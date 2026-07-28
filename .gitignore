@@ -1,0 +1,9 @@
+.gortex/
+.gemini/
+.hermes/
+.claude/
+.cursor/
+.vscode/
+node_modules/
+.gortex.yaml
+.gortex.lock
