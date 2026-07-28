@@ -1,0 +1,7 @@
+export const VISKOD_STORAGE_DIR = '.viskod';
+export const CAPTURE_DIR = 'captures';
+export const CONTEXT_DIR = 'context';
+export const LOG_DIR = 'logs';
+export const CACHE_DIR = 'cache';
+export const SETTINGS_FILE = 'settings.json';
+export const OVERLAY_CSS_PREFIX = '__viskod_';

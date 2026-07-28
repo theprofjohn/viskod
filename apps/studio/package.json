@@ -1,0 +1,24 @@
+{
+  "type": "module",
+  "main": "./src/index.ts",
+  "version": "0.0.1",
+  "name": "@viskod/app-studio",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "private": true,
+  "dependencies": {
+    "@viskod/shared": "workspace:*",
+    "@viskod/event-bus": "workspace:*",
+    "@viskod/browser-runtime": "workspace:*",
+    "@viskod/capture-pipeline": "workspace:*",
+    "@viskod/context-engine": "workspace:*",
+    "@viskod/config": "workspace:*"
+  }
+}

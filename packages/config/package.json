@@ -1,0 +1,16 @@
+{
+  "type": "module",
+  "main": "./src/index.ts",
+  "version": "0.0.1",
+  "name": "@viskod/config",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "private": true
+}

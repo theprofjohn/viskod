@@ -1,0 +1,26 @@
+{
+  "name": "viskod",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "check": "biome check . && tsc -b && vitest run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
