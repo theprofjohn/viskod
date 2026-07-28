@@ -36,6 +36,14 @@ export interface Screenshot {
   width: number;
   height: number;
   sizeBytes: number;
+  buffer: Buffer;
+}
+export interface ElementHierarchy {
+  selectedNode: { tagName: string; depth: number; text?: string };
+  parents: Array<{ tagName: string; depth: number; text?: string }>;
+  siblings: Array<{ tagName: string; depth: number; text?: string }>;
+  children: Array<{ tagName: string; depth: number; text?: string }>;
+  landmarks: Array<{ tagName: string; role?: string; label?: string; depth: number }>;
 }
 export interface BrowserDiagnostics {
   consoleErrors: Array<{ message: string; source: string; timestamp: string }>;
@@ -249,6 +257,7 @@ export class BrowserRuntime {
         width: this.config.viewport.width,
         height: this.config.viewport.height,
         sizeBytes: buffer.length,
+        buffer,
       };
 
       this.eventBus.publish({
@@ -276,26 +285,10 @@ export class BrowserRuntime {
     if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
 
     try {
-      const snapshot = await entry.page.$eval(selector, (el) => {
-        const serialize = (node: Element): Record<string, unknown> => {
-          const rect = node.getBoundingClientRect();
-          const children: Record<string, unknown>[] = [];
-          for (let i = 0; i < node.children.length; i++) {
-            const child = node.children[i];
-            if (child) children.push(serialize(child));
-          }
-          return {
-            tagName: node.tagName.toLowerCase(),
-            attributes: Object.fromEntries(
-              Array.from(node.attributes).map((a) => [a.name, a.value]),
-            ),
-            boundingBox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-            children,
-            text: node.textContent?.slice(0, 500) ?? undefined,
-          };
-        };
-        return serialize(el);
-      });
+      const escaped = selector.replace(/[\\"]/g, '\\$&');
+      const snapshot = await entry.page.evaluate(
+        `(function(){var el = document.querySelector("${escaped}");if (!el) return null;var walk = function(n, d){if (d > 20) return null;var r = n.getBoundingClientRect();var a = {};for (var i = 0; i < n.attributes.length; i++) a[n.attributes[i].name] = n.attributes[i].value;var c = [];for (var i = 0; i < n.children.length; i++){var ch = n.children[i];if (ch) { var w = walk(ch, d + 1); if (w) c.push(w); }}return {tagName: n.tagName.toLowerCase(), attributes: a, boundingBox: {x: r.x, y: r.y, width: r.width, height: r.height}, children: c, text: (n.textContent || "").slice(0, 500)};};return walk(el, 0);})()`,
+      );
 
       return ok(snapshot as unknown as DOMSnapshot);
     } catch (error) {
@@ -448,6 +441,27 @@ export class BrowserRuntime {
     }
   }
 
+  async getElementHierarchy(
+    handle: BrowserHandle,
+    selector: string,
+  ): Promise<Result<ElementHierarchy>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
+
+    try {
+      const escaped = selector.replace(/[\\"]/g, '\\$&');
+      const result = await entry.page.evaluate(
+        `(function(){var el = document.querySelector("${escaped}");if (!el) return null;var result = { selectedNode: null, parents: [], siblings: [], children: [], landmarks: [] };result.selectedNode = { tagName: el.tagName.toLowerCase(), depth: 0, text: (el.textContent || "").slice(0, 200) };var p = el.parentElement;var depth = 1;while (p && depth <= 10) {result.parents.push({ tagName: p.tagName.toLowerCase(), depth: depth, text: (p.textContent || "").slice(0, 200) });var role = p.getAttribute("role");if (role || p.tagName.toLowerCase() === "main" || p.tagName.toLowerCase() === "nav" || p.tagName.toLowerCase() === "header" || p.tagName.toLowerCase() === "footer" || p.tagName.toLowerCase() === "aside") {result.landmarks.push({ tagName: p.tagName.toLowerCase(), role: role || undefined, label: p.getAttribute("aria-label") || undefined, depth: depth });}p = p.parentElement;depth++;}if (el.parentElement) {for (var i = 0; i < el.parentElement.children.length; i++) {var sib = el.parentElement.children[i];if (sib !== el) result.siblings.push({ tagName: sib.tagName.toLowerCase(), depth: 1, text: (sib.textContent || "").slice(0, 200) });}}for (var i = 0; i < el.children.length; i++) {var child = el.children[i];result.children.push({ tagName: child.tagName.toLowerCase(), depth: 1, text: (child.textContent || "").slice(0, 200) });}return result;})()`,
+      );
+
+      return ok(result as unknown as ElementHierarchy);
+    } catch (error) {
+      return err(
+        this.brError('BR_HIERARCHY_FAILED', `Hierarchy retrieval failed: ${String(error)}`),
+      );
+    }
+  }
+
   async getDiagnostics(handle: BrowserHandle): Promise<Result<BrowserDiagnostics>> {
     const entry = this.handles.get(handle.contextId);
     if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
@@ -464,7 +478,7 @@ export class BrowserRuntime {
     const entry = this.handles.get(handle.contextId);
     return {
       status: entry ? 'healthy' : 'unavailable',
-      uptime: Date.now() - this.startTime,
+      uptime: this.startTime === 0 ? 0 : Date.now() - this.startTime,
       pageCount: this.handles.size,
     };
   }

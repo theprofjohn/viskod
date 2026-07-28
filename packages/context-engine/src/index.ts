@@ -2,6 +2,7 @@ import type {
   BrowserHandle,
   BrowserRuntime,
   DOMSnapshot,
+  ElementHierarchy,
   Screenshot,
   StyleSnapshot,
 } from '@viskod/browser-runtime';
@@ -11,6 +12,7 @@ import type { SelectionEngine, SelectionTarget } from '@viskod/selection-engine'
 import type { BaseEvent, BoundingBox, Result } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 import type { ViskodError } from '@viskod/shared';
+import type { SourceHintEngine } from '@viskod/source-hint-engine';
 
 export type { SelectionTarget } from '@viskod/selection-engine';
 
@@ -96,6 +98,7 @@ export interface VCECreationOptions {
   eventBus: EventBus;
   capturePipeline?: CapturePipeline;
   selectionEngine?: SelectionEngine;
+  sourceHintEngine?: SourceHintEngine;
 }
 
 export class VisualContextEngine {
@@ -103,30 +106,48 @@ export class VisualContextEngine {
   private eventBus: EventBus;
   private capturePipeline?: CapturePipeline;
   private selectionEngine?: SelectionEngine;
+  private sourceHintEngine?: SourceHintEngine;
   private currentHandle: BrowserHandle | null = null;
   private currentUrl = '';
   private packetsGenerated = 0;
   private failedCount = 0;
   private processingTimes: number[] = [];
+  private isProcessingFromEvent = false;
+  private projectScan: {
+    projectId: string;
+    name: string;
+    rootPath: string;
+    directories: string[];
+    primaryFramework: string | null;
+    detectedFrameworks: string[];
+    frameworkConfidence: number;
+  } | null = null;
 
   constructor(options: VCECreationOptions) {
     this.browserRuntime = options.browserRuntime;
     this.eventBus = options.eventBus;
     this.capturePipeline = options.capturePipeline;
     this.selectionEngine = options.selectionEngine;
+    this.sourceHintEngine = options.sourceHintEngine;
 
     this.eventBus.subscribe('BR_EVENT:CAPTURE_COMPLETED', async (_event: BaseEvent) => {
       // Process capture when BR completes
     });
 
     this.eventBus.subscribe('SE_EVENT:SELECTION_CHANGED', async (event: BaseEvent) => {
-      const payload = event.payload as { selectionId: string; selector: string };
-      if (payload.selectionId) {
-        await this.processSelection({
-          selector: payload.selector ?? payload.selectionId,
-          boundingBox: { x: 0, y: 0, width: 0, height: 0 },
-          source: 'overlay' as const,
-        });
+      if (this.isProcessingFromEvent) return;
+      this.isProcessingFromEvent = true;
+      try {
+        const payload = event.payload as { selectionId: string; selector: string };
+        if (payload.selectionId) {
+          await this.processSelection({
+            selector: payload.selector ?? payload.selectionId,
+            boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+            source: 'overlay' as const,
+          });
+        }
+      } finally {
+        this.isProcessingFromEvent = false;
       }
     });
   }
@@ -184,6 +205,7 @@ export class VisualContextEngine {
             children: HierarchyNode[];
           }
         | undefined;
+      let browserHierarchy: ElementHierarchy | undefined;
 
       if (selection) {
         // Use Selection Engine for hierarchy when available
@@ -216,14 +238,22 @@ export class VisualContextEngine {
         const domResult = await this.browserRuntime.getDOMSnapshot(handle, selection.selector);
         if (domResult.ok) domSnapshot = domResult.value;
 
+        // Get real DOM hierarchy from the browser
+        const hierarchyResult = await this.browserRuntime.getElementHierarchy(
+          handle,
+          selection.selector,
+        );
+        if (hierarchyResult.ok) {
+          browserHierarchy = hierarchyResult.value;
+          evidenceSources.push('browser-runtime:hierarchy');
+        }
+
         const styleResult = await this.browserRuntime.getComputedStyles(handle, selection.selector);
         if (styleResult.ok) styleSnapshot = styleResult.value;
 
         const captureResult = await this.browserRuntime.captureScreenshot(handle, 'selection');
         if (captureResult.ok) captureScreenshot = captureResult.value;
       }
-
-      const sourceHints: SourceHintEntry[] = [];
 
       const domData = domSnapshot ?? {
         tagName: 'unknown',
@@ -232,7 +262,78 @@ export class VisualContextEngine {
         children: [] as DOMSnapshot[],
       };
 
-      const hierarchy = hierarchyFromSelection ?? this.buildHierarchy(domData, selection);
+      const hierarchy = browserHierarchy
+        ? {
+            selectedNode: {
+              tagName: browserHierarchy.selectedNode.tagName,
+              depth: browserHierarchy.selectedNode.depth,
+            },
+            parents: browserHierarchy.parents.map((p) => ({ tagName: p.tagName, depth: p.depth })),
+            siblings: browserHierarchy.siblings.map((s) => ({
+              tagName: s.tagName,
+              depth: s.depth,
+            })),
+            children: browserHierarchy.children.map((c) => ({
+              tagName: c.tagName,
+              depth: c.depth,
+            })),
+          }
+        : (hierarchyFromSelection ?? this.buildHierarchy(domData, selection));
+
+      const sourceHints: SourceHintEntry[] = [];
+
+      // Populate source hints via SourceHintEngine when available
+      if (this.sourceHintEngine && selection && domSnapshot) {
+        try {
+          const hintInput = {
+            domContext: {
+              tagName: domSnapshot.tagName,
+              className: domSnapshot.attributes.class,
+              id: domSnapshot.attributes.id,
+              role: domSnapshot.attributes.role,
+              text: domSnapshot.text,
+              parentTagName: hierarchy.parents[0]?.tagName,
+            },
+            route: {
+              url: this.currentUrl,
+              pathname: new URL(this.currentUrl).pathname,
+            },
+            project: {
+              metadata: {
+                projectId: this.projectScan?.projectId ?? 'unknown',
+                name: this.projectScan?.name ?? 'unknown',
+                rootPath: this.projectScan?.rootPath ?? '',
+                packageManager: 'unknown',
+                language: 'typescript',
+              },
+              componentIndex: this.projectScan
+                ? { directories: this.projectScan.directories }
+                : undefined,
+              framework: this.projectScan
+                ? {
+                    primary: this.projectScan.primaryFramework,
+                    detected: this.projectScan.detectedFrameworks,
+                    confidence: this.projectScan.frameworkConfidence,
+                  }
+                : undefined,
+            },
+            captureId: packetId,
+          };
+          const hintResult = await this.sourceHintEngine.generateHints(hintInput);
+          if (hintResult.ok) {
+            for (const hint of hintResult.value) {
+              sourceHints.push({
+                filePath: hint.filePath,
+                confidence: hint.confidence,
+                evidence: hint.evidence.map((e) => e.detail).join('; '),
+                isPrimary: hint.isPrimary,
+              });
+            }
+          }
+        } catch {
+          // Hint generation is best-effort
+        }
+      }
 
       const confidence = {
         sourceMapping: 0.0,
@@ -255,7 +356,7 @@ export class VisualContextEngine {
           ? {
               selector: selection.selector,
               tagName: domData.tagName,
-              boundingBox: selection.boundingBox,
+              boundingBox: domData.boundingBox,
               text: domData.text?.slice(0, 500),
             }
           : { selector: '', tagName: '', boundingBox: { x: 0, y: 0, width: 0, height: 0 } },
@@ -309,14 +410,13 @@ export class VisualContextEngine {
       // Persist via Capture Pipeline
       if (this.capturePipeline && captureScreenshot) {
         try {
-          const buffer = Buffer.alloc(captureScreenshot.sizeBytes);
           await this.capturePipeline.persistCapture(
             { packetId: packet.packetId },
             [
               {
                 captureId: captureScreenshot.captureId,
                 type: 'selection' as const,
-                buffer,
+                buffer: captureScreenshot.buffer,
                 format: captureScreenshot.format as 'png',
                 width: captureScreenshot.width,
                 height: captureScreenshot.height,
@@ -373,6 +473,18 @@ export class VisualContextEngine {
 
   getLastPacket(): ContextPacket | null {
     return null;
+  }
+
+  setProjectContext(context: {
+    rootPath: string;
+    projectId: string;
+    name: string;
+    directories: string[];
+    primaryFramework: string | null;
+    detectedFrameworks: string[];
+    frameworkConfidence: number;
+  }): void {
+    this.projectScan = context;
   }
 
   health(): VCEHealth {

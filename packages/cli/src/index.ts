@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { BrowserRuntime } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
-import { VisualContextEngine } from '@viskod/context-engine';
+import { type SelectionTarget, VisualContextEngine } from '@viskod/context-engine';
 import { EventBus } from '@viskod/event-bus';
 import { MCPServer } from '@viskod/mcp-server';
 import { ProjectScanner } from '@viskod/project-scanner';
@@ -20,6 +20,7 @@ function createRuntime() {
     eventBus,
     capturePipeline,
     selectionEngine,
+    sourceHintEngine,
   });
   return {
     eventBus,
@@ -77,6 +78,21 @@ async function cmdStart(subArgs: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // Scan project and set context for source hints
+  const scanResult = await runtime.projectScanner.scan();
+  if (scanResult.ok) {
+    const s = scanResult.value;
+    runtime.vce.setProjectContext({
+      rootPath: s.metadata.rootPath,
+      projectId: s.metadata.projectId,
+      name: s.metadata.name,
+      directories: s.components.directories,
+      primaryFramework: s.framework.primary,
+      detectedFrameworks: s.framework.detected,
+      frameworkConfidence: s.framework.confidence,
+    });
+  }
+
   console.log(`Ready. Browser session active at ${targetUrl}.`);
   console.log(`Use 'viskod capture <selector>' to capture an element.`);
   console.log(`Use 'viskod health' to check subsystem status.`);
@@ -132,7 +148,9 @@ async function cmdScan(subArgs: string[]): Promise<void> {
           cssFramework: scan.designSystem.cssFramework,
           uiLibrary: scan.designSystem.uiLibrary,
         },
-        configuration: scan.configuration.map((c) => `${c.file} (${c.type})`),
+        configuration: scan.configuration
+          .filter((c) => c.exists)
+          .map((c) => `${c.file} (${c.type})`),
         scanDurationMs: scan.scanDurationMs,
       },
       null,
@@ -166,6 +184,21 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
   if (!navResult.ok) {
     console.error(`Failed to navigate: ${navResult.error.message}`);
     process.exit(1);
+  }
+
+  // Scan project and set context for source hints
+  const scanResult = await runtime.projectScanner.scan();
+  if (scanResult.ok) {
+    const s = scanResult.value;
+    runtime.vce.setProjectContext({
+      rootPath: s.metadata.rootPath,
+      projectId: s.metadata.projectId,
+      name: s.metadata.name,
+      directories: s.components.directories,
+      primaryFramework: s.framework.primary,
+      detectedFrameworks: s.framework.detected,
+      frameworkConfidence: s.framework.confidence,
+    });
   }
 
   console.log(`Selecting element: ${selector}...`);
@@ -219,8 +252,189 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
 }
 
 async function cmdServe(): Promise<void> {
-  console.log('Starting Viskod MCP server on stdio...');
+  const runtime = createRuntime();
+
   const server = new MCPServer();
+
+  server.registerTool(
+    {
+      name: 'health',
+      description: 'Check subsystem health status',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+    async () => {
+      const browserHealth = runtime.browserRuntime.health({ contextId: 'cli' });
+      const result = {
+        'browser-runtime': { status: browserHealth.status, pageCount: browserHealth.pageCount },
+        'visual-context-engine': runtime.vce.health(),
+        'selection-engine': runtime.selectionEngine.health(),
+        'project-scanner': runtime.projectScanner.health(),
+        'source-hint-engine': runtime.sourceHintEngine.health(),
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    {
+      name: 'scan',
+      description: 'Scan a project directory for metadata',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to project root (defaults to current dir)' },
+        },
+        required: [],
+      },
+    },
+    async (args) => {
+      const rootPath = (args.path as string | undefined) ?? process.cwd();
+      const result = await runtime.projectScanner.scan(rootPath);
+      if (!result.ok) {
+        return {
+          content: [{ type: 'text', text: `Scan failed: ${result.error.message}` }],
+          isError: true,
+        };
+      }
+      const scan = result.value;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                project: {
+                  name: scan.metadata.name,
+                  rootPath: scan.metadata.rootPath,
+                  packageManager: scan.metadata.packageManager,
+                  workspaceType: scan.metadata.workspaceType,
+                  language: scan.metadata.language,
+                  runtime: scan.metadata.runtime,
+                },
+                framework: {
+                  primary: scan.framework.primary,
+                  detected: scan.framework.detected,
+                  confidence: scan.framework.confidence,
+                },
+                routes: { total: scan.routes.totalRoutes },
+                components: {
+                  directories: scan.components.directories,
+                  totalFiles: scan.components.totalFiles,
+                },
+                designSystem: {
+                  cssFramework: scan.designSystem.cssFramework,
+                  uiLibrary: scan.designSystem.uiLibrary,
+                },
+                scanDurationMs: scan.scanDurationMs,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    {
+      name: 'capture',
+      description: 'Navigate to a URL, select an element, and capture a Context Packet',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector for the element to capture' },
+          url: {
+            type: 'string',
+            description: 'URL to navigate to (defaults to http://localhost:3000)',
+          },
+        },
+        required: ['selector'],
+      },
+    },
+    async (args) => {
+      const selector = args.selector as string;
+      const targetUrl = (args.url as string | undefined) ?? 'http://localhost:3000';
+
+      const startResult = await runtime.vce.start();
+      if (!startResult.ok) {
+        return {
+          content: [
+            { type: 'text', text: `Failed to start browser: ${startResult.error.message}` },
+          ],
+          isError: true,
+        };
+      }
+
+      const navResult = await runtime.vce.navigate(targetUrl);
+      if (!navResult.ok) {
+        await runtime.vce.stopBrowser();
+        return {
+          content: [{ type: 'text', text: `Failed to navigate: ${navResult.error.message}` }],
+          isError: true,
+        };
+      }
+
+      // Scan project and set context for source hints
+      const scanResult = await runtime.projectScanner.scan();
+      if (scanResult.ok) {
+        const s = scanResult.value;
+        runtime.vce.setProjectContext({
+          rootPath: s.metadata.rootPath,
+          projectId: s.metadata.projectId,
+          name: s.metadata.name,
+          directories: s.components.directories,
+          primaryFramework: s.framework.primary,
+          detectedFrameworks: s.framework.detected,
+          frameworkConfidence: s.framework.confidence,
+        });
+      }
+
+      const selection: SelectionTarget = {
+        selector,
+        boundingBox: { x: 0, y: 0, width: 100, height: 100 },
+        source: 'mcp',
+      };
+
+      const result = await runtime.vce.generatePacket(selection);
+      await runtime.vce.stopBrowser();
+
+      if (!result.ok) {
+        return {
+          content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }],
+          isError: true,
+        };
+      }
+
+      const packet = result.value;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                packetId: packet.packetId,
+                timestamp: packet.timestamp,
+                selection: packet.selection,
+                dom: { tagName: packet.dom.tagName, childCount: packet.dom.childCount },
+                screenshots: packet.screenshots.length,
+                confidence: packet.confidence,
+                evidenceSources: packet.metadata.evidenceSources,
+                processingTimeMs: packet.metadata.processingTimeMs,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
   await server.start();
 }
 
