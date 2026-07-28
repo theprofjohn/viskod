@@ -3,10 +3,10 @@ import { BrowserRuntime } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
 import { VisualContextEngine } from '@viskod/context-engine';
 import { EventBus } from '@viskod/event-bus';
+import { MCPServer } from '@viskod/mcp-server';
 import { ProjectScanner } from '@viskod/project-scanner';
 import { SelectionEngine } from '@viskod/selection-engine';
 import { SourceHintEngine } from '@viskod/source-hint-engine';
-import { MCPServer } from '@viskod/mcp-server';
 
 function createRuntime() {
   const eventBus = new EventBus({ enableHistory: true, historySize: 100 });
