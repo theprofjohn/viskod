@@ -96,27 +96,6 @@ export interface VCECreationOptions {
   eventBus: EventBus;
   capturePipeline?: CapturePipeline;
   selectionEngine?: SelectionEngine;
-  projectScanner?: {
-    scan: (rootPath?: string) => Promise<
-      Result<{
-        metadata: { name: string; rootPath: string };
-        framework: { primary: string | null };
-        timestamp: string;
-      }>
-    >;
-  };
-  sourceHintEngine?: {
-    generateHints: (input: Record<string, unknown>) => Promise<
-      Result<
-        Array<{
-          filePath: string;
-          confidence: number;
-          evidence: Array<{ detail: string }>;
-          isPrimary: boolean;
-        }>
-      >
-    >;
-  };
 }
 
 export class VisualContextEngine {
@@ -124,12 +103,8 @@ export class VisualContextEngine {
   private eventBus: EventBus;
   private capturePipeline?: CapturePipeline;
   private selectionEngine?: SelectionEngine;
-  private projectScanner?: VCECreationOptions['projectScanner'];
-  private sourceHintEngine?: VCECreationOptions['sourceHintEngine'];
   private currentHandle: BrowserHandle | null = null;
   private currentUrl = '';
-  private projectMetadata: { name: string; rootPath: string } | null = null;
-  private frameworkPrimary: string | null = null;
   private packetsGenerated = 0;
   private failedCount = 0;
   private processingTimes: number[] = [];
@@ -139,8 +114,6 @@ export class VisualContextEngine {
     this.eventBus = options.eventBus;
     this.capturePipeline = options.capturePipeline;
     this.selectionEngine = options.selectionEngine;
-    this.projectScanner = options.projectScanner;
-    this.sourceHintEngine = options.sourceHintEngine;
 
     this.eventBus.subscribe('BR_EVENT:CAPTURE_COMPLETED', async (_event: BaseEvent) => {
       // Process capture when BR completes
@@ -159,21 +132,6 @@ export class VisualContextEngine {
   }
 
   async start(): Promise<Result<BrowserHandle>> {
-    if (this.projectScanner) {
-      try {
-        const scanResult = await this.projectScanner.scan();
-        if (scanResult.ok) {
-          this.projectMetadata = {
-            name: scanResult.value.metadata.name,
-            rootPath: scanResult.value.metadata.rootPath,
-          };
-          this.frameworkPrimary = scanResult.value.framework.primary;
-        }
-      } catch {
-        // Project scanning is optional — continue without it
-      }
-    }
-
     return this.startBrowser();
   }
 
@@ -265,42 +223,7 @@ export class VisualContextEngine {
         if (captureResult.ok) captureScreenshot = captureResult.value;
       }
 
-      // Source hints via Source Hint Engine
-      let sourceHints: SourceHintEntry[] = [];
-      if (this.sourceHintEngine && domSnapshot) {
-        try {
-          const hintsResult = await this.sourceHintEngine.generateHints({
-            domContext: {
-              tagName: domSnapshot.tagName,
-              className: domSnapshot.attributes.class ?? '',
-            },
-            route: {
-              url: this.currentUrl,
-              pathname: new URL(this.currentUrl || 'http://localhost').pathname,
-            },
-            project: {
-              metadata: {
-                name: this.projectMetadata?.name ?? 'unknown',
-                rootPath: this.projectMetadata?.rootPath ?? '.',
-              },
-              framework: this.frameworkPrimary ? { primary: this.frameworkPrimary } : undefined,
-            },
-            captureId: captureScreenshot?.captureId,
-          });
-
-          if (hintsResult.ok) {
-            sourceHints = hintsResult.value.map((h) => ({
-              filePath: h.filePath,
-              confidence: h.confidence,
-              evidence: h.evidence.map((e) => e.detail).join('; '),
-              isPrimary: h.isPrimary,
-            }));
-            evidenceSources.push('source-hint-engine');
-          }
-        } catch {
-          // Source hints are best-effort
-        }
-      }
+      const sourceHints: SourceHintEntry[] = [];
 
       const domData = domSnapshot ?? {
         tagName: 'unknown',
@@ -312,10 +235,10 @@ export class VisualContextEngine {
       const hierarchy = hierarchyFromSelection ?? this.buildHierarchy(domData, selection);
 
       const confidence = {
-        sourceMapping: sourceHints.length > 0 ? 0.7 : 0.0,
+        sourceMapping: 0.0,
         semanticLabeling: 0.5,
         layoutAnalysis: styleSnapshot ? 0.8 : 0.3,
-        frameworkDetection: this.frameworkPrimary ? 0.9 : 0.0,
+        frameworkDetection: 0.0,
       };
 
       const packet: ContextPacket = {
@@ -379,13 +302,6 @@ export class VisualContextEngine {
           evidenceSources,
           redactions,
         },
-        project: this.projectMetadata
-          ? {
-              name: this.projectMetadata.name,
-              root: this.projectMetadata.rootPath,
-              framework: this.frameworkPrimary ?? undefined,
-            }
-          : undefined,
         diagnostics: [],
         sourceHints,
       };

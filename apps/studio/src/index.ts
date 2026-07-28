@@ -302,30 +302,19 @@ export class Studio {
 // Entry point — bootstrap wiring
 import { BrowserRuntime } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
-import { ProjectScanner } from '@viskod/project-scanner';
 import type { SelectionEngine as SelectionEngineType } from '@viskod/selection-engine';
 import { SelectionEngine } from '@viskod/selection-engine';
-import { SourceHintEngine } from '@viskod/source-hint-engine';
 
 const eventBus = new EventBus({ enableHistory: true, historySize: 50 });
 const browserRuntime = new BrowserRuntime(eventBus);
 const capturePipeline = new CapturePipeline();
 const selectionEngine: SelectionEngineType = new SelectionEngine(eventBus);
-const projectScanner = new ProjectScanner(eventBus);
-const sourceHintEngine = new SourceHintEngine(eventBus);
 
 const vce = new VisualContextEngine({
   browserRuntime,
   eventBus,
   capturePipeline,
   selectionEngine,
-  projectScanner,
-  sourceHintEngine: {
-    generateHints: (input: Record<string, unknown>) =>
-      sourceHintEngine.generateHints(
-        input as unknown as Parameters<typeof sourceHintEngine.generateHints>[0],
-      ),
-  },
 });
 
 const studio = new Studio(vce, eventBus, selectionEngine);

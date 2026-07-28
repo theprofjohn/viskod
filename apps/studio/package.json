@@ -20,8 +20,6 @@
     "@viskod/capture-pipeline": "workspace:*",
     "@viskod/context-engine": "workspace:*",
     "@viskod/config": "workspace:*",
-    "@viskod/selection-engine": "workspace:*",
-    "@viskod/project-scanner": "workspace:*",
-    "@viskod/source-hint-engine": "workspace:*"
+    "@viskod/selection-engine": "workspace:*"
   }
 }
