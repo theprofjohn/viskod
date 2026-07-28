@@ -31,7 +31,8 @@
       "@viskod/config": ["./packages/config/src/index.ts"],
       "@viskod/selection-engine": ["./packages/selection-engine/src/index.ts"],
       "@viskod/project-scanner": ["./packages/project-scanner/src/index.ts"],
-      "@viskod/source-hint-engine": ["./packages/source-hint-engine/src/index.ts"]
+      "@viskod/source-hint-engine": ["./packages/source-hint-engine/src/index.ts"],
+      "@viskod/mcp-server": ["./packages/mcp-server/src/index.ts"]
     }
   }
 }

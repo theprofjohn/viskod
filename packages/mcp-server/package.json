@@ -1,0 +1,25 @@
+{
+  "name": "@viskod/mcp-server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@viskod/event-bus": "workspace:*",
+    "@viskod/shared": "workspace:*",
+    "@viskod/browser-runtime": "workspace:*",
+    "@viskod/capture-pipeline": "workspace:*",
+    "@viskod/context-engine": "workspace:*",
+    "@viskod/selection-engine": "workspace:*",
+    "@viskod/project-scanner": "workspace:*",
+    "@viskod/source-hint-engine": "workspace:*",
+    "@viskod/config": "workspace:*"
+  }
+}
