@@ -137,4 +137,72 @@ describe('EventBus', () => {
     });
     expect(goodHandler).toHaveBeenCalled();
   });
+
+  it('delivers events to all subscribers', () => {
+    const bus = new EventBus();
+    const received: string[] = [];
+    void bus.subscribe('test:multi', () => {
+      received.push('a');
+    });
+    void bus.subscribe('test:multi', () => {
+      received.push('b');
+    });
+    bus.publish({
+      eventId: 'e1',
+      eventType: 'test:multi',
+      timestamp: new Date().toISOString(),
+      version: '1.0.0',
+      source: 'test',
+      correlationId: 'c1',
+      payload: {},
+    });
+    expect(received).toEqual(['a', 'b']);
+  });
+
+  it('does not deliver to unsubscribed handlers', () => {
+    const bus = new EventBus();
+    const received: string[] = [];
+    const result = bus.subscribe('test:unsub', () => {
+      received.push('x');
+    });
+    if (result.ok) bus.unsubscribe(result.value.id);
+    bus.publish({
+      eventId: 'e2',
+      eventType: 'test:unsub',
+      timestamp: new Date().toISOString(),
+      version: '1.0.0',
+      source: 'test',
+      correlationId: 'c2',
+      payload: {},
+    });
+    expect(received).toEqual([]);
+  });
+
+  it('respects history limit', () => {
+    const bus = new EventBus({ enableHistory: true, historySize: 2 });
+    for (let i = 0; i < 5; i++) {
+      bus.publish({
+        eventId: `e${i}`,
+        eventType: 'test:hist',
+        timestamp: new Date().toISOString(),
+        version: '1.0.0',
+        source: 'test',
+        correlationId: `c${i}`,
+        payload: {},
+      });
+    }
+    const history = (bus as unknown as { history: Array<unknown> }).history;
+    expect(history.length).toBe(2);
+  });
+
+  it('rejects invalid event payload', () => {
+    const bus = new EventBus();
+    expect(() => bus.publish(null as never)).toThrow();
+  });
+
+  it('history is disabled by default', () => {
+    const bus = new EventBus();
+    const history = (bus as unknown as { history: Array<unknown> }).history;
+    expect(history.length).toBe(0);
+  });
 });

@@ -1,3 +1,5 @@
+// @viskod/audit — ALPHA (enterprise audit trail)
+
 export type AuditAction =
   | 'capture'
   | 'selection'
@@ -64,7 +66,6 @@ export class AuditEngine {
 
   query(filter: AuditFilter = {}): AuditEntry[] {
     let results = [...this.entries];
-
     const { actor, action, subsystem, status, fromDate, toDate, limit } = filter;
     if (actor) results = results.filter((e) => e.actor === actor);
     if (action) results = results.filter((e) => e.action === action);
@@ -72,7 +73,6 @@ export class AuditEngine {
     if (status) results = results.filter((e) => e.status === status);
     if (fromDate) results = results.filter((e) => e.timestamp >= fromDate);
     if (toDate) results = results.filter((e) => e.timestamp <= toDate);
-
     results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     return results.slice(0, limit ?? 100);
   }
