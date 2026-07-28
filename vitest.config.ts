@@ -13,6 +13,7 @@ const resolveAlias = {
   '@viskod/project-scanner': resolve(__dirname, 'packages/project-scanner/src/index.ts'),
   '@viskod/source-hint-engine': resolve(__dirname, 'packages/source-hint-engine/src/index.ts'),
   '@viskod/mcp-server': resolve(__dirname, 'packages/mcp-server/src/index.ts'),
+  '@viskod/cli': resolve(__dirname, 'packages/cli/src/index.ts'),
 };
 
 export default defineConfig({
