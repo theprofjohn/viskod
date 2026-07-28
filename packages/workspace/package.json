@@ -1,6 +1,7 @@
 {
   "name": "@viskod/workspace",
-  "version": "0.0.1",
+  "version": "0.1.0-alpha",
+  "description": "Viskod team workspace management (ALPHA)",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
