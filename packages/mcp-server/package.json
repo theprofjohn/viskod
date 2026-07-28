@@ -13,6 +13,13 @@
   "exports": { ".": "./src/index.ts" },
   "dependencies": {
     "@viskod/event-bus": "workspace:*",
-    "@viskod/shared": "workspace:*"
+    "@viskod/shared": "workspace:*",
+    "@viskod/browser-runtime": "workspace:*",
+    "@viskod/capture-pipeline": "workspace:*",
+    "@viskod/context-engine": "workspace:*",
+    "@viskod/selection-engine": "workspace:*",
+    "@viskod/project-scanner": "workspace:*",
+    "@viskod/source-hint-engine": "workspace:*",
+    "@viskod/config": "workspace:*"
   }
 }
