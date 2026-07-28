@@ -19,6 +19,16 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@viskod/shared": ["./packages/shared/src/index.ts"],
+      "@viskod/event-bus": ["./packages/event-bus/src/index.ts"],
+      "@viskod/browser-runtime": ["./packages/browser-runtime/src/index.ts"],
+      "@viskod/capture-pipeline": ["./packages/capture-pipeline/src/index.ts"],
+      "@viskod/overlay-system": ["./packages/overlay-system/src/index.ts"],
+      "@viskod/context-engine": ["./packages/context-engine/src/index.ts"],
+      "@viskod/config": ["./packages/config/src/index.ts"]
+    }
   }
 }

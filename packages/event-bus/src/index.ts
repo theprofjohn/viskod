@@ -1,5 +1,5 @@
 import type { BaseEvent, Identifier, Result } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity } from '@viskod/shared';
+import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 import type { ViskodError } from '@viskod/shared';
 
 // ---- Types ----

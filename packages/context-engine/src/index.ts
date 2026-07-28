@@ -1,9 +1,15 @@
-import type { Result, BoundingBox } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity } from '@viskod/shared';
-import type { ViskodError } from '@viskod/shared';
-import type { EventBus } from '@viskod/event-bus';
-import type { BrowserRuntime, BrowserHandle } from '@viskod/browser-runtime';
+import type {
+  BrowserHandle,
+  BrowserRuntime,
+  DOMSnapshot,
+  Screenshot,
+  StyleSnapshot,
+} from '@viskod/browser-runtime';
 import type { CapturePipeline } from '@viskod/capture-pipeline';
+import type { EventBus } from '@viskod/event-bus';
+import type { BaseEvent, BoundingBox, Result } from '@viskod/shared';
+import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
+import type { ViskodError } from '@viskod/shared';
 
 // ---- Selection Target (P0 — when selection-engine P1, this enriches) ----
 export interface SelectionTarget {
@@ -97,6 +103,7 @@ export class VisualContextEngine {
   private browserRuntime: BrowserRuntime;
   private eventBus: EventBus;
   private capturePipeline?: CapturePipeline;
+  private currentHandle: BrowserHandle | null = null;
   private packetsGenerated = 0;
   private failedCount = 0;
   private processingTimes: number[] = [];
@@ -108,27 +115,47 @@ export class VisualContextEngine {
 
     // VCE subscribes to BR events through Event Bus (event flow)
     // NEVER receives direct callbacks from BR
-    this.eventBus.subscribe('BR_EVENT:CAPTURE_COMPLETED', async (event) => {
-      const payload = event.payload as { captureId: string };
+    this.eventBus.subscribe('BR_EVENT:CAPTURE_COMPLETED', async (_event: BaseEvent) => {
       // Process capture when BR completes — but do NOT import BR internals
     });
   }
 
-  async generatePacket(
-    handle: BrowserHandle,
-    selection?: SelectionTarget,
-  ): Promise<Result<ContextPacket>> {
+  async startBrowser(): Promise<Result<BrowserHandle>> {
+    const result = await this.browserRuntime.launch();
+    if (result.ok) {
+      this.currentHandle = result.value;
+    }
+    return result;
+  }
+
+  async stopBrowser(): Promise<Result<void>> {
+    if (!this.currentHandle) {
+      return ok(undefined);
+    }
+    const result = await this.browserRuntime.shutdown(this.currentHandle);
+    if (result.ok) {
+      this.currentHandle = null;
+    }
+    return result;
+  }
+
+  async generatePacket(selection?: SelectionTarget): Promise<Result<ContextPacket>> {
+    if (!this.currentHandle) {
+      return err(this.vceError('VCE_NO_BROWSER', 'Browser not started'));
+    }
+
     const startTime = Date.now();
     const packetId = crypto.randomUUID();
+    const handle = this.currentHandle;
 
     try {
       // Stage 1: Collection — gather evidence from BR (command flow: VCE → BR)
       const evidenceSources: string[] = ['browser-runtime'];
       const redactions: string[] = [];
 
-      let domSnapshot;
-      let styleSnapshot;
-      let screenshot;
+      let domSnapshot: DOMSnapshot | undefined;
+      let styleSnapshot: StyleSnapshot | undefined;
+      let screenshot: Screenshot | undefined;
 
       if (selection) {
         const domResult = await this.browserRuntime.getDOMSnapshot(handle, selection.selector);
@@ -277,15 +304,15 @@ export class VisualContextEngine {
     }
   }
 
-  async processCapture(captureId: string, handle: BrowserHandle): Promise<Result<ContextPacket>> {
-    return this.generatePacket(handle);
+  async processCapture(_captureId: string): Promise<Result<ContextPacket>> {
+    if (!this.currentHandle) {
+      return err(this.vceError('VCE_NO_BROWSER', 'Browser not started'));
+    }
+    return this.generatePacket();
   }
 
-  async processSelection(
-    handle: BrowserHandle,
-    selection: SelectionTarget,
-  ): Promise<Result<ContextPacket>> {
-    return this.generatePacket(handle, selection);
+  async processSelection(selection: SelectionTarget): Promise<Result<ContextPacket>> {
+    return this.generatePacket(selection);
   }
 
   health(): VCEHealth {
@@ -302,7 +329,7 @@ export class VisualContextEngine {
     };
   }
 
-  private buildHierarchy(dom: { tagName: string }, selection?: SelectionTarget) {
+  private buildHierarchy(dom: { tagName: string }, _selection?: SelectionTarget) {
     return {
       selectedNode: { tagName: dom.tagName, depth: 0 },
       parents: [] as HierarchyNode[],

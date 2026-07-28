@@ -1,6 +1,5 @@
-import { ok, err, ErrorCategory, ErrorSeverity } from '@viskod/shared';
+import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 import type { Result, ViskodError } from '@viskod/shared';
-import { VISKOD_STORAGE_DIR, CAPTURE_DIR } from '@viskod/shared';
 
 export interface Screenshot {
   captureId: string;
@@ -55,7 +54,6 @@ interface CaptureMetadata {
 
 export class CapturePipeline {
   private captures = new Map<string, CaptureMetadata>();
-  private baseDir = `${VISKOD_STORAGE_DIR}/${CAPTURE_DIR}`;
 
   async persistCapture(
     packet: { packetId: string },
@@ -124,9 +122,10 @@ export class CapturePipeline {
       page: m.page,
     }));
 
-    if (filter.fromDate) results = results.filter((c) => c.timestamp >= filter.fromDate!);
-    if (filter.toDate) results = results.filter((c) => c.timestamp <= filter.toDate!);
-    if (filter.pageUrl) results = results.filter((c) => c.page.url.includes(filter.pageUrl!));
+    const { fromDate, toDate, pageUrl } = filter;
+    if (fromDate) results = results.filter((c) => c.timestamp >= fromDate);
+    if (toDate) results = results.filter((c) => c.timestamp <= toDate);
+    if (pageUrl) results = results.filter((c) => c.page.url.includes(pageUrl));
 
     const offset = filter.offset ?? 0;
     const limit = filter.limit ?? 50;

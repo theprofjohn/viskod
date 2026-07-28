@@ -1,10 +1,7 @@
-import { EventBus } from '@viskod/event-bus';
-import { BrowserRuntime } from '@viskod/browser-runtime';
-import { CapturePipeline } from '@viskod/capture-pipeline';
-import { VisualContextEngine } from '@viskod/context-engine';
-import type { SelectionTarget, ContextPacket } from '@viskod/context-engine';
-import type { BrowserHandle } from '@viskod/browser-runtime';
 import http from 'node:http';
+import { VisualContextEngine } from '@viskod/context-engine';
+import type { ContextPacket, SelectionTarget } from '@viskod/context-engine';
+import { EventBus } from '@viskod/event-bus';
 
 // Studio is the graphical interface — NOT an IDE, NOT a code editor, NOT a coding agent.
 // Studio owns UI state ONLY. Business state belongs to runtime packages.
@@ -22,22 +19,14 @@ interface StudioState {
 
 export class Studio {
   private eventBus: EventBus;
-  private browserRuntime: BrowserRuntime;
-  private capturePipeline: CapturePipeline;
   private vce: VisualContextEngine;
   private state: StudioState;
-  private browserHandle: BrowserHandle | null = null;
+  private browserConnected = false;
   private server: http.Server | null = null;
 
-  constructor() {
-    this.eventBus = new EventBus({ enableHistory: true, historySize: 50 });
-    this.browserRuntime = new BrowserRuntime(this.eventBus);
-    this.capturePipeline = new CapturePipeline();
-    this.vce = new VisualContextEngine({
-      browserRuntime: this.browserRuntime,
-      eventBus: this.eventBus,
-      capturePipeline: this.capturePipeline,
-    });
+  constructor(vce: VisualContextEngine, eventBus: EventBus) {
+    this.vce = vce;
+    this.eventBus = eventBus;
 
     this.state = {
       activePanel: 'browser-session',
@@ -75,9 +64,10 @@ export class Studio {
   }
 
   async start(): Promise<void> {
-    const result = await this.browserRuntime.launch();
+    // Start browser through VCE (Studio does not own browser lifecycle)
+    const result = await this.vce.startBrowser();
     if (result.ok) {
-      this.browserHandle = result.value;
+      this.browserConnected = true;
     }
 
     this.server = http.createServer((req, res) => {
@@ -111,7 +101,7 @@ export class Studio {
   }
 
   async confirmSelection(): Promise<{ ok: boolean }> {
-    if (!this.browserHandle) return { ok: false };
+    if (!this.browserConnected) return { ok: false };
 
     // Simulated selection for P0 demo
     const selection: SelectionTarget = {
@@ -121,7 +111,7 @@ export class Studio {
     this.state.currentSelection = selection;
 
     // Studio calls VCE (command flow)
-    const result = await this.vce.processSelection(this.browserHandle, selection);
+    const result = await this.vce.processSelection(selection);
     if (result.ok) {
       this.state.currentPacket = result.value;
       this.state.activePanel = 'context-explorer';
@@ -146,9 +136,8 @@ export class Studio {
 
   async shutdown(): Promise<void> {
     if (this.server) this.server.close();
-    if (this.browserHandle) {
-      await this.browserRuntime.shutdown(this.browserHandle);
-    }
+    // Stop browser through VCE (Studio does not own browser lifecycle)
+    await this.vce.stopBrowser();
   }
 
   getState(): StudioState {
@@ -156,6 +145,19 @@ export class Studio {
   }
 }
 
-// Entry point
-const studio = new Studio();
+// Entry point — temporary orchestrator for vertical slice
+// In production, CLI would perform this wiring
+import { BrowserRuntime } from '@viskod/browser-runtime';
+import { CapturePipeline } from '@viskod/capture-pipeline';
+
+const eventBus = new EventBus({ enableHistory: true, historySize: 50 });
+const browserRuntime = new BrowserRuntime(eventBus);
+const capturePipeline = new CapturePipeline();
+const vce = new VisualContextEngine({
+  browserRuntime,
+  eventBus,
+  capturePipeline,
+});
+
+const studio = new Studio(vce, eventBus);
 void studio.start();

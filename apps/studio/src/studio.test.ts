@@ -1,9 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { BrowserRuntime } from '@viskod/browser-runtime';
+import { CapturePipeline } from '@viskod/capture-pipeline';
+import { VisualContextEngine } from '@viskod/context-engine';
+import { EventBus } from '@viskod/event-bus';
+import { describe, expect, it } from 'vitest';
 import { Studio } from './index';
 
 describe('Studio', () => {
   it('starts with initial state', () => {
-    const studio = new Studio();
+    const eventBus = new EventBus();
+    const browserRuntime = new BrowserRuntime(eventBus);
+    const capturePipeline = new CapturePipeline();
+    const vce = new VisualContextEngine({
+      browserRuntime,
+      eventBus,
+      capturePipeline,
+    });
+    const studio = new Studio(vce, eventBus);
     const state = studio.getState();
     expect(state.activePanel).toBe('browser-session');
     expect(state.currentPacket).toBeNull();
@@ -11,14 +23,30 @@ describe('Studio', () => {
   });
 
   it('startSelection sets isSelecting to true', async () => {
-    const studio = new Studio();
+    const eventBus = new EventBus();
+    const browserRuntime = new BrowserRuntime(eventBus);
+    const capturePipeline = new CapturePipeline();
+    const vce = new VisualContextEngine({
+      browserRuntime,
+      eventBus,
+      capturePipeline,
+    });
+    const studio = new Studio(vce, eventBus);
     const result = await studio.startSelection();
     expect(result.ok).toBe(true);
     expect(studio.getState().isSelecting).toBe(true);
   });
 
   it('clearSelection resets state', async () => {
-    const studio = new Studio();
+    const eventBus = new EventBus();
+    const browserRuntime = new BrowserRuntime(eventBus);
+    const capturePipeline = new CapturePipeline();
+    const vce = new VisualContextEngine({
+      browserRuntime,
+      eventBus,
+      capturePipeline,
+    });
+    const studio = new Studio(vce, eventBus);
     await studio.startSelection();
     await studio.clearSelection();
     expect(studio.getState().isSelecting).toBe(false);
@@ -26,14 +54,30 @@ describe('Studio', () => {
   });
 
   it('Studio never imports browser-runtime internals', () => {
-    // Verified by constructor: Studio receives BrowserRuntime as a dependency,
+    // Verified by constructor: Studio receives VCE as a dependency,
     // never creates or imports its internals directly
-    const studio = new Studio();
+    const eventBus = new EventBus();
+    const browserRuntime = new BrowserRuntime(eventBus);
+    const capturePipeline = new CapturePipeline();
+    const vce = new VisualContextEngine({
+      browserRuntime,
+      eventBus,
+      capturePipeline,
+    });
+    const studio = new Studio(vce, eventBus);
     expect(studio).toBeDefined();
   });
 
   it('confirmSelection calls VCE and receives packet', async () => {
-    const studio = new Studio();
+    const eventBus = new EventBus();
+    const browserRuntime = new BrowserRuntime(eventBus);
+    const capturePipeline = new CapturePipeline();
+    const vce = new VisualContextEngine({
+      browserRuntime,
+      eventBus,
+      capturePipeline,
+    });
+    const studio = new Studio(vce, eventBus);
     await studio.startSelection();
     // Note: needs browserHandle to be set via start(), which launches BR
     // This test validates the flow contracts are wired correctly

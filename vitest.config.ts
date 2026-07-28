@@ -1,5 +1,5 @@
-import { defineConfig } from 'vitest/config';
 import { resolve } from 'node:path';
+import { defineConfig } from 'vitest/config';
 
 const resolveAlias = {
   '@viskod/shared': resolve(__dirname, 'packages/shared/src/index.ts'),

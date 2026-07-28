@@ -1,9 +1,9 @@
-import type { Result, BoundingBox, Viewport } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity } from '@viskod/shared';
-import type { ViskodError } from '@viskod/shared';
-import type { EventBus } from '@viskod/event-bus';
 import type { BrowserConfig } from '@viskod/config';
 import { DEFAULT_CONFIG } from '@viskod/config';
+import type { EventBus } from '@viskod/event-bus';
+import type { BoundingBox, Result, Viewport } from '@viskod/shared';
+import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
+import type { ViskodError } from '@viskod/shared';
 
 // Stub: Playwright is imported lazily to avoid requiring it during tests
 // In production: import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
@@ -67,7 +67,6 @@ export interface ScreenshotOptions {
 export class BrowserRuntime {
   private eventBus: EventBus;
   private config: BrowserConfig;
-  private connected = false;
   private startTime = 0;
   private handles = new Map<string, { browser: PlaywrightBrowser; page: PlaywrightPage }>();
 
@@ -83,7 +82,6 @@ export class BrowserRuntime {
 
     // In P0: stub mode. Real Playwright integration in Phase 2.
     // Stub creates a "virtual" browser session for testing the vertical slice.
-    this.connected = true;
 
     const handle: BrowserHandle = { contextId };
     this.handles.set(contextId, { browser: {} as PlaywrightBrowser, page: {} as PlaywrightPage });
@@ -106,7 +104,6 @@ export class BrowserRuntime {
     if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Browser handle not found'));
 
     this.handles.delete(handle.contextId);
-    this.connected = this.handles.size > 0;
 
     this.eventBus.publish({
       eventId: crypto.randomUUID(),
@@ -158,7 +155,7 @@ export class BrowserRuntime {
 
   async captureScreenshot(
     handle: BrowserHandle,
-    type: 'viewport' | 'selection' | 'full-page',
+    _type: 'viewport' | 'selection' | 'full-page',
   ): Promise<Result<Screenshot>> {
     if (!this.handles.has(handle.contextId))
       return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
@@ -184,7 +181,7 @@ export class BrowserRuntime {
     });
   }
 
-  async getDOMSnapshot(handle: BrowserHandle, selector: string): Promise<Result<DOMSnapshot>> {
+  async getDOMSnapshot(handle: BrowserHandle, _selector: string): Promise<Result<DOMSnapshot>> {
     if (!this.handles.has(handle.contextId))
       return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
     return ok({
@@ -195,7 +192,10 @@ export class BrowserRuntime {
     });
   }
 
-  async getComputedStyles(handle: BrowserHandle, selector: string): Promise<Result<StyleSnapshot>> {
+  async getComputedStyles(
+    handle: BrowserHandle,
+    _selector: string,
+  ): Promise<Result<StyleSnapshot>> {
     if (!this.handles.has(handle.contextId))
       return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
     return ok({
@@ -203,7 +203,7 @@ export class BrowserRuntime {
     });
   }
 
-  async getDiagnostics(handle: BrowserHandle): Promise<Result<BrowserDiagnostics>> {
+  async getDiagnostics(_handle: BrowserHandle): Promise<Result<BrowserDiagnostics>> {
     return ok({ consoleErrors: [], pageErrors: [], memoryUsage: 0 });
   }
 

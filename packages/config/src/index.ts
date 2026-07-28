@@ -1,5 +1,5 @@
 import type { Result, ViskodError } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity } from '@viskod/shared';
+import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 
 export interface GeneralConfig {
   startupBehavior: 'open-studio' | 'tray-only' | 'headless';
@@ -72,11 +72,11 @@ export function mergeConfigs(
   env: Partial<ViskodConfig> = {},
   defaults: ViskodConfig = DEFAULT_CONFIG,
 ): ViskodConfig {
-  const result = structuredClone(defaults);
-  mergeInto(result, env);
-  mergeInto(result, file);
-  mergeInto(result, cli);
-  return result;
+  const result = structuredClone(defaults) as unknown as Record<string, unknown>;
+  mergeInto(result, env as unknown as Record<string, unknown>);
+  mergeInto(result, file as unknown as Record<string, unknown>);
+  mergeInto(result, cli as unknown as Record<string, unknown>);
+  return result as unknown as ViskodConfig;
 }
 
 function mergeInto(target: Record<string, unknown>, source: Record<string, unknown>): void {

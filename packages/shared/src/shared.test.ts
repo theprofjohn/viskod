@@ -1,22 +1,22 @@
-import { describe, it, expect } from 'vitest';
-import { ok, err, isRecoverable, ErrorCategory, ErrorSeverity } from './errors';
+import { describe, expect, it } from 'vitest';
+import { OVERLAY_CSS_PREFIX, VISKOD_STORAGE_DIR } from './constants';
+import { ErrorCategory, ErrorSeverity, err, isRecoverable, ok } from './errors';
 import {
-  IdentifierSchema,
-  TimestampSchema,
-  SemVerSchema,
-  ViskodErrorSchema,
   BoundingBoxSchema,
+  IdentifierSchema,
+  SemVerSchema,
+  TimestampSchema,
   ViewportSchema,
+  ViskodErrorSchema,
 } from './schemas';
-import { VISKOD_STORAGE_DIR, OVERLAY_CSS_PREFIX } from './constants';
-import type { Result } from './errors';
 
 describe('ok()', () => {
   it('creates a valid Result with value and success flag', () => {
     const result = ok(42);
     expect(result.ok).toBe(true);
-    expect(result.value).toBe(42);
-    expect(result.error).toBeUndefined();
+    if (result.ok) {
+      expect(result.value).toBe(42);
+    }
   });
 });
 
@@ -33,8 +33,9 @@ describe('err()', () => {
     };
     const result = err(error);
     expect(result.ok).toBe(false);
-    expect(result.value).toBeUndefined();
-    expect(result.error).toEqual(error);
+    if (!result.ok) {
+      expect(result.error).toEqual(error);
+    }
   });
 });
 

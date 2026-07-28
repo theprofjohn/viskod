@@ -1,4 +1,4 @@
-import type { Identifier, Timestamp, SemVer } from './types';
+import type { Identifier, SemVer, Timestamp } from './types';
 
 export interface BaseEvent<T extends string = string, P = unknown> {
   eventId: Identifier;
