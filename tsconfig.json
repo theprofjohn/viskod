@@ -37,7 +37,9 @@
       "@viskod/diagnostics": ["./packages/diagnostics/src/index.ts"],
       "@viskod/sdk": ["./packages/sdk/src/index.ts"],
       "@viskod/plugin-system": ["./packages/plugin-system/src/index.ts"],
-      "@viskod/permissions": ["./packages/permissions/src/index.ts"]
+      "@viskod/permissions": ["./packages/permissions/src/index.ts"],
+      "@viskod/audit": ["./packages/audit/src/index.ts"],
+      "@viskod/workspace": ["./packages/workspace/src/index.ts"]
     }
   }
 }

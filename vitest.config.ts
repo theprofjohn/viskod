@@ -18,6 +18,8 @@ const resolveAlias = {
   '@viskod/sdk': resolve(__dirname, 'packages/sdk/src/index.ts'),
   '@viskod/plugin-system': resolve(__dirname, 'packages/plugin-system/src/index.ts'),
   '@viskod/permissions': resolve(__dirname, 'packages/permissions/src/index.ts'),
+  '@viskod/audit': resolve(__dirname, 'packages/audit/src/index.ts'),
+  '@viskod/workspace': resolve(__dirname, 'packages/workspace/src/index.ts'),
 };
 
 export default defineConfig({
