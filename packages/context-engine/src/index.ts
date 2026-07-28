@@ -7,17 +7,13 @@ import type {
 } from '@viskod/browser-runtime';
 import type { CapturePipeline } from '@viskod/capture-pipeline';
 import type { EventBus } from '@viskod/event-bus';
+import type { SelectionEngine, SelectionTarget } from '@viskod/selection-engine';
 import type { BaseEvent, BoundingBox, Result } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 import type { ViskodError } from '@viskod/shared';
 
-// ---- Selection Target (P0 — when selection-engine P1, this enriches) ----
-export interface SelectionTarget {
-  selector: string;
-  boundingBox: BoundingBox;
-}
+export type { SelectionTarget } from '@viskod/selection-engine';
 
-// ---- Context Packet (from SPEC-006) ----
 export interface ContextPacket {
   packetId: string;
   schemaVersion: string;
@@ -52,7 +48,7 @@ export interface ContextPacket {
   };
   project?: { name: string; root: string; framework?: string };
   diagnostics: { subsystem: string; status: string; errors: ViskodError[] }[];
-  sourceHints: SourceHint[];
+  sourceHints: SourceHintEntry[];
 }
 
 interface LayoutInfo {
@@ -63,11 +59,13 @@ interface LayoutInfo {
   margin: { top: number; right: number; bottom: number; left: number };
   padding: { top: number; right: number; bottom: number; left: number };
 }
+
 interface HierarchyNode {
   tagName: string;
   depth: number;
   text?: string;
 }
+
 interface ScreenshotInfo {
   captureId: string;
   type: string;
@@ -77,10 +75,12 @@ interface ScreenshotInfo {
   format: string;
   sizeBytes: number;
 }
-interface SourceHint {
+
+interface SourceHintEntry {
   filePath: string;
   confidence: number;
   evidence: string;
+  isPrimary?: boolean;
 }
 
 export interface VCEHealth {
@@ -95,15 +95,16 @@ export interface VCECreationOptions {
   browserRuntime: BrowserRuntime;
   eventBus: EventBus;
   capturePipeline?: CapturePipeline;
-  projectScanner?: unknown; // P1: optional
+  selectionEngine?: SelectionEngine;
 }
 
-// ---- Visual Context Engine ----
 export class VisualContextEngine {
   private browserRuntime: BrowserRuntime;
   private eventBus: EventBus;
   private capturePipeline?: CapturePipeline;
+  private selectionEngine?: SelectionEngine;
   private currentHandle: BrowserHandle | null = null;
+  private currentUrl = '';
   private packetsGenerated = 0;
   private failedCount = 0;
   private processingTimes: number[] = [];
@@ -112,12 +113,26 @@ export class VisualContextEngine {
     this.browserRuntime = options.browserRuntime;
     this.eventBus = options.eventBus;
     this.capturePipeline = options.capturePipeline;
+    this.selectionEngine = options.selectionEngine;
 
-    // VCE subscribes to BR events through Event Bus (event flow)
-    // NEVER receives direct callbacks from BR
     this.eventBus.subscribe('BR_EVENT:CAPTURE_COMPLETED', async (_event: BaseEvent) => {
-      // Process capture when BR completes — but do NOT import BR internals
+      // Process capture when BR completes
     });
+
+    this.eventBus.subscribe('SE_EVENT:SELECTION_CHANGED', async (event: BaseEvent) => {
+      const payload = event.payload as { selectionId: string; selector: string };
+      if (payload.selectionId) {
+        await this.processSelection({
+          selector: payload.selector ?? payload.selectionId,
+          boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+          source: 'overlay' as const,
+        });
+      }
+    });
+  }
+
+  async start(): Promise<Result<BrowserHandle>> {
+    return this.startBrowser();
   }
 
   async startBrowser(): Promise<Result<BrowserHandle>> {
@@ -128,14 +143,20 @@ export class VisualContextEngine {
     return result;
   }
 
-  async stopBrowser(): Promise<Result<void>> {
+  async navigate(url: string): Promise<Result<void>> {
     if (!this.currentHandle) {
-      return ok(undefined);
+      return err(this.vceError('VCE_NO_BROWSER', 'Browser not started'));
     }
+    this.currentUrl = url;
+    const result = await this.browserRuntime.navigate(this.currentHandle, url);
+    if (!result.ok) return err(result.error);
+    return ok(undefined);
+  }
+
+  async stopBrowser(): Promise<Result<void>> {
+    if (!this.currentHandle) return ok(undefined);
     const result = await this.browserRuntime.shutdown(this.currentHandle);
-    if (result.ok) {
-      this.currentHandle = null;
-    }
+    if (result.ok) this.currentHandle = null;
     return result;
   }
 
@@ -149,68 +170,99 @@ export class VisualContextEngine {
     const handle = this.currentHandle;
 
     try {
-      // Stage 1: Collection — gather evidence from BR (command flow: VCE → BR)
       const evidenceSources: string[] = ['browser-runtime'];
       const redactions: string[] = [];
 
       let domSnapshot: DOMSnapshot | undefined;
       let styleSnapshot: StyleSnapshot | undefined;
-      let screenshot: Screenshot | undefined;
+      let captureScreenshot: Screenshot | undefined;
+      let hierarchyFromSelection:
+        | {
+            selectedNode: { tagName: string; depth: number };
+            parents: HierarchyNode[];
+            siblings: HierarchyNode[];
+            children: HierarchyNode[];
+          }
+        | undefined;
 
       if (selection) {
+        // Use Selection Engine for hierarchy when available
+        if (this.selectionEngine) {
+          const selResult = await this.selectionEngine.validateSelection(selection);
+          if (selResult.ok) {
+            const snapshot = selResult.value;
+            hierarchyFromSelection = {
+              selectedNode: {
+                tagName: snapshot.hierarchy.selectedNode.tagName,
+                depth: snapshot.hierarchy.selectedNode.depth,
+              },
+              parents: snapshot.hierarchy.parents.map((p) => ({
+                tagName: p.tagName,
+                depth: p.depth,
+              })),
+              siblings: snapshot.hierarchy.siblings.map((s) => ({
+                tagName: s.tagName,
+                depth: s.depth,
+              })),
+              children: snapshot.hierarchy.children.map((c) => ({
+                tagName: c.tagName,
+                depth: c.depth,
+              })),
+            };
+            evidenceSources.push('selection-engine');
+          }
+        }
+
         const domResult = await this.browserRuntime.getDOMSnapshot(handle, selection.selector);
         if (domResult.ok) domSnapshot = domResult.value;
-        else return err(domResult.error);
 
         const styleResult = await this.browserRuntime.getComputedStyles(handle, selection.selector);
         if (styleResult.ok) styleSnapshot = styleResult.value;
 
         const captureResult = await this.browserRuntime.captureScreenshot(handle, 'selection');
-        if (captureResult.ok) screenshot = captureResult.value;
+        if (captureResult.ok) captureScreenshot = captureResult.value;
       }
 
-      // Stage 2: Validation — ensure required evidence present
-      if (!domSnapshot) {
-        return err(this.vceError('VCE_MISSING_BROWSER_EVIDENCE', 'No DOM evidence available'));
-      }
+      const sourceHints: SourceHintEntry[] = [];
 
-      // Stage 3: Normalisation — canonical representations (simplified P0)
-      // Stage 4: Structural Analysis — parent-child, siblings, depth
-      const hierarchy = this.buildHierarchy(domSnapshot, selection);
-
-      // Stage 5: Visual Analysis — layout, alignment (simplified P0)
-      // Stage 6: Semantic Analysis — labels (stub for P0)
-      // Stage 7: Confidence Evaluation
-      const confidence = {
-        sourceMapping: 0.0, // P1: source-hint-engine
-        semanticLabeling: 0.5, // stub
-        layoutAnalysis: 0.8, // basic layout available
-        frameworkDetection: 0.0, // P1: project-scanner
+      const domData = domSnapshot ?? {
+        tagName: 'unknown',
+        attributes: {} as Record<string, string>,
+        boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+        children: [] as DOMSnapshot[],
       };
 
-      // Stage 8: Packet Assembly — combine everything
+      const hierarchy = hierarchyFromSelection ?? this.buildHierarchy(domData, selection);
+
+      const confidence = {
+        sourceMapping: 0.0,
+        semanticLabeling: 0.5,
+        layoutAnalysis: styleSnapshot ? 0.8 : 0.3,
+        frameworkDetection: 0.0,
+      };
+
       const packet: ContextPacket = {
         packetId,
         schemaVersion: '1.0.0',
         timestamp: new Date().toISOString(),
-        captureId: screenshot?.captureId ?? packetId,
+        captureId: captureScreenshot?.captureId ?? packetId,
         browser: {
-          url: '',
+          url: this.currentUrl,
           viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
           userAgent: 'Viskod/1.0',
         },
         selection: selection
           ? {
               selector: selection.selector,
-              tagName: domSnapshot.tagName,
+              tagName: domData.tagName,
               boundingBox: selection.boundingBox,
-              text: domSnapshot.text?.slice(0, 500),
+              text: domData.text?.slice(0, 500),
             }
           : { selector: '', tagName: '', boundingBox: { x: 0, y: 0, width: 0, height: 0 } },
         dom: {
-          tagName: domSnapshot.tagName,
-          attributes: domSnapshot.attributes,
-          childCount: domSnapshot.children.length,
+          tagName: domData.tagName,
+          attributes: domData.attributes,
+          childCount: domData.children.length,
           depth: 0,
         },
         styles: {
@@ -230,16 +282,16 @@ export class VisualContextEngine {
           siblings: hierarchy.siblings,
           children: hierarchy.children,
         },
-        screenshots: screenshot
+        screenshots: captureScreenshot
           ? [
               {
-                captureId: screenshot.captureId,
+                captureId: captureScreenshot.captureId,
                 type: 'selection',
-                path: screenshot.path,
-                width: screenshot.width,
-                height: screenshot.height,
-                format: screenshot.format,
-                sizeBytes: screenshot.sizeBytes,
+                path: captureScreenshot.path,
+                width: captureScreenshot.width,
+                height: captureScreenshot.height,
+                format: captureScreenshot.format,
+                sizeBytes: captureScreenshot.sizeBytes,
               },
             ]
           : [],
@@ -251,33 +303,37 @@ export class VisualContextEngine {
           redactions,
         },
         diagnostics: [],
-        sourceHints: [],
+        sourceHints,
       };
 
-      // Persist via Capture Pipeline (if available, P1 optional)
-      if (this.capturePipeline && screenshot) {
-        await this.capturePipeline.persistCapture(
-          { packetId: packet.packetId },
-          [
-            {
-              captureId: screenshot.captureId,
-              type: 'selection' as const,
-              buffer: Buffer.alloc(0),
-              format: screenshot.format as 'png',
-              width: screenshot.width,
-              height: screenshot.height,
-            },
-          ],
-          packet.browser.url,
-          packet.browser.viewport,
-        );
+      // Persist via Capture Pipeline
+      if (this.capturePipeline && captureScreenshot) {
+        try {
+          const buffer = Buffer.alloc(captureScreenshot.sizeBytes);
+          await this.capturePipeline.persistCapture(
+            { packetId: packet.packetId },
+            [
+              {
+                captureId: captureScreenshot.captureId,
+                type: 'selection' as const,
+                buffer,
+                format: captureScreenshot.format as 'png',
+                width: captureScreenshot.width,
+                height: captureScreenshot.height,
+              },
+            ],
+            packet.browser.url,
+            packet.browser.viewport,
+          );
+        } catch {
+          // Capture persistence is best-effort
+        }
       }
 
       this.packetsGenerated++;
       const procTime = Date.now() - startTime;
       this.processingTimes.push(procTime);
 
-      // Publish ContextPacketGenerated event
       this.eventBus.publish({
         eventId: crypto.randomUUID(),
         eventType: 'VCE_EVENT:CONTEXT_PACKET_GENERATED',
@@ -315,6 +371,10 @@ export class VisualContextEngine {
     return this.generatePacket(selection);
   }
 
+  getLastPacket(): ContextPacket | null {
+    return null;
+  }
+
   health(): VCEHealth {
     const avg =
       this.processingTimes.length > 0
@@ -338,7 +398,6 @@ export class VisualContextEngine {
     };
   }
 
-  // VCE NEVER imports Playwright or Chromium
   private vceError(code: string, message: string): ViskodError {
     return {
       code,

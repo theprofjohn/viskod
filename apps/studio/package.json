@@ -19,6 +19,7 @@
     "@viskod/browser-runtime": "workspace:*",
     "@viskod/capture-pipeline": "workspace:*",
     "@viskod/context-engine": "workspace:*",
-    "@viskod/config": "workspace:*"
+    "@viskod/config": "workspace:*",
+    "@viskod/selection-engine": "workspace:*"
   }
 }

@@ -9,6 +9,7 @@ const resolveAlias = {
   '@viskod/browser-runtime': resolve(__dirname, 'packages/browser-runtime/src/index.ts'),
   '@viskod/context-engine': resolve(__dirname, 'packages/context-engine/src/index.ts'),
   '@viskod/overlay-system': resolve(__dirname, 'packages/overlay-system/src/index.ts'),
+  '@viskod/selection-engine': resolve(__dirname, 'packages/selection-engine/src/index.ts'),
 };
 
 export default defineConfig({

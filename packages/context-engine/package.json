@@ -13,5 +13,11 @@
     ".": "./src/index.ts"
   },
   "private": true,
-  "dependencies": {}
+  "dependencies": {
+    "@viskod/shared": "workspace:*",
+    "@viskod/event-bus": "workspace:*",
+    "@viskod/browser-runtime": "workspace:*",
+    "@viskod/capture-pipeline": "workspace:*",
+    "@viskod/selection-engine": "workspace:*"
+  }
 }
