@@ -1,0 +1,17 @@
+{
+  "name": "@viskod/audit",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@viskod/shared": "workspace:*"
+  }
+}
