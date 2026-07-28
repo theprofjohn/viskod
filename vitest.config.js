@@ -9,6 +9,8 @@ const resolveAlias = {
     '@viskod/context-engine': resolve(__dirname, 'packages/context-engine/src/index.ts'),
     '@viskod/overlay-system': resolve(__dirname, 'packages/overlay-system/src/index.ts'),
     '@viskod/selection-engine': resolve(__dirname, 'packages/selection-engine/src/index.ts'),
+    '@viskod/project-scanner': resolve(__dirname, 'packages/project-scanner/src/index.ts'),
+    '@viskod/source-hint-engine': resolve(__dirname, 'packages/source-hint-engine/src/index.ts'),
 };
 export default defineConfig({
     resolve: {
