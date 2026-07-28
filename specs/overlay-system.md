@@ -32,7 +32,7 @@
 | SPEC-002 (shared-types) | Approved | Consumes BoundingBox type; defines OverlayState, OverlayCommands, OverlayEvents schemas |
 | SPEC-003 (error-model) | Approved | Error codes OV_INJECTION_FAILED, OV_ELEMENT_NOT_FOUND, OV_SELECTOR_INVALID, OV_OVERLAY_DETECTED |
 | SPEC-008 (browser-runtime) | Approved | Browser Runtime injects the overlay script via addScriptTag; bridges overlay postMessage events to the Event Bus |
-| SPEC-011 (selection-engine) | Draft (P1, not yet written) | SelectionTarget interface enrichment (validation status, candidate scores, hierarchy); when SPEC-011 is approved, full selection validation is added |
+| SPEC-014 (selection-engine) | Draft | SelectionTarget interface enrichment (validation status, candidate scores, hierarchy); Selection Engine consumes HighlightRequested events; Overlay System renders highlights determined by Selection Engine |
 
 ---
 

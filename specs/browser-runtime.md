@@ -2,9 +2,10 @@
 
 > **Specification ID:** SPEC-008
 > **Version:** 1.0
-> **Status:** Draft
+> **Status:** Approved
 > **Owner:** Platform Architecture
 > **Last Updated:** 2026-07-28
+> **Phase 2 Note:** P0 stub implementation exists in `packages/browser-runtime/`. Phase 2 replaces stub methods (launch, navigate, captureScreenshot, getDOMSnapshot, getComputedStyles) with real Playwright calls. Overlay injection script provided by `@viskod/overlay-system` (SPEC-022). Selection events consumed by `@viskod/selection-engine` (SPEC-014).
 
 ---
 

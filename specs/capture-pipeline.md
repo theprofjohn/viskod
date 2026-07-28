@@ -2,9 +2,10 @@
 
 > **Specification ID:** SPEC-010
 > **Version:** 1.0
-> **Status:** Draft
+> **Status:** Approved
 > **Owner:** Viskod Engineering
 > **Last Updated:** 2026-07-28
+> **Phase 2 Note:** P0 stub implementation exists in `packages/capture-pipeline/` (in-memory Map). Phase 2 replaces in-memory storage with file-backed persistence to `.viskod/captures/{captureId}/` per the storage layout defined in this spec.
 
 ---
 
