@@ -20,6 +20,7 @@ const resolveAlias = {
   '@viskod/permissions': resolve(__dirname, 'packages/permissions/src/index.ts'),
   '@viskod/audit': resolve(__dirname, 'packages/audit/src/index.ts'),
   '@viskod/workspace': resolve(__dirname, 'packages/workspace/src/index.ts'),
+  '@viskod/runtime-session': resolve(__dirname, 'packages/runtime-session/src/index.ts'),
 };
 
 export default defineConfig({

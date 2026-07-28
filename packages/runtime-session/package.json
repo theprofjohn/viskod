@@ -1,0 +1,24 @@
+{
+  "name": "@viskod/runtime-session",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@viskod/shared": "workspace:*",
+    "@viskod/event-bus": "workspace:*",
+    "@viskod/browser-runtime": "workspace:*",
+    "@viskod/capture-pipeline": "workspace:*",
+    "@viskod/context-engine": "workspace:*",
+    "@viskod/selection-engine": "workspace:*",
+    "@viskod/project-scanner": "workspace:*",
+    "@viskod/source-hint-engine": "workspace:*"
+  }
+}
