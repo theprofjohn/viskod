@@ -15,6 +15,8 @@ const resolveAlias = {
     '@viskod/cli': resolve(__dirname, 'packages/cli/src/index.ts'),
     '@viskod/diagnostics': resolve(__dirname, 'packages/diagnostics/src/index.ts'),
     '@viskod/sdk': resolve(__dirname, 'packages/sdk/src/index.ts'),
+    '@viskod/plugin-system': resolve(__dirname, 'packages/plugin-system/src/index.ts'),
+    '@viskod/permissions': resolve(__dirname, 'packages/permissions/src/index.ts'),
 };
 export default defineConfig({
     resolve: {

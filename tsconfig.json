@@ -35,7 +35,9 @@
       "@viskod/mcp-server": ["./packages/mcp-server/src/index.ts"],
       "@viskod/cli": ["./packages/cli/src/index.ts"],
       "@viskod/diagnostics": ["./packages/diagnostics/src/index.ts"],
-      "@viskod/sdk": ["./packages/sdk/src/index.ts"]
+      "@viskod/sdk": ["./packages/sdk/src/index.ts"],
+      "@viskod/plugin-system": ["./packages/plugin-system/src/index.ts"],
+      "@viskod/permissions": ["./packages/permissions/src/index.ts"]
     }
   }
 }
