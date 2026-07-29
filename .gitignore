@@ -30,5 +30,9 @@ tests/**/*.d.ts
 tests/**/*.js.map
 tests/**/*.d.ts.map
 
+# graphify dev tool
+graphify-out/cache/
+graphify-out/cost.json
+
 # pnpm temp files
 pnpm-lock.yaml.*
