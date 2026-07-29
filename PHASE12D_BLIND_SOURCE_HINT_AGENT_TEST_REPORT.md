@@ -93,9 +93,11 @@ The source hint narrowed the search from the entire project to files matching `t
 
 | Element | Before | After | Change | Root Cause |
 |---|---|---|---|---|
-| `.target-card` height | **110.89** | **147.50** | +36.61px | Padding `10px 8px` → `20px`; flex gap added |
+| `.target-card` height | **110.89** | **147.50** | +36.61px | Padding `10px 8px` → `20px` |
 | `.target-card` width | 640 | 640 | — | — |
-| `#phase12-source-submit-button` width | **624** (from Phase 12C) | **95.45** | -528.55px | `width: 100%` removed |
+| `#phase12-source-submit-button` width | **~624** (see note) | **95.45** | -528.55px | `width: 100%` removed |
+
+**Note on before button width:** The before-fix capture phase only included `.target-card` (the element described in the blind prompt), not the button separately. The ~624px value is the expected width from the same broken CSS (`width: 100%` in a 640px container minus 2×8px padding), confirmed by Phase 12C's measurement of the identical broken state. A rigorous before/after would require capturing the button before fixing. This is a minor methodological gap: the after-fix measurement of 95.45px is real, but the before comparison relies on inference rather than direct measurement.
 
 ---
 
