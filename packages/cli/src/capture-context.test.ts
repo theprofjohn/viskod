@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
 import { generateExport } from '@viskod/context-engine';
 import type { ContextPacket } from '@viskod/context-engine';
+import { describe, expect, it } from 'vitest';
 
 function mockPacket(overrides: Partial<ContextPacket> = {}): ContextPacket {
   return {
@@ -8,17 +8,80 @@ function mockPacket(overrides: Partial<ContextPacket> = {}): ContextPacket {
     schemaVersion: '1.0.0',
     timestamp: 'now',
     captureId: 'c1',
-    browser: { url: 'http://localhost:3000', viewport: { width: 1280, height: 720, deviceScaleFactor: 1 }, userAgent: 'test' },
-    selection: { selector: '.target-card', tagName: 'div', boundingBox: { x: 10, y: 20, width: 640, height: 300 }, text: 'target' },
+    browser: {
+      url: 'http://localhost:3000',
+      viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
+      userAgent: 'test',
+    },
+    selection: {
+      selector: '.target-card',
+      tagName: 'div',
+      boundingBox: { x: 10, y: 20, width: 640, height: 300 },
+      text: 'target',
+    },
     dom: { tagName: 'div', attributes: {}, childCount: 3, depth: 1 },
-    styles: { computed: {}, layout: { display: 'block', position: 'static', width: 640, height: 300, margin: { top: 0, right: 0, bottom: 0, left: 0 }, padding: { top: 0, right: 0, bottom: 0, left: 0 } } },
-    hierarchy: { selectedNode: { tagName: 'div', depth: 0 }, parents: [], siblings: [], children: [] },
-    screenshots: [{ captureId: 'ss1', type: 'selection', path: 'selection.png', width: 100, height: 100, format: 'png', sizeBytes: 512 }],
-    confidence: { sourceMapping: 0, semanticLabeling: 0.5, layoutAnalysis: 0.8, frameworkDetection: 0 },
-    metadata: { engineVersion: '1.0.0', processingTimeMs: 100, evidenceSources: ['browser-runtime'], redactions: ['email'] },
+    styles: {
+      computed: {},
+      layout: {
+        display: 'block',
+        position: 'static',
+        width: 640,
+        height: 300,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      },
+    },
+    hierarchy: {
+      selectedNode: { tagName: 'div', depth: 0 },
+      parents: [],
+      siblings: [],
+      children: [],
+    },
+    screenshots: [
+      {
+        captureId: 'ss1',
+        type: 'selection',
+        path: 'selection.png',
+        width: 100,
+        height: 100,
+        format: 'png',
+        sizeBytes: 512,
+      },
+    ],
+    confidence: {
+      sourceMapping: 0,
+      semanticLabeling: 0.5,
+      layoutAnalysis: 0.8,
+      frameworkDetection: 0,
+    },
+    metadata: {
+      engineVersion: '1.0.0',
+      processingTimeMs: 100,
+      evidenceSources: ['browser-runtime'],
+      redactions: ['email'],
+    },
     diagnostics: [],
-    sourceHints: [{ filePath: 'src/components/TargetCard.jsx', confidence: 0.85, evidence: 'match', isPrimary: true, exists: true, matchType: 'case-insensitive', reason: 'found' }],
-    runtimeEvidence: { console: [{ level: 'error', message: 'test error', timestamp: 'now' }], network: [{ request: { method: 'POST', url: '/api/test' }, response: { status: 500, statusText: 'Error' }, timestamp: 'now' }] },
+    sourceHints: [
+      {
+        filePath: 'src/components/TargetCard.jsx',
+        confidence: 0.85,
+        evidence: 'match',
+        isPrimary: true,
+        exists: true,
+        matchType: 'case-insensitive',
+        reason: 'found',
+      },
+    ],
+    runtimeEvidence: {
+      console: [{ level: 'error', message: 'test error', timestamp: 'now' }],
+      network: [
+        {
+          request: { method: 'POST', url: '/api/test' },
+          response: { status: 500, statusText: 'Error' },
+          timestamp: 'now',
+        },
+      ],
+    },
     ...overrides,
   };
 }
@@ -27,8 +90,12 @@ describe('capture_context response shape', () => {
   it('includes packetId, profile, and brief', () => {
     const packet = mockPacket();
     const brief = generateExport(packet, { format: 'markdown' });
+    const captureDir = packet.captureDir ?? '';
+    const packetPath = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
     const response = {
       packetId: packet.packetId,
+      packetPath,
+      captureDir,
       profile: 'debug',
       briefFormat: 'markdown',
       brief,
@@ -49,6 +116,35 @@ describe('capture_context response shape', () => {
     expect(response.runtimeEvidenceSummary.network).toBe(1);
     expect(response.redactionSummary).toContain('email');
     expect(response.screenshotPaths).toContain('selection.png');
+  });
+
+  it('capture_context returns packetPath and captureDir', () => {
+    const packet = mockPacket({ captureDir: '/tmp/.viskod/captures/test-uuid' });
+    const captureDir = packet.captureDir ?? '';
+    const packetPath = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
+    expect(packetPath).toBe('/tmp/.viskod/captures/test-uuid/packet.json');
+    expect(captureDir).toBe('/tmp/.viskod/captures/test-uuid');
+  });
+
+  it('capture_context packetPath points to packet.json', () => {
+    const packet = mockPacket({ captureDir: '/tmp/.viskod/captures/test-uuid' });
+    const packetPath = `${(packet.captureDir ?? '').replace(/\\/g, '/')}/packet.json`;
+    expect(packetPath.endsWith('/packet.json')).toBe(true);
+  });
+
+  it('capture_context handles missing captureDir gracefully', () => {
+    const packet = mockPacket({ captureDir: undefined });
+    const captureDir = packet.captureDir ?? '';
+    const packetPath = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
+    expect(captureDir).toBe('');
+    expect(packetPath).toBe('');
+  });
+
+  it('no daemon token in MCP output', () => {
+    const packet = mockPacket();
+    const brief = generateExport(packet, { format: 'json' });
+    expect(brief).not.toContain('daemon-token');
+    expect(brief).not.toContain('sessionToken');
   });
 
   it('markdown brief includes source hints and bounding box', () => {
@@ -77,9 +173,25 @@ describe('capture_context response shape', () => {
     // Simulate debug profile detection
     packet.runtimeEvidence = {
       console: [{ level: 'error', message: 'e', timestamp: 'now' }],
-      network: [{ request: { method: 'GET', url: '/api' }, response: { status: 500, statusText: 'E' }, timestamp: 'now' }],
+      network: [
+        {
+          request: { method: 'GET', url: '/api' },
+          response: { status: 500, statusText: 'E' },
+          timestamp: 'now',
+        },
+      ],
     };
-    packet.screenshots = [{ captureId: 'ss1', type: 'selection', path: 's.png', width: 10, height: 10, format: 'png', sizeBytes: 100 }];
+    packet.screenshots = [
+      {
+        captureId: 'ss1',
+        type: 'selection',
+        path: 's.png',
+        width: 10,
+        height: 10,
+        format: 'png',
+        sizeBytes: 100,
+      },
+    ];
     const brief = JSON.parse(generateExport(packet, { format: 'json' }));
     expect(brief.profile).toBe('debug');
   });
@@ -94,8 +206,23 @@ describe('capture_context response shape', () => {
 
 describe('recapture_context comparison', () => {
   it('computes bounding box delta', () => {
-    const before = mockPacket({ selection: { selector: '.card', tagName: 'div', boundingBox: { x: 10, y: 20, width: 640, height: 200 }, text: 'before' } });
-    const after = mockPacket({ packetId: 'after-test', selection: { selector: '.card', tagName: 'div', boundingBox: { x: 10, y: 20, width: 640, height: 300 }, text: 'after' } });
+    const before = mockPacket({
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 10, y: 20, width: 640, height: 200 },
+        text: 'before',
+      },
+    });
+    const after = mockPacket({
+      packetId: 'after-test',
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 10, y: 20, width: 640, height: 300 },
+        text: 'after',
+      },
+    });
 
     const beforeBox = before.selection?.boundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const afterBox = after.selection?.boundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
@@ -110,7 +237,11 @@ describe('recapture_context comparison', () => {
   });
 
   it('compares screenshot, source hint, and evidence counts', () => {
-    const before = mockPacket({ screenshots: [], sourceHints: [], runtimeEvidence: { console: [], network: [] } });
+    const before = mockPacket({
+      screenshots: [],
+      sourceHints: [],
+      runtimeEvidence: { console: [], network: [] },
+    });
     const after = mockPacket();
 
     const comp = {
@@ -165,7 +296,13 @@ describe('existing capture tool unaffected', () => {
 
 describe('error handling', () => {
   it('invalid selector would return a clear error from pipeline', () => {
-    const packet = mockPacket({ selection: { selector: '.nonexistent', tagName: 'div', boundingBox: { x: 0, y: 0, width: 0, height: 0 } } });
+    const packet = mockPacket({
+      selection: {
+        selector: '.nonexistent',
+        tagName: 'div',
+        boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+      },
+    });
     // The capture would fail at the browser level, but the exporter still handles the packet
     const brief = generateExport(packet, { format: 'markdown' });
     expect(brief).toContain('.nonexistent');

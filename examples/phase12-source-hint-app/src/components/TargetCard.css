@@ -30,7 +30,7 @@
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background .15s;
 }
 
 .target-card-button:hover {

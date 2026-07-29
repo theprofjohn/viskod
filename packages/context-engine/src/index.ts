@@ -64,6 +64,7 @@ export interface ContextPacket {
   diagnostics: { subsystem: string; status: string; errors: ViskodError[] }[];
   sourceHints: SourceHintEntry[];
   runtimeEvidence?: RuntimeEvidence;
+  captureDir?: string;
 }
 
 interface LayoutInfo {
@@ -518,16 +519,22 @@ export class VisualContextEngine {
             packet.browser.url,
             packet.browser.viewport,
           );
-          if (persistResult.ok && screenshotsForPersist.length > 0) {
+          if (persistResult.ok) {
             const absoluteDir = persistResult.value.captureDir;
-            const projectRoot = this.projectScan?.rootPath;
-            const relativeDir = projectRoot ? path.relative(projectRoot, absoluteDir) : absoluteDir;
-            packet.screenshots = packet.screenshots.map((s) => ({
-              ...s,
-              captureDir: relativeDir,
-              absoluteCaptureDir: absoluteDir,
-              path: `${s.type}.${s.format}`,
-            }));
+            // Always attach captureDir to the packet
+            packet.captureDir = absoluteDir;
+            if (screenshotsForPersist.length > 0) {
+              const projectRoot = this.projectScan?.rootPath;
+              const relativeDir = projectRoot
+                ? path.relative(projectRoot, absoluteDir)
+                : absoluteDir;
+              packet.screenshots = packet.screenshots.map((s) => ({
+                ...s,
+                captureDir: relativeDir,
+                absoluteCaptureDir: absoluteDir,
+                path: `${s.type}.${s.format}`,
+              }));
+            }
           }
         } catch {
           // Capture persistence is best-effort

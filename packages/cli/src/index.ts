@@ -499,8 +499,20 @@ async function cmdServe(): Promise<void> {
         properties: {
           selector: { type: 'string', description: 'CSS selector for the element' },
           url: { type: 'string', description: 'URL to navigate to' },
-          profile: { type: 'string', description: 'Capture profile: default, debug, or audit', enum: ['default', 'debug', 'audit'] },
-          format: { type: 'string', description: 'Brief format: markdown or json (default: markdown)', enum: ['markdown', 'json'] },
+          profile: {
+            type: 'string',
+            description: 'Capture profile: default, debug, or audit',
+            enum: ['default', 'debug', 'audit'],
+          },
+          projectPath: {
+            type: 'string',
+            description: 'Project root path for source scanning (default: auto-discover)',
+          },
+          format: {
+            type: 'string',
+            description: 'Brief format: markdown or json (default: markdown)',
+            enum: ['markdown', 'json'],
+          },
         },
         required: ['selector'],
       },
@@ -509,6 +521,7 @@ async function cmdServe(): Promise<void> {
       const selector = args.selector as string;
       const url = args.url as string | undefined;
       const profileName = (args.profile as string | undefined) ?? 'default';
+      const projectPath = args.projectPath as string | undefined;
       const format = (args.format as string | undefined) ?? 'markdown';
 
       const profile = resolveProfile(profileName);
@@ -516,18 +529,45 @@ async function cmdServe(): Promise<void> {
       if (!session.getStatus()) {
         const startResult = await session.start(url ?? 'http://localhost:3000');
         if (!startResult.ok) {
-          return { content: [{ type: 'text', text: `Failed to start session: ${startResult.error.message}` }], isError: true };
+          return {
+            content: [
+              { type: 'text', text: `Failed to start session: ${startResult.error.message}` },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      // Set project context if specified
+      if (projectPath && session.getStatus()) {
+        const scanResult = await session.getProjectScanner().scan(projectPath);
+        if (scanResult.ok) {
+          const s = scanResult.value;
+          session.getVCE().setProjectContext({
+            rootPath: s.metadata.rootPath,
+            projectId: s.metadata.projectId,
+            name: s.metadata.name,
+            directories: s.components.directories,
+            primaryFramework: s.framework.primary,
+            detectedFrameworks: s.framework.detected,
+            frameworkConfidence: s.framework.confidence,
+          });
         }
       }
 
       const result = await session.capture(selector, url, profile);
       if (!result.ok) {
-        return { content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }], isError: true };
+        return {
+          content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }],
+          isError: true,
+        };
       }
 
       const packet = result.value;
       const brief = generateExport(packet, { format: format as 'markdown' | 'json' });
 
+      const captureDir = packet.captureDir ?? '';
+      const packetPath = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
       const screenshotPaths = (packet.screenshots ?? []).map((s) => s.path);
       const sourceHintCount = (packet.sourceHints ?? []).length;
       const consoleCount = (packet.runtimeEvidence?.console ?? []).length;
@@ -540,6 +580,8 @@ async function cmdServe(): Promise<void> {
             text: JSON.stringify(
               {
                 packetId: packet.packetId,
+                packetPath,
+                captureDir,
                 profile: profileName,
                 briefFormat: format,
                 brief,
@@ -566,8 +608,19 @@ async function cmdServe(): Promise<void> {
         properties: {
           selector: { type: 'string', description: 'CSS selector for the element' },
           url: { type: 'string', description: 'URL to navigate to' },
-          profile: { type: 'string', description: 'Capture profile', enum: ['default', 'debug', 'audit'] },
-          previousPacketPath: { type: 'string', description: 'Path to previous packet.json for comparison' },
+          profile: {
+            type: 'string',
+            description: 'Capture profile',
+            enum: ['default', 'debug', 'audit'],
+          },
+          projectPath: {
+            type: 'string',
+            description: 'Project root path for source scanning (default: auto-discover)',
+          },
+          previousPacketPath: {
+            type: 'string',
+            description: 'Path to previous packet.json for comparison',
+          },
           format: { type: 'string', description: 'Brief format', enum: ['markdown', 'json'] },
         },
         required: ['selector'],
@@ -577,6 +630,7 @@ async function cmdServe(): Promise<void> {
       const selector = args.selector as string;
       const url = args.url as string | undefined;
       const profileName = (args.profile as string | undefined) ?? 'default';
+      const projectPath = args.projectPath as string | undefined;
       const prevPath = args.previousPacketPath as string | undefined;
       const format = (args.format as string | undefined) ?? 'markdown';
 
@@ -585,13 +639,38 @@ async function cmdServe(): Promise<void> {
       if (!session.getStatus()) {
         const startResult = await session.start(url ?? 'http://localhost:3000');
         if (!startResult.ok) {
-          return { content: [{ type: 'text', text: `Failed to start session: ${startResult.error.message}` }], isError: true };
+          return {
+            content: [
+              { type: 'text', text: `Failed to start session: ${startResult.error.message}` },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      // Set project context if specified
+      if (projectPath && session.getStatus()) {
+        const scanResult = await session.getProjectScanner().scan(projectPath);
+        if (scanResult.ok) {
+          const s = scanResult.value;
+          session.getVCE().setProjectContext({
+            rootPath: s.metadata.rootPath,
+            projectId: s.metadata.projectId,
+            name: s.metadata.name,
+            directories: s.components.directories,
+            primaryFramework: s.framework.primary,
+            detectedFrameworks: s.framework.detected,
+            frameworkConfidence: s.framework.confidence,
+          });
         }
       }
 
       const result = await session.capture(selector, url, profile);
       if (!result.ok) {
-        return { content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }], isError: true };
+        return {
+          content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }],
+          isError: true,
+        };
       }
 
       const packet = result.value;
@@ -602,7 +681,7 @@ async function cmdServe(): Promise<void> {
         try {
           const { readFileSync } = await import('node:fs');
           const raw = readFileSync(prevPath, 'utf-8');
-          const prev = JSON.parse(raw) as Record<string, unknown>;
+          const prev: Record<string, unknown> = JSON.parse(raw);
           const prevSelection = (prev as any).selection ?? {};
           const curSelection = packet.selection ?? {};
           const prevBox = prevSelection.boundingBox ?? {};
@@ -610,10 +689,22 @@ async function cmdServe(): Promise<void> {
 
           comparisonSummary = {
             boundingBoxDelta: {
-              x: curBox.x !== undefined && prevBox.x !== undefined ? curBox.x - prevBox.x : undefined,
-              y: curBox.y !== undefined && prevBox.y !== undefined ? curBox.y - prevBox.y : undefined,
-              width: curBox.width !== undefined && prevBox.width !== undefined ? curBox.width - prevBox.width : undefined,
-              height: curBox.height !== undefined && prevBox.height !== undefined ? Math.round((curBox.height - prevBox.height) * 100) / 100 : undefined,
+              x:
+                curBox.x !== undefined && prevBox.x !== undefined
+                  ? curBox.x - prevBox.x
+                  : undefined,
+              y:
+                curBox.y !== undefined && prevBox.y !== undefined
+                  ? curBox.y - prevBox.y
+                  : undefined,
+              width:
+                curBox.width !== undefined && prevBox.width !== undefined
+                  ? curBox.width - prevBox.width
+                  : undefined,
+              height:
+                curBox.height !== undefined && prevBox.height !== undefined
+                  ? Math.round((curBox.height - prevBox.height) * 100) / 100
+                  : undefined,
             },
             screenshotsBefore: (prev as any).screenshots?.length ?? 0,
             screenshotsAfter: (packet.screenshots ?? []).length,
@@ -634,6 +725,9 @@ async function cmdServe(): Promise<void> {
       const consoleCount = (packet.runtimeEvidence?.console ?? []).length;
       const networkCount = (packet.runtimeEvidence?.network ?? []).length;
 
+      const captureDir = packet.captureDir ?? '';
+      const packetPathOut = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
+
       return {
         content: [
           {
@@ -641,6 +735,8 @@ async function cmdServe(): Promise<void> {
             text: JSON.stringify(
               {
                 packetId: packet.packetId,
+                packetPath: packetPathOut,
+                captureDir,
                 profile: profileName,
                 briefFormat: format,
                 brief,
