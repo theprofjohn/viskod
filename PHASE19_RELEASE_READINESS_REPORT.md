@@ -152,4 +152,6 @@ All PASS criteria met:
 - [x] No private paths/secrets in committed release files — hardcoded user path in `opencode.json` removed from index
 - [x] Repo is ready for an internal `v0.2.0-alpha` tag
 
+Graphify generated files: confirmed untracked after `git rm --cached`.
+
 The repository is ready for a `v0.2.0-alpha` tag.
