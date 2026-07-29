@@ -2,6 +2,7 @@ export interface SessionInfo {
   sessionId: string;
   pid: number;
   port: number;
+  token: string;
   status: 'starting' | 'running' | 'stopped';
   browserUrl?: string;
   startedAt: string;
@@ -12,6 +13,7 @@ export interface DaemonRequest {
   id: number;
   method: string;
   params?: Record<string, unknown>;
+  token?: string;
 }
 
 export interface DaemonResponse {

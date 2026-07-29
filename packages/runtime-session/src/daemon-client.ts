@@ -7,10 +7,12 @@ import type { DaemonResponse, SessionInfo } from './types';
 
 export class DaemonClient {
   private port: number;
+  private token: string;
   private nextId = 1;
 
-  constructor(port: number) {
+  constructor(port: number, token: string) {
     this.port = port;
+    this.token = token;
   }
 
   async capture(selector: string, url?: string): Promise<Result<ContextPacket>> {
@@ -60,7 +62,7 @@ export class DaemonClient {
       }, 10000);
 
       client.connect(this.port, '127.0.0.1', () => {
-        const req = `${JSON.stringify({ id, method, params: params ?? {} })}\n`;
+        const req = `${JSON.stringify({ id, method, token: this.token, params: params ?? {} })}\n`;
         client.write(req);
       });
 

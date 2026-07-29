@@ -94,11 +94,13 @@ export class RuntimeSession {
 
     const sessionId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
+    const token = crypto.randomUUID();
 
     this._info = {
       sessionId,
       pid: process.pid,
       port: 0,
+      token,
       status: 'running',
       browserUrl: url,
       startedAt,

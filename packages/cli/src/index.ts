@@ -169,7 +169,7 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
   // Try to use existing session
   const sessionInfo = RuntimeSession.readSessionFile();
   if (sessionInfo && sessionInfo.status === 'running') {
-    const client = new DaemonClient(sessionInfo.port);
+    const client = new DaemonClient(sessionInfo.port, sessionInfo.token);
     const result = await client.capture(selector, targetUrl);
     if (result.ok) {
       const packet = result.value;
@@ -192,8 +192,8 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
       );
       return;
     }
-    console.error(`Session capture failed: ${result.error?.message}`);
-    console.log('Falling back to standalone capture...');
+    // Daemon unreachable or rejected — clean stale session file
+    RuntimeSession.clearSessionFile();
   }
 
   // Fallback: standalone capture (legacy behavior)
@@ -410,7 +410,7 @@ async function cmdStatus(): Promise<void> {
   }
 
   // Verify daemon is responsive
-  const client = new DaemonClient(sessionInfo.port);
+  const client = new DaemonClient(sessionInfo.port, sessionInfo.token);
   const result = await client.status();
   if (result.ok) {
     console.log(JSON.stringify(result.value, null, 2));
@@ -427,7 +427,7 @@ async function cmdStop(): Promise<void> {
     return;
   }
 
-  const client = new DaemonClient(sessionInfo.port);
+  const client = new DaemonClient(sessionInfo.port, sessionInfo.token);
   const result = await client.stop();
   if (result.ok) {
     RuntimeSession.clearSessionFile();
