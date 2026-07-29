@@ -1,7 +1,7 @@
 {
   "type": "module",
   "main": "./src/index.ts",
-  "version": "0.0.1",
+  "version": "0.2.0-alpha",
   "name": "@viskod/event-bus",
   "types": "./src/index.ts",
   "scripts": {

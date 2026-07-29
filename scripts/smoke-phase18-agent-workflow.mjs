@@ -81,8 +81,9 @@ let cssBackup = null;
 if (existsSync(FIXTURE_CSS)) {
   cssBackup = readFileSync(FIXTURE_CSS, 'utf-8');
   // Write broken CSS: hide description
+  // Replace description rule (multi-line or single-line) with display:none
   const brokenCss = cssBackup.replace(
-    /\.target-card-description\{[^}]*\}/,
+    /\.target-card-description\s*\{[\s\S]*?\}/,
     '.target-card-description{display:none}',
   );
   writeFileSync(FIXTURE_CSS_BROKEN, brokenCss, 'utf-8');

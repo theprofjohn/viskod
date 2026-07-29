@@ -1,10 +1,18 @@
+# IDE / local tooling
 .gortex/
 .gemini/
 .hermes/
 .claude/
 .cursor/
 .vscode/
+.opencode/
+opencode.json
+.viskod/
+
+# Dependencies
 node_modules/
+
+# Config files
 .gortex.yaml
 .gortex.lock
 
@@ -17,6 +25,7 @@ packages/*/src/**/*.d.ts
 apps/*/src/**/*.js
 apps/*/src/**/*.d.ts
 **/dist
+**/coverage
 
 # Root compiled config
 /*.js
@@ -30,9 +39,23 @@ tests/**/*.d.ts
 tests/**/*.js.map
 tests/**/*.d.ts.map
 
-# graphify dev tool
+# graphify dev tool (auto-generated database)
 graphify-out/cache/
 graphify-out/cost.json
+graphify-out/2026-*/
+graphify-out/graph.json
+graphify-out/manifest.json
+graphify-out/graph.html
+graphify-out/GRAPH_REPORT.md
+graphify-out/.graphify_labels.json
+graphify-out/.graphify_labels.json.sig
+graphify-out/.graphify_root
 
 # pnpm temp files
 pnpm-lock.yaml.*
+
+# Runtime captures and logs
+.viskod/captures/
+.viskid/session.json
+.viskod/*.tmp
+.viskod/logs/

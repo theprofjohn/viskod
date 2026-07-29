@@ -1,6 +1,6 @@
 {
   "name": "@viskod/selection-engine",
-  "version": "0.0.1",
+  "version": "0.2.0-alpha",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
