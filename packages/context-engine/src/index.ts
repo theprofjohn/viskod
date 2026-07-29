@@ -4,8 +4,16 @@ import type {
   BrowserRuntime,
   DOMSnapshot,
   ElementHierarchy,
+  RuntimeEvidence,
   Screenshot,
   StyleSnapshot,
+} from '@viskod/browser-runtime';
+import {
+  DEFAULT_TRUNCATION,
+  redactEvidence,
+  truncateConsoleEntries,
+  truncateNetworkEntries,
+  truncateSelectedElement,
 } from '@viskod/browser-runtime';
 import type { CapturePipeline } from '@viskod/capture-pipeline';
 import type { EventBus } from '@viskod/event-bus';
@@ -52,6 +60,7 @@ export interface ContextPacket {
   project?: { name: string; root: string; framework?: string };
   diagnostics: { subsystem: string; status: string; errors: ViskodError[] }[];
   sourceHints: SourceHintEntry[];
+  runtimeEvidence?: RuntimeEvidence;
 }
 
 interface LayoutInfo {
@@ -200,6 +209,7 @@ export class VisualContextEngine {
       let domSnapshot: DOMSnapshot | undefined;
       let styleSnapshot: StyleSnapshot | undefined;
       let captureScreenshot: Screenshot | undefined;
+      let runtimeEvidence: RuntimeEvidence | undefined;
       let hierarchyFromSelection:
         | {
             selectedNode: { tagName: string; depth: number };
@@ -256,6 +266,41 @@ export class VisualContextEngine {
 
         const captureResult = await this.browserRuntime.captureScreenshot(handle, 'selection');
         if (captureResult.ok) captureScreenshot = captureResult.value;
+
+        // Collect runtime evidence
+        const consoleResult = await this.browserRuntime.captureConsoleLogs(handle);
+        const networkResult = await this.browserRuntime.captureNetworkRequests(handle);
+        const elementResult = await this.browserRuntime.getSelectedElementInfo(
+          handle,
+          selection.selector,
+        );
+
+        const rawEvidence: RuntimeEvidence = {};
+        if (consoleResult.ok) rawEvidence.console = consoleResult.value;
+        if (networkResult.ok) rawEvidence.network = networkResult.value;
+        if (elementResult.ok) rawEvidence.selectedElement = elementResult.value;
+
+        // Apply redaction
+        const { evidence: redactedEvidence, redactions: evidenceRedactions } =
+          redactEvidence(rawEvidence);
+        for (const r of evidenceRedactions) {
+          if (!redactions.includes(r)) redactions.push(r);
+        }
+
+        // Apply truncation
+        const truncation = DEFAULT_TRUNCATION;
+        runtimeEvidence = {};
+        if (redactedEvidence.console)
+          runtimeEvidence.console = truncateConsoleEntries(redactedEvidence.console, truncation);
+        if (redactedEvidence.network)
+          runtimeEvidence.network = truncateNetworkEntries(redactedEvidence.network, truncation);
+        if (redactedEvidence.selectedElement)
+          runtimeEvidence.selectedElement = truncateSelectedElement(
+            redactedEvidence.selectedElement,
+            truncation,
+          );
+
+        evidenceSources.push('browser-runtime:evidence');
       }
 
       const domData = domSnapshot ?? {
@@ -408,6 +453,7 @@ export class VisualContextEngine {
         },
         diagnostics: [],
         sourceHints,
+        runtimeEvidence,
       };
 
       // Persist via Capture Pipeline

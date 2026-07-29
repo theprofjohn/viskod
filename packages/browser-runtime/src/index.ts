@@ -10,6 +10,27 @@ import {
   ok,
 } from '@viskod/shared';
 import { type Browser, type Page, chromium } from 'playwright';
+import type { ConsoleEntry, NetworkEntry, SelectedElementInfo } from './evidence';
+import { collectConsoleEntries } from './evidence';
+export type {
+  ConsoleEntry,
+  NetworkEntry,
+  NetworkRequest,
+  NetworkResponse,
+  RuntimeEvidence,
+  SelectedElementInfo,
+  TruncationConfig,
+  RedactionRule,
+} from './evidence';
+export {
+  DEFAULT_TRUNCATION,
+  applyRedaction,
+  collectConsoleEntries,
+  redactEvidence,
+  truncateConsoleEntries,
+  truncateNetworkEntries,
+  truncateSelectedElement,
+} from './evidence';
 
 export interface BrowserHandle {
   contextId: string;
@@ -74,10 +95,21 @@ const DEFAULT_CONFIG: { browser: BrowserConfig } = {
   },
 };
 
+interface NetworkRecord {
+  method: string;
+  url: string;
+  status: number;
+  statusText: string;
+  durationMs: number;
+  sizeBytes: number;
+  timestamp: string;
+}
+
 interface BrowserEntry {
   browser: Browser;
   page: Page;
   consoleErrors: Array<{ message: string; source: string; timestamp: string }>;
+  networkEntries: NetworkRecord[];
 }
 
 export class BrowserRuntime {
@@ -115,6 +147,7 @@ export class BrowserRuntime {
         browser,
         page,
         consoleErrors: [],
+        networkEntries: [],
       };
 
       page.on('console', (msg) => {
@@ -133,6 +166,39 @@ export class BrowserRuntime {
           source: 'window.onerror',
           timestamp: new Date().toISOString(),
         });
+      });
+
+      page.on('request', (req) => {
+        entry.networkEntries.push({
+          method: req.method(),
+          url: req.url(),
+          status: 0,
+          statusText: '',
+          durationMs: 0,
+          sizeBytes: 0,
+          timestamp: new Date().toISOString(),
+        });
+      });
+
+      page.on('requestfinished', async (req) => {
+        const existing = entry.networkEntries.find((n) => n.url === req.url() && n.status === 0);
+        if (existing) {
+          const resp = await req.response();
+          existing.status = resp?.status() ?? 0;
+          existing.statusText = resp?.statusText() ?? '';
+          existing.durationMs = Date.now() - new Date(existing.timestamp).getTime();
+          const contentLen = resp?.headers()['content-length'];
+          existing.sizeBytes = contentLen ? Number(contentLen) : 0;
+        }
+      });
+
+      page.on('requestfailed', (req) => {
+        const existing = entry.networkEntries.find((n) => n.url === req.url() && n.status === 0);
+        if (existing) {
+          existing.status = 0;
+          existing.statusText = req.failure()?.errorText ?? 'Failed';
+          existing.durationMs = Date.now() - new Date(existing.timestamp).getTime();
+        }
       });
 
       this.handles.set(contextId, entry);
@@ -459,6 +525,49 @@ export class BrowserRuntime {
       return err(
         this.brError('BR_HIERARCHY_FAILED', `Hierarchy retrieval failed: ${String(error)}`),
       );
+    }
+  }
+
+  async captureConsoleLogs(handle: BrowserHandle): Promise<Result<ConsoleEntry[]>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
+    return ok(collectConsoleEntries(entry.consoleErrors));
+  }
+
+  async captureNetworkRequests(handle: BrowserHandle): Promise<Result<NetworkEntry[]>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
+    const entries = entry.networkEntries.map((n) => ({
+      request: { method: n.method, url: n.url },
+      response: n.status > 0 ? { status: n.status, statusText: n.statusText } : undefined,
+      durationMs: n.durationMs > 0 ? n.durationMs : undefined,
+      sizeBytes: n.sizeBytes > 0 ? n.sizeBytes : undefined,
+      timestamp: n.timestamp,
+    }));
+    return ok(entries);
+  }
+
+  async getSelectedElementInfo(
+    handle: BrowserHandle,
+    selector: string,
+  ): Promise<Result<SelectedElementInfo>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
+
+    try {
+      const escaped = selector.replace(/[\\"]/g, '\\$&');
+      const result = await entry.page.evaluate(
+        `(function(){var el = document.querySelector("${escaped}");if (!el) return null;var r = el.getBoundingClientRect();var a = {};for (var i = 0; i < el.attributes.length; i++) a[el.attributes[i].name] = el.attributes[i].value;return {tagName: el.tagName.toLowerCase(), text: (el.textContent || "").slice(0, 500), attributes: a, boundingBox: {x: r.x, y: r.y, width: r.width, height: r.height}};})()`,
+      );
+      if (!result) {
+        return err(this.brError('BR_ELEMENT_NOT_FOUND', `Element not found: ${selector}`));
+      }
+      return ok({
+        selector,
+        ...(result as Omit<SelectedElementInfo, 'selector'>),
+      });
+    } catch (error) {
+      return err(this.brError('BR_ELEMENT_INFO_FAILED', `Element info failed: ${String(error)}`));
     }
   }
 
