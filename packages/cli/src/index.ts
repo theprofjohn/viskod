@@ -490,6 +490,175 @@ async function cmdServe(): Promise<void> {
     },
   );
 
+  server.registerTool(
+    {
+      name: 'capture_context',
+      description: 'Capture an element and return an agent-ready context brief in one step',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector for the element' },
+          url: { type: 'string', description: 'URL to navigate to' },
+          profile: { type: 'string', description: 'Capture profile: default, debug, or audit', enum: ['default', 'debug', 'audit'] },
+          format: { type: 'string', description: 'Brief format: markdown or json (default: markdown)', enum: ['markdown', 'json'] },
+        },
+        required: ['selector'],
+      },
+    },
+    async (args) => {
+      const selector = args.selector as string;
+      const url = args.url as string | undefined;
+      const profileName = (args.profile as string | undefined) ?? 'default';
+      const format = (args.format as string | undefined) ?? 'markdown';
+
+      const profile = resolveProfile(profileName);
+
+      if (!session.getStatus()) {
+        const startResult = await session.start(url ?? 'http://localhost:3000');
+        if (!startResult.ok) {
+          return { content: [{ type: 'text', text: `Failed to start session: ${startResult.error.message}` }], isError: true };
+        }
+      }
+
+      const result = await session.capture(selector, url, profile);
+      if (!result.ok) {
+        return { content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }], isError: true };
+      }
+
+      const packet = result.value;
+      const brief = generateExport(packet, { format: format as 'markdown' | 'json' });
+
+      const screenshotPaths = (packet.screenshots ?? []).map((s) => s.path);
+      const sourceHintCount = (packet.sourceHints ?? []).length;
+      const consoleCount = (packet.runtimeEvidence?.console ?? []).length;
+      const networkCount = (packet.runtimeEvidence?.network ?? []).length;
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                packetId: packet.packetId,
+                profile: profileName,
+                briefFormat: format,
+                brief,
+                screenshotPaths,
+                sourceHintCount,
+                runtimeEvidenceSummary: { console: consoleCount, network: networkCount },
+                redactionSummary: packet.metadata?.redactions ?? [],
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    {
+      name: 'recapture_context',
+      description: 'Re-capture an element and optionally compare with a previous capture',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector for the element' },
+          url: { type: 'string', description: 'URL to navigate to' },
+          profile: { type: 'string', description: 'Capture profile', enum: ['default', 'debug', 'audit'] },
+          previousPacketPath: { type: 'string', description: 'Path to previous packet.json for comparison' },
+          format: { type: 'string', description: 'Brief format', enum: ['markdown', 'json'] },
+        },
+        required: ['selector'],
+      },
+    },
+    async (args) => {
+      const selector = args.selector as string;
+      const url = args.url as string | undefined;
+      const profileName = (args.profile as string | undefined) ?? 'default';
+      const prevPath = args.previousPacketPath as string | undefined;
+      const format = (args.format as string | undefined) ?? 'markdown';
+
+      const profile = resolveProfile(profileName);
+
+      if (!session.getStatus()) {
+        const startResult = await session.start(url ?? 'http://localhost:3000');
+        if (!startResult.ok) {
+          return { content: [{ type: 'text', text: `Failed to start session: ${startResult.error.message}` }], isError: true };
+        }
+      }
+
+      const result = await session.capture(selector, url, profile);
+      if (!result.ok) {
+        return { content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }], isError: true };
+      }
+
+      const packet = result.value;
+      const brief = generateExport(packet, { format: format as 'markdown' | 'json' });
+
+      let comparisonSummary: Record<string, unknown> | undefined;
+      if (prevPath) {
+        try {
+          const { readFileSync } = await import('node:fs');
+          const raw = readFileSync(prevPath, 'utf-8');
+          const prev = JSON.parse(raw) as Record<string, unknown>;
+          const prevSelection = (prev as any).selection ?? {};
+          const curSelection = packet.selection ?? {};
+          const prevBox = prevSelection.boundingBox ?? {};
+          const curBox = curSelection.boundingBox ?? {};
+
+          comparisonSummary = {
+            boundingBoxDelta: {
+              x: curBox.x !== undefined && prevBox.x !== undefined ? curBox.x - prevBox.x : undefined,
+              y: curBox.y !== undefined && prevBox.y !== undefined ? curBox.y - prevBox.y : undefined,
+              width: curBox.width !== undefined && prevBox.width !== undefined ? curBox.width - prevBox.width : undefined,
+              height: curBox.height !== undefined && prevBox.height !== undefined ? Math.round((curBox.height - prevBox.height) * 100) / 100 : undefined,
+            },
+            screenshotsBefore: (prev as any).screenshots?.length ?? 0,
+            screenshotsAfter: (packet.screenshots ?? []).length,
+            sourceHintsBefore: (prev as any).sourceHints?.length ?? 0,
+            sourceHintsAfter: (packet.sourceHints ?? []).length,
+            consoleBefore: (prev as any).runtimeEvidence?.console?.length ?? 0,
+            consoleAfter: (packet.runtimeEvidence?.console ?? []).length,
+            networkBefore: (prev as any).runtimeEvidence?.network?.length ?? 0,
+            networkAfter: (packet.runtimeEvidence?.network ?? []).length,
+          };
+        } catch {
+          comparisonSummary = { error: 'Failed to read previous packet for comparison' };
+        }
+      }
+
+      const screenshotPaths = (packet.screenshots ?? []).map((s) => s.path);
+      const sourceHintCount = (packet.sourceHints ?? []).length;
+      const consoleCount = (packet.runtimeEvidence?.console ?? []).length;
+      const networkCount = (packet.runtimeEvidence?.network ?? []).length;
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                packetId: packet.packetId,
+                profile: profileName,
+                briefFormat: format,
+                brief,
+                screenshotPaths,
+                sourceHintCount,
+                runtimeEvidenceSummary: { console: consoleCount, network: networkCount },
+                redactionSummary: packet.metadata?.redactions ?? [],
+                comparisonSummary,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
   await server.start();
 }
 
