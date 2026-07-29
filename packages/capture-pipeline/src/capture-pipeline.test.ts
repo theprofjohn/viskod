@@ -28,6 +28,17 @@ describe('CapturePipeline', () => {
     }
   }
 
+  it('eagerly creates storage directory in constructor', async () => {
+    // The constructor should create the storage dir so first persist works
+    const freshDir = path.join(os.tmpdir(), `.viskod-test-eager-${Date.now()}`);
+    // Ensure the directory does NOT exist yet
+    expect(fs.existsSync(freshDir)).toBe(false);
+    new CapturePipeline(freshDir);
+    expect(fs.existsSync(freshDir)).toBe(true);
+    expect(fs.statSync(freshDir).isDirectory()).toBe(true);
+    fs.rmSync(freshDir, { recursive: true, force: true });
+  });
+
   function createDummyCapture(dir: string, captureId: string, daysAgo: number): void {
     const captureDir = path.join(dir, captureId);
     fs.mkdirSync(captureDir, { recursive: true });

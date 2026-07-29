@@ -278,6 +278,130 @@ describe('SourceHintEngine hardening', () => {
     }
   });
 
+  describe('usage-site hint ranking', () => {
+    it('usage-site hint ranks above generic component hints when visible text matches', async () => {
+      const tmpDir = join(tmpdir(), `viskod-she-usage-${Date.now()}`);
+      // Create generic component (card.tsx) that WON'T match via usage-site (no visible text in it)
+      // We rely on className-based matching for generic hints
+      const compDir = join(tmpDir, 'src', 'components');
+      mkdirSync(compDir, { recursive: true });
+      writeFileSync(join(compDir, 'card.tsx'), 'export function Card() { return <div>Card</div> }');
+      writeFileSync(join(compDir, 'flex.tsx'), 'export function Flex() { return <div>Flex</div> }');
+
+      // Create usage file with visible text AND component references
+      const usageDir = join(tmpDir, 'src', 'features', 'auth', 'sign-in');
+      mkdirSync(usageDir, { recursive: true });
+      writeFileSync(
+        join(usageDir, 'index.tsx'),
+        [
+          'import { Card } from "@/components/ui/card"',
+          'export function SignIn() {',
+          '  return <Card><CardTitle>Sign in</CardTitle><label>Email</label><input />',
+          '    <label>Password</label><input type="password" /></Card>',
+          '}',
+        ].join('\n'),
+      );
+
+      const engine = new SourceHintEngine(new EventBus());
+      const input = makeHintInput({
+        domContext: {
+          tagName: 'div',
+          className: 'flex max-w-sm gap-4',
+          text: 'Sign in Enter your email and password below to log into your account',
+        },
+        project: {
+          metadata: {
+            projectId: 'test',
+            name: 't',
+            rootPath: tmpDir,
+            packageManager: 'pnpm',
+            language: 'ts',
+          },
+          componentIndex: { directories: ['src/components'] },
+        },
+      });
+      const result = await engine.generateHints(input);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const hints = result.value;
+        expect(hints.length).toBeGreaterThan(0);
+
+        // Log hints for debugging
+        console.log('Top 5 hints:');
+        hints.slice(0, 5).forEach((h, i) => {
+          console.log(
+            `  ${i + 1}. ${h.filePath} (${h.matchType}, exists=${h.exists}, conf=${h.confidence})`,
+          );
+        });
+
+        // Top hint should be the usage-site file
+        const topHint = hints[0]!;
+        expect(topHint.filePath).toContain('sign-in');
+        expect(topHint.matchType).toBe('usage-site');
+        expect(topHint.exists).toBe(true);
+        expect(topHint.reason).toContain('Usage-site');
+
+        // Usage-site hint should be at #1
+        const usageSiteIdx = hints.findIndex((h) => h.matchType === 'usage-site');
+        expect(usageSiteIdx).toBe(0);
+      }
+
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('generic component hints still appear below usage-site hint', async () => {
+      const tmpDir = join(tmpdir(), `viskod-she-generic-${Date.now()}`);
+      const compDir = join(tmpDir, 'src', 'components');
+      mkdirSync(compDir, { recursive: true });
+      writeFileSync(join(compDir, 'card.tsx'), 'export function Card() { return <div>Card</div> }');
+      writeFileSync(join(compDir, 'flex.tsx'), 'export function Flex() { return <div>Flex</div> }');
+
+      const usageDir = join(tmpDir, 'src', 'features', 'auth', 'sign-in');
+      mkdirSync(usageDir, { recursive: true });
+      writeFileSync(
+        join(usageDir, 'index.tsx'),
+        '// Sign in with Card\nimport { Card } from "./card"\nexport default function Page() { return <Card><h1>Sign in</h1></Card> }\n',
+      );
+
+      const engine = new SourceHintEngine(new EventBus());
+      const input = makeHintInput({
+        domContext: {
+          tagName: 'div',
+          className: 'flex max-w-sm gap-4',
+          text: 'Sign in Email Password submit account',
+        },
+        project: {
+          metadata: {
+            projectId: 'test',
+            name: 't',
+            rootPath: tmpDir,
+            packageManager: 'pnpm',
+            language: 'ts',
+          },
+          componentIndex: { directories: ['src/components'] },
+        },
+      });
+      const result = await engine.generateHints(input);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const hints = result.value;
+
+        const usageSiteIdx = hints.findIndex((h) => h.matchType === 'usage-site');
+        expect(usageSiteIdx).toBe(0);
+
+        // Generic hints still exist (flex.tsx, card.tsx)
+        const hasGeneric = hints.some((h) => h.matchType !== 'usage-site');
+        expect(hasGeneric).toBe(true);
+
+        // Generic hints are ranked after #1
+        const firstNonUsage = hints.findIndex((h) => h.matchType !== 'usage-site');
+        expect(firstNonUsage).toBeGreaterThan(0);
+      }
+
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+  });
+
   it('uses cache for repeated identical inputs', async () => {
     const engine = new SourceHintEngine(new EventBus());
     const input = makeHintInput({

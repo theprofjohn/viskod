@@ -240,11 +240,11 @@ function findUsageSiteCandidates(input: HintInput): UsageSiteCandidate[] {
   const rootPath = input.project.metadata.rootPath;
   const dirs = input.project.componentIndex?.directories ?? [];
   const dc = input.domContext;
-  if (!rootPath || dirs.length === 0) return candidates;
+  if (!rootPath || dirs.length === 0) return [];
 
   // Extract meaningful visible text from the DOM (skip short fragments)
   const visibleText = (dc.text || '').trim();
-  if (!visibleText || visibleText.length < 5) return candidates;
+  if (!visibleText || visibleText.length < 5) return [];
 
   // Collect significant phrases (exclude common Tailwind utility prefix words)
   const UTILITY_BLACKLIST = new Set([
@@ -458,7 +458,8 @@ function findUsageSiteCandidates(input: HintInput): UsageSiteCandidate[] {
             if (hasComponentRef) {
               seenPaths.add(relPath);
               const matchRatio = matchedWords.length / uniqueWords.length;
-              const confidence = 0.6 + matchRatio * 0.35;
+              // Base 0.9 to beat generic class-name exact matches (max 0.95)
+              const confidence = 0.9 + matchRatio * 0.09;
               candidates.push({
                 filePath: relPath,
                 reason: `Usage-site: file contains visible text "${matchedWords.slice(0, 3).join(', ')}"${componentNames.length > 0 ? ` and references ${componentNames[0]}` : ''}`,
@@ -730,7 +731,22 @@ export class SourceHintEngine {
         );
       }
 
-      scored.sort((a, b) => b.confidence - a.confidence);
+      // Sort by priority tier first, then confidence within tier
+      // Tiers: usage-site (0) > existing exact (1) > existing case-insensitive (2) > existing style (3) > generated (4)
+      const matchTypeTier: Record<string, number> = {
+        'usage-site': 0,
+        exact: 1,
+        'case-insensitive': 2,
+        'style-adjacent': 3,
+        generated: 4,
+        'generated-non-existing': 4,
+      };
+      scored.sort((a, b) => {
+        const tierA = matchTypeTier[a.matchType] ?? 99;
+        const tierB = matchTypeTier[b.matchType] ?? 99;
+        if (tierA !== tierB) return tierA - tierB;
+        return b.confidence - a.confidence;
+      });
 
       const deduped: SourceHint[] = [];
       const seenFilePaths = new Set<string>();

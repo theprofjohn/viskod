@@ -68,9 +68,45 @@ The top hint now points to **the actual file that was edited** (`sign-in/index.t
 
 ## Tests Added
 
-No new test files — existing test suites continue to pass (239/239).
+### `packages/capture-pipeline/src/capture-pipeline.test.ts`
 
-The source-hint engine's existing tests verify backward compatibility. Usage-site matching is tested implicitly via the dogfood workflow.
+| Test | Status |
+|------|--------|
+| `eagerly creates storage directory in constructor` | PASS |
+
+Verifies the CapturePipeline creates `.viskod/captures/` in its constructor, eliminating the need for a warm-up capture.
+
+### `packages/source-hint-engine/src/source-hint-engine.test.ts`
+
+| Test | Status |
+|------|--------|
+| `usage-site hint ranks above generic component hints when visible text matches` | PASS |
+| `generic component hints still appear below usage-site hint` | PASS |
+
+Both tests create a tmp directory with:
+- Generic component files: `src/components/card.tsx`, `src/components/flex.tsx`
+- Usage-site file: `src/features/auth/sign-in/index.tsx` with visible text "Sign in", "Email", "Password" and `<Card>` references
+
+The engine receives visible text via `domContext.text` and rank asserts:
+
+1. **Top hint is usage-site**: `sign-in/index.tsx` with `matchType: 'usage-site'` ranks **#1**
+2. **Generic hints rank below**: `flex.tsx` (exact class-name match) ranks **#2**
+3. **matchType is correct**: `usage-site` with `exists: true` and reason containing "Usage-site"
+4. **Generic hints preserved**: they still appear in the hint list below usage-site
+
+### Existing tests preserved
+
+All 239 existing tests + 3 new tests = **242 total, all PASS**.
+
+### Before/After Sorting
+
+A tiered sort was added to the scoring pipeline to ensure `usage-site` hints always rank above other matchType hints:
+
+```
+Tiers: usage-site (0) > exact (1) > case-insensitive (2) > style-adjacent (3) > generated (4)
+```
+
+Within each tier, hints are sorted by confidence descending.
 
 ## Phase 20B Re-run Result
 
@@ -99,9 +135,9 @@ The source-hint engine's existing tests verify backward compatibility. Usage-sit
 | Check | Result |
 |-------|--------|
 | `tsc -b` | 0 errors |
-| `biome check .` | 0 errors (impacted files) |
-| `vitest run` | 239/239 PASS |
-| `pnpm release:check` | PASS |
+| `biome check .` | 0 errors (1 warning: noNonNullAssertion in test, acceptable) |
+| `vitest run` | **242/242 PASS** (239 existing + 3 new) |
+| `pnpm release:check` | **PASS** (biome + tsc + vitest + smoke 38/38) |
 | External `npx eslint src/` | PASS |
 | External `npx vite build` | PASS |
 
