@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 12B Agent Loop App</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <h1>Phase 12B Agent Loop</h1>
+      <p>Controlled UI bug dogfood fixture</p>
+    </header>
+
+    <main class="app-main">
+      <!-- BUG: This card has spacing, alignment, and contrast issues -->
+      <div class="phase12-target-card">
+        <h2 class="card-title">Submit Your Feedback</h2>
+        <p class="card-description">Help us improve by sharing your experience with the agent loop feature.</p>
+        <div class="card-form">
+          <label class="form-label">Your Name</label>
+          <input type="text" class="form-input" placeholder="Enter your name" />
+
+          <label class="form-label">Rating</label>
+          <select class="form-select">
+            <option>Excellent</option>
+            <option>Good</option>
+            <option>Average</option>
+            <option>Poor</option>
+          </select>
+
+          <button class="form-button" id="phase12-submit-button">Submit Feedback</button>
+        </div>
+      </div>
+
+      <div class="phase12-target-card">
+        <h2 class="card-title">Activity Log</h2>
+        <div id="activity-log">
+          <p class="log-entry">Page loaded</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
