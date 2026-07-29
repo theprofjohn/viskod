@@ -18,6 +18,11 @@
       "type": "local",
       "command": ["npx", "@playwright/mcp@latest"],
       "enabled": true
+    },
+    "graphify": {
+      "type": "local",
+      "command": ["C:\\Users\\Acer\\.local\\bin\\graphify-mcp.exe", "graphify-out/graph.json"],
+      "enabled": true
     }
   }
 }
