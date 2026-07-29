@@ -31,6 +31,8 @@ export {
   truncateNetworkEntries,
   truncateSelectedElement,
 } from './evidence';
+export type { CaptureProfile, ProfileConfig } from './profiles';
+export { PROFILES, resolveProfile } from './profiles';
 
 export interface BrowserHandle {
   contextId: string;

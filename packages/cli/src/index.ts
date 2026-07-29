@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { BrowserRuntime } from '@viskod/browser-runtime';
+import { BrowserRuntime, resolveProfile } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
 import { VisualContextEngine } from '@viskod/context-engine';
 import { EventBus } from '@viskod/event-bus';
@@ -159,18 +159,29 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
   const selector = subArgs[0];
 
   if (!selector) {
-    console.error('Usage: viskod capture <selector> [--url <url>]');
+    console.error(
+      'Usage: viskod capture <selector> [--url <url>] [--profile <default|debug|audit>]',
+    );
     process.exit(1);
   }
 
   const urlIdx = subArgs.indexOf('--url');
   const targetUrl = urlIdx >= 0 ? (subArgs[urlIdx + 1] ?? 'http://localhost:3000') : undefined;
 
+  const profileIdx = subArgs.indexOf('--profile');
+  const profileName = profileIdx >= 0 ? (subArgs[profileIdx + 1] ?? 'default') : undefined;
+  const profile = profileName ? resolveProfile(profileName) : undefined;
+
+  if (profileName && !['default', 'debug', 'audit'].includes(profileName)) {
+    console.error(`Unknown profile "${profileName}". Valid values: default, debug, audit`);
+    process.exit(1);
+  }
+
   // Try to use existing session
   const sessionInfo = RuntimeSession.readSessionFile();
   if (sessionInfo && sessionInfo.status === 'running') {
     const client = new DaemonClient(sessionInfo.port, sessionInfo.token);
-    const result = await client.capture(selector, targetUrl);
+    const result = await client.capture(selector, targetUrl, profileName);
     if (result.ok) {
       const packet = result.value;
       console.log(
@@ -185,6 +196,7 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
             evidenceSources: packet.metadata.evidenceSources,
             processingTimeMs: packet.metadata.processingTimeMs,
             session: 'shared',
+            profile: profileName ?? 'default',
           },
           null,
           2,
@@ -252,7 +264,7 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
   }
 
   console.log('Capturing context...');
-  const result = await runtime.vce.generatePacket(selection);
+  const result = await runtime.vce.generatePacket(selection, profile);
   if (!result.ok) {
     console.error(`Capture failed: ${result.error.message}`);
     process.exit(1);
@@ -301,6 +313,11 @@ async function cmdServe(): Promise<void> {
         properties: {
           selector: { type: 'string', description: 'CSS selector for the element' },
           url: { type: 'string', description: 'URL to navigate to' },
+          profile: {
+            type: 'string',
+            description: 'Capture profile: default, debug, or audit (default: default)',
+            enum: ['default', 'debug', 'audit'],
+          },
         },
         required: ['selector'],
       },
@@ -308,6 +325,8 @@ async function cmdServe(): Promise<void> {
     async (args) => {
       const selector = args.selector as string;
       const url = args.url as string | undefined;
+      const profileName = (args.profile as string | undefined) ?? 'default';
+      const profile = resolveProfile(profileName);
 
       // Start session if not running
       if (!session.getStatus()) {
@@ -320,11 +339,9 @@ async function cmdServe(): Promise<void> {
             isError: true,
           };
         }
-      } else if (url && url !== session.getStatus()?.browserUrl) {
-        // Navigate to new URL within existing session
       }
 
-      const result = await session.capture(selector, url);
+      const result = await session.capture(selector, url, profile);
       if (!result.ok) {
         return {
           content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }],
@@ -347,6 +364,7 @@ async function cmdServe(): Promise<void> {
                 confidence: packet.confidence,
                 evidenceSources: packet.metadata.evidenceSources,
                 processingTimeMs: packet.metadata.processingTimeMs,
+                profile: profileName,
               },
               null,
               2,

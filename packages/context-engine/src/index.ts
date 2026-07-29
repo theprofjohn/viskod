@@ -9,8 +9,9 @@ import type {
   StyleSnapshot,
 } from '@viskod/browser-runtime';
 import {
-  DEFAULT_TRUNCATION,
+  type ProfileConfig,
   redactEvidence,
+  resolveProfile,
   truncateConsoleEntries,
   truncateNetworkEntries,
   truncateSelectedElement,
@@ -193,7 +194,10 @@ export class VisualContextEngine {
     return result;
   }
 
-  async generatePacket(selection?: SelectionTarget): Promise<Result<ContextPacket>> {
+  async generatePacket(
+    selection?: SelectionTarget,
+    profile?: ProfileConfig,
+  ): Promise<Result<ContextPacket>> {
     if (!this.currentHandle) {
       return err(this.vceError('VCE_NO_BROWSER', 'Browser not started'));
     }
@@ -221,6 +225,9 @@ export class VisualContextEngine {
       let browserHierarchy: ElementHierarchy | undefined;
 
       if (selection) {
+        // Resolve profile before collecting data
+        const p = profile ?? resolveProfile('default');
+
         // Use Selection Engine for hierarchy when available
         if (this.selectionEngine) {
           const selResult = await this.selectionEngine.validateSelection(selection);
@@ -262,43 +269,61 @@ export class VisualContextEngine {
         }
 
         const styleResult = await this.browserRuntime.getComputedStyles(handle, selection.selector);
-        if (styleResult.ok) styleSnapshot = styleResult.value;
+        if (styleResult.ok && p.collectStyles) styleSnapshot = styleResult.value;
 
         const captureResult = await this.browserRuntime.captureScreenshot(handle, 'selection');
-        if (captureResult.ok) captureScreenshot = captureResult.value;
+        if (captureResult.ok && p.collectScreenshot) captureScreenshot = captureResult.value;
 
-        // Collect runtime evidence
-        const consoleResult = await this.browserRuntime.captureConsoleLogs(handle);
-        const networkResult = await this.browserRuntime.captureNetworkRequests(handle);
+        // Collect runtime evidence based on profile
+        const rawEvidence: RuntimeEvidence = {};
+
+        if (p.collectConsole) {
+          const consoleResult = await this.browserRuntime.captureConsoleLogs(handle);
+          if (consoleResult.ok) rawEvidence.console = consoleResult.value;
+        }
+        if (p.collectNetwork) {
+          const networkResult = await this.browserRuntime.captureNetworkRequests(handle);
+          if (networkResult.ok) rawEvidence.network = networkResult.value;
+        }
+
         const elementResult = await this.browserRuntime.getSelectedElementInfo(
           handle,
           selection.selector,
         );
-
-        const rawEvidence: RuntimeEvidence = {};
-        if (consoleResult.ok) rawEvidence.console = consoleResult.value;
-        if (networkResult.ok) rawEvidence.network = networkResult.value;
-        if (elementResult.ok) rawEvidence.selectedElement = elementResult.value;
-
-        // Apply redaction
-        const { evidence: redactedEvidence, redactions: evidenceRedactions } =
-          redactEvidence(rawEvidence);
-        for (const r of evidenceRedactions) {
-          if (!redactions.includes(r)) redactions.push(r);
+        if (elementResult.ok && p.collectSelectedElement) {
+          rawEvidence.selectedElement = elementResult.value;
         }
 
-        // Apply truncation
-        const truncation = DEFAULT_TRUNCATION;
-        runtimeEvidence = {};
-        if (redactedEvidence.console)
-          runtimeEvidence.console = truncateConsoleEntries(redactedEvidence.console, truncation);
-        if (redactedEvidence.network)
-          runtimeEvidence.network = truncateNetworkEntries(redactedEvidence.network, truncation);
-        if (redactedEvidence.selectedElement)
-          runtimeEvidence.selectedElement = truncateSelectedElement(
-            redactedEvidence.selectedElement,
-            truncation,
-          );
+        // Apply redaction (unless explicitly disabled with unsafe flag)
+        const unsafe = p.enableRedaction === false;
+        if (unsafe) {
+          runtimeEvidence = rawEvidence;
+        } else {
+          const { evidence: redactedEvidence, redactions: evidenceRedactions } =
+            redactEvidence(rawEvidence);
+          for (const r of evidenceRedactions) {
+            if (!redactions.includes(r)) redactions.push(r);
+          }
+
+          // Apply truncation
+          const truncation = {
+            maxConsoleEntries: p.maxConsoleEntries,
+            maxNetworkEntries: p.maxNetworkEntries,
+            maxMessageLength: p.maxMessageLength,
+            maxUrlLength: 500,
+            maxAttributeLength: 500,
+          };
+          runtimeEvidence = {};
+          if (redactedEvidence.console)
+            runtimeEvidence.console = truncateConsoleEntries(redactedEvidence.console, truncation);
+          if (redactedEvidence.network)
+            runtimeEvidence.network = truncateNetworkEntries(redactedEvidence.network, truncation);
+          if (redactedEvidence.selectedElement)
+            runtimeEvidence.selectedElement = truncateSelectedElement(
+              redactedEvidence.selectedElement,
+              truncation,
+            );
+        }
 
         evidenceSources.push('browser-runtime:evidence');
       }

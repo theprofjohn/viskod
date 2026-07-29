@@ -1,4 +1,5 @@
 import * as net from 'node:net';
+import { resolveProfile } from '@viskod/browser-runtime';
 import { RuntimeSession } from './runtime-session';
 import type { DaemonRequest, DaemonResponse } from './types';
 
@@ -76,10 +77,12 @@ export class DaemonServer {
       case 'capture': {
         const selector = request.params?.selector as string | undefined;
         const url = request.params?.url as string | undefined;
+        const profileName = request.params?.profile as string | undefined;
         if (!selector) {
           return { id: request.id, error: { code: -32602, message: 'Missing selector' } };
         }
-        const result = await this.session.capture(selector, url);
+        const profile = profileName ? resolveProfile(profileName) : undefined;
+        const result = await this.session.capture(selector, url, profile);
         if (!result.ok) {
           return { id: request.id, error: { code: -32000, message: result.error.message } };
         }

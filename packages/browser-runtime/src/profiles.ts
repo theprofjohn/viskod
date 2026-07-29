@@ -53,7 +53,7 @@ export const PROFILES: Record<CaptureProfile, ProfileConfig> = {
     collectStyles: true,
     collectHierarchy: true,
     collectSourceHints: false,
-    enableRedaction: false,
+    enableRedaction: true,
     maxConsoleEntries: 500,
     maxNetworkEntries: 200,
     maxMessageLength: 10000,

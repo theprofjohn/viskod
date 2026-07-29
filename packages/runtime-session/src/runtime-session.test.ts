@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PROFILES } from '@viskod/browser-runtime';
 import { describe, expect, it } from 'vitest';
 import { SESSION_FILE } from './constants';
 import { DaemonClient } from './daemon-client';
@@ -171,5 +172,44 @@ describe('DaemonServer + DaemonClient', () => {
     const client = new DaemonClient(1, 'any-token');
     const result = await client.status();
     expect(result.ok).toBe(false);
+  });
+
+  it('capture accepts profile parameter', async () => {
+    const session = new RuntimeSession();
+    (session as unknown as { _info: ReturnType<typeof makeMockInfo> })._info = makeMockInfo({
+      token: 'profile-test-token',
+    });
+
+    // Capture with debug profile — should fail because no browser, but profile is accepted
+    const result = await session.capture('.foo', undefined, PROFILES.debug);
+    expect(result.ok).toBe(false);
+  });
+
+  it('capture backward compatible without profile', async () => {
+    const session = new RuntimeSession();
+    (session as unknown as { _info: ReturnType<typeof makeMockInfo> })._info = makeMockInfo({
+      token: 'back compat',
+    });
+
+    // Legacy call — no profile argument
+    const result = await session.capture('.foo');
+    expect(result.ok).toBe(false);
+  });
+
+  it('daemon capture passes profile', async () => {
+    const session = new RuntimeSession();
+    (session as unknown as { _info: ReturnType<typeof makeMockInfo> })._info = makeMockInfo({
+      token: 'daemon-profile-token',
+    });
+
+    const server = new DaemonServer(session);
+    const port = await server.start();
+    const client = new DaemonClient(port, 'daemon-profile-token');
+
+    // Captures with profile via daemon — fails because no browser, but profile accepted
+    const result = await client.capture('.btn', undefined, 'audit');
+    expect(result.ok).toBe(false);
+
+    await server.stop();
   });
 });

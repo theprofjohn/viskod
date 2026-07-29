@@ -1,4 +1,4 @@
-import { BrowserRuntime } from '@viskod/browser-runtime';
+import { BrowserRuntime, PROFILES } from '@viskod/browser-runtime';
 import { EventBus } from '@viskod/event-bus';
 import { SelectionEngine } from '@viskod/selection-engine';
 import { SourceHintEngine } from '@viskod/source-hint-engine';
@@ -101,5 +101,56 @@ describe('VisualContextEngine', () => {
     const vce = new VisualContextEngine({ browserRuntime: br, eventBus: bus });
     const result = await vce.stopBrowser();
     expect(result.ok).toBe(true);
+  });
+
+  it('generatePacket accepts profile and rejects without browser', async () => {
+    const bus = new EventBus();
+    const br = new BrowserRuntime(bus);
+    const vce = new VisualContextEngine({ browserRuntime: br, eventBus: bus });
+
+    // With default profile (no change from current behavior)
+    const r1 = await vce.generatePacket({
+      selector: '.foo',
+      boundingBox: { x: 0, y: 0, width: 100, height: 100 },
+      source: 'mcp',
+    });
+    expect(r1.ok).toBe(false);
+
+    // With debug profile
+    const r2 = await vce.generatePacket(
+      {
+        selector: '.foo',
+        boundingBox: { x: 0, y: 0, width: 100, height: 100 },
+        source: 'mcp',
+      },
+      PROFILES.debug,
+    );
+    expect(r2.ok).toBe(false);
+
+    // With audit profile
+    const r3 = await vce.generatePacket(
+      {
+        selector: '.foo',
+        boundingBox: { x: 0, y: 0, width: 100, height: 100 },
+        source: 'mcp',
+      },
+      PROFILES.audit,
+    );
+    expect(r3.ok).toBe(false);
+  });
+
+  it('generatePacket backward compatible without profile', async () => {
+    const bus = new EventBus();
+    const br = new BrowserRuntime(bus);
+    const vce = new VisualContextEngine({ browserRuntime: br, eventBus: bus });
+
+    // Legacy call — no profile argument
+    const result = await vce.generatePacket({
+      selector: '.foo',
+      boundingBox: { x: 0, y: 0, width: 100, height: 100 },
+      source: 'mcp',
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('Browser not started');
   });
 });

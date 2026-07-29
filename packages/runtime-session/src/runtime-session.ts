@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { type BrowserHandle, BrowserRuntime } from '@viskod/browser-runtime';
+import { type BrowserHandle, BrowserRuntime, type ProfileConfig } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
 import {
   type ContextPacket,
@@ -116,7 +116,11 @@ export class RuntimeSession {
     return ok(undefined);
   }
 
-  async capture(selector: string, targetUrl?: string): Promise<Result<ContextPacket>> {
+  async capture(
+    selector: string,
+    targetUrl?: string,
+    profile?: ProfileConfig,
+  ): Promise<Result<ContextPacket>> {
     if (this._info?.status !== 'running') {
       return err(
         this.sessionError('SESSION_NOT_STARTED', 'Session not running. Call start() first.'),
@@ -140,7 +144,7 @@ export class RuntimeSession {
       source: 'mcp',
     };
 
-    const result = await this.vce.generatePacket(selection);
+    const result = await this.vce.generatePacket(selection, profile);
     if (!result.ok) {
       return err(
         this.sessionError('SESSION_CAPTURE_FAILED', `Capture failed: ${result.error.message}`),
