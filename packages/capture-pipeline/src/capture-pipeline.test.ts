@@ -1,9 +1,10 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CapturePipeline } from './index';
 
-const TEST_DIR = path.join(process.cwd(), '.viskod-test-capture-pipeline');
+const TEST_DIR = path.join(os.tmpdir(), `.viskod-test-capture-pipeline-${Date.now()}`);
 
 describe('CapturePipeline', () => {
   let pipeline: CapturePipeline;
@@ -19,7 +20,11 @@ describe('CapturePipeline', () => {
 
   function cleanupTestDir() {
     if (fs.existsSync(TEST_DIR)) {
-      fs.rmSync(TEST_DIR, { recursive: true, force: true });
+      try {
+        fs.rmSync(TEST_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      } catch {
+        // Best-effort cleanup on Windows file-lock races
+      }
     }
   }
 
@@ -217,6 +222,82 @@ describe('CapturePipeline', () => {
     it('rejects negative retention days', async () => {
       const deleted = await pipeline.runRetentionCleanup(-1);
       expect(deleted.ok).toBe(false);
+    });
+  });
+
+  describe('packet persistence', () => {
+    it('persists packet.json when packetJson is provided', async () => {
+      const packetData = {
+        packetId: crypto.randomUUID(),
+        packetJson: JSON.stringify({
+          packetId: 'test-packet',
+          runtimeEvidence: {
+            console: [{ level: 'error', message: 'test error', timestamp: 'now' }],
+          },
+        }),
+      };
+      const result = await pipeline.persistCapture(
+        packetData,
+        [
+          {
+            captureId: crypto.randomUUID(),
+            type: 'viewport' as const,
+            buffer: Buffer.alloc(64),
+            format: 'png' as const,
+            width: 10,
+            height: 10,
+          },
+        ],
+        'http://localhost:3000',
+        { width: 1280, height: 720 },
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const packetJsonPath = path.join(result.value.captureDir, 'packet.json');
+        expect(fs.existsSync(packetJsonPath)).toBe(true);
+        const contents = JSON.parse(fs.readFileSync(packetJsonPath, 'utf-8'));
+        expect(contents.runtimeEvidence.console[0].message).toBe('test error');
+        expect(result.value.packetFilePath).toBe(packetJsonPath);
+      }
+    });
+
+    it('allows zero screenshots (audit profile)', async () => {
+      const result = await pipeline.persistCapture(
+        { packetId: crypto.randomUUID(), packetJson: '{"test":true}' },
+        [],
+        'http://localhost:3000',
+        { width: 1280, height: 720 },
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.screenshotCount).toBe(0);
+        expect(fs.existsSync(path.join(result.value.captureDir, 'packet.json'))).toBe(true);
+        expect(fs.existsSync(result.value.captureDir)).toBe(true);
+      }
+    });
+
+    it('no .tmp files remain after successful persist', async () => {
+      const result = await pipeline.persistCapture(
+        { packetId: crypto.randomUUID() },
+        [
+          {
+            captureId: crypto.randomUUID(),
+            type: 'viewport' as const,
+            buffer: Buffer.alloc(64),
+            format: 'png' as const,
+            width: 10,
+            height: 10,
+          },
+        ],
+        'http://localhost:3000',
+        { width: 1280, height: 720 },
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const entries = fs.readdirSync(result.value.captureDir);
+        const tmpFiles = entries.filter((e) => e.endsWith('.tmp'));
+        expect(tmpFiles).toHaveLength(0);
+      }
     });
   });
 });

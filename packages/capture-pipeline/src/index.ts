@@ -28,6 +28,7 @@ export interface StoredCapture {
   tags?: string[];
   page: { url: string; viewport: { width: number; height: number } };
   captureDir: string;
+  packetFilePath?: string;
 }
 
 export interface CaptureFilter {
@@ -76,7 +77,7 @@ export class CapturePipeline {
   }
 
   async persistCapture(
-    packet: { packetId: string },
+    packet: { packetId: string; packetJson?: string },
     screenshots: Screenshot[],
     pageUrl: string,
     viewport: { width: number; height: number },
@@ -85,12 +86,6 @@ export class CapturePipeline {
 
     if (!this.validateCaptureId(captureId)) {
       return err(this.cpError('CP_INVALID_CAPTURE_ID', `Invalid capture ID: ${captureId}`));
-    }
-
-    if (screenshots.length === 0) {
-      return err(
-        this.cpError('CP_NO_SCREENSHOTS', 'persistCapture requires at least one screenshot'),
-      );
     }
 
     const availableSpace = this.getAvailableSpace();
@@ -153,11 +148,31 @@ export class CapturePipeline {
       try {
         fs.writeFileSync(tempPath, JSON.stringify(metadata, null, 2), 'utf-8');
         fs.renameSync(tempPath, metadataPath);
+        // Safety: remove any leftover .tmp (shouldn't exist after successful rename)
+        try {
+          if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+        } catch {
+          // best-effort
+        }
       } catch (writeError) {
         this.cleanup(captureDir);
         return err(
           this.cpError('CP_WRITE_FAILED', `Failed to write metadata: ${String(writeError)}`),
         );
+      }
+
+      // Persist full packet JSON when provided
+      let packetFilePath: string | undefined;
+      if (packet.packetJson) {
+        packetFilePath = path.join(captureDir, 'packet.json');
+        try {
+          fs.writeFileSync(packetFilePath, packet.packetJson, 'utf-8');
+        } catch (writeError) {
+          this.cleanup(captureDir);
+          return err(
+            this.cpError('CP_WRITE_FAILED', `Failed to write packet.json: ${String(writeError)}`),
+          );
+        }
       }
 
       const stored: StoredCapture = {
@@ -168,6 +183,7 @@ export class CapturePipeline {
         totalSizeBytes,
         page: { url: pageUrl, viewport },
         captureDir,
+        packetFilePath,
       };
 
       return ok(stored);
@@ -414,6 +430,17 @@ export class CapturePipeline {
   private cleanup(dir: string): void {
     try {
       if (fs.existsSync(dir)) {
+        // Clean up any stray .tmp files before recursive removal
+        try {
+          const entries = fs.readdirSync(dir);
+          for (const entry of entries) {
+            if (entry.endsWith('.tmp')) {
+              fs.rmSync(path.join(dir, entry), { force: true });
+            }
+          }
+        } catch {
+          // best-effort stray cleanup
+        }
         fs.rmSync(dir, { recursive: true, force: true });
       }
     } catch {

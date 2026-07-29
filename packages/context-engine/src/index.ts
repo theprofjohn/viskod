@@ -482,24 +482,28 @@ export class VisualContextEngine {
       };
 
       // Persist via Capture Pipeline
-      if (this.capturePipeline && captureScreenshot) {
+      if (this.capturePipeline) {
         try {
+          const screenshotsForPersist = captureScreenshot
+            ? [
+                {
+                  captureId: captureScreenshot.captureId,
+                  type: 'selection' as const,
+                  buffer: captureScreenshot.buffer,
+                  format: captureScreenshot.format as 'png',
+                  width: captureScreenshot.width,
+                  height: captureScreenshot.height,
+                },
+              ]
+            : [];
+
           const persistResult = await this.capturePipeline.persistCapture(
-            { packetId: packet.packetId },
-            [
-              {
-                captureId: captureScreenshot.captureId,
-                type: 'selection' as const,
-                buffer: captureScreenshot.buffer,
-                format: captureScreenshot.format as 'png',
-                width: captureScreenshot.width,
-                height: captureScreenshot.height,
-              },
-            ],
+            { packetId: packet.packetId, packetJson: JSON.stringify(packet, null, 2) },
+            screenshotsForPersist,
             packet.browser.url,
             packet.browser.viewport,
           );
-          if (persistResult.ok) {
+          if (persistResult.ok && screenshotsForPersist.length > 0) {
             const absoluteDir = persistResult.value.captureDir;
             const projectRoot = this.projectScan?.rootPath;
             const relativeDir = projectRoot ? path.relative(projectRoot, absoluteDir) : absoluteDir;

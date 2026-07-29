@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "viskod": "tsx packages/cli/src/index.ts",
     "dev": "pnpm -r dev",
     "build": "pnpm -r build",
     "test": "vitest run",
