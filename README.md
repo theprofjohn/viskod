@@ -311,6 +311,25 @@ Review `MEMORY.md` before introducing architectural changes.
 
 ---
 
+# MCP Agent Workflow
+
+Viskod exposes two MCP tools for AI coding agents: `capture_context` and `recapture_context`.
+
+The standard workflow:
+
+1. **Start** `pnpm viskod serve --url <APP_URL>`
+2. **Capture** `capture_context(selector, url, profile: "debug")` → receive a brief with source hints
+3. **Fix** the issue in the identified source file
+4. **Re-capture** `recapture_context(previousPacketPath, reload: true, cacheBust: true)` → verify with `comparisonSummary`
+
+Detailed guides:
+- [Quickstart](QUICKSTART_MCP.md) — 8-step walkthrough from install to verified fix
+- [Agent Workflow](AGENT_WORKFLOW.md) — tool usage, profile guidance, comparison interpretation
+- [MCP Config Examples](examples/mcp-configs/) — OpenCode, Cursor, and Claude Desktop templates
+- [Agent Prompt Template](examples/agent-workflows/prompts/fix-visual-issue.md) — copy-paste prompt for coding agents
+
+---
+
 # Documentation
 
 The architecture documentation baseline is frozen at v1.0 (score: 94/100).

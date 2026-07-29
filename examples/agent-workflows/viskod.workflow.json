@@ -1,0 +1,75 @@
+{
+  "workflow": "viskod-capture-fix-verify",
+  "version": "1.0.0",
+  "description": "Capture UI context, fix a visual issue, and verify via comparison recapture",
+  "requiredTools": ["capture_context", "recapture_context"],
+  "recommendedCallSequence": [
+    {
+      "step": 1,
+      "tool": "capture_context",
+      "purpose": "Capture the current visual state of the target element",
+      "inputExample": {
+        "selector": ".target-card",
+        "url": "http://localhost:3000",
+        "profile": "debug",
+        "projectPath": "./my-app"
+      },
+      "outputFieldsToInspect": [
+        "packetPath",
+        "captureDir",
+        "brief",
+        "sourceHintCount",
+        "runtimeEvidenceSummary"
+      ]
+    },
+    {
+      "step": 2,
+      "action": "edit-source",
+      "purpose": "Edit the source file identified by the highest-confidence existing source hint"
+    },
+    {
+      "step": 3,
+      "tool": "recapture_context",
+      "purpose": "Re-capture the same element after the fix and compare against the previous capture",
+      "inputExample": {
+        "selector": ".target-card",
+        "url": "http://localhost:3000",
+        "profile": "default",
+        "projectPath": "./my-app",
+        "previousPacketPath": "<packetPath from step 1>",
+        "reload": true,
+        "cacheBust": true
+      },
+      "outputFieldsToInspect": [
+        "packetPath",
+        "captureDir",
+        "brief",
+        "comparisonSummary.boundingBoxDelta",
+        "comparisonSummary.areaDelta",
+        "comparisonSummary.evidenceDelta",
+        "comparisonSummary.changedFields",
+        "comparisonSummary.verdict",
+        "comparisonSummary.notes"
+      ]
+    }
+  ],
+  "safetyNotes": [
+    "Never output redacted values. If a value appears as [REDACTED] or [TOKEN_REDACTED], treat it as sensitive.",
+    "Do not modify files outside the project scope (node_modules, .git, system files).",
+    "Always pass reload:true and cacheBust:true to recapture_context after local file edits.",
+    "The packetPath from capture_context must be saved and passed as previousPacketPath to recapture_context.",
+    "Use profile:'debug' for initial capture (max info) and profile:'default' for recapture (comparison focus)."
+  ],
+  "validationChecklist": [
+    "capture_context returned packetPath (non-empty string)",
+    "capture_context returned captureDir (non-empty string)",
+    "capture_context returned brief (non-empty string)",
+    "capture_context returned sourceHintCount >= 0",
+    "recapture_context returned comparisonSummary (non-null object)",
+    "comparisonSummary.boundingBoxDelta has before/after/delta for x, y, width, height",
+    "comparisonSummary.areaDelta has percentChange (number)",
+    "comparisonSummary.changedFields is a non-empty array if layout changed",
+    "comparisonSummary.verdict is one of: improved, changed, unchanged, regressed, unknown",
+    "No daemon-token or sessionToken appears in any output"
+  ]
+}

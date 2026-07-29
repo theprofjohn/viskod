@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "viskod": {
+      "command": "pnpm",
+      "args": [
+        "--dir",
+        "<REPO_PATH>",
+        "exec",
+        "tsx",
+        "packages/cli/src/index.ts",
+        "serve",
+        "--url",
+        "http://localhost:3000"
+      ],
+      "env": {}
+    }
+  }
+}
