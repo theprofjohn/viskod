@@ -177,6 +177,9 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
     process.exit(1);
   }
 
+  const projectPathIdx = subArgs.indexOf('--project-path');
+  const projectPath = projectPathIdx >= 0 ? subArgs[projectPathIdx + 1] : undefined;
+
   // Try to use existing session
   const sessionInfo = RuntimeSession.readSessionFile();
   if (sessionInfo && sessionInfo.status === 'running') {
@@ -226,7 +229,7 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const scanResult = await runtime.projectScanner.scan();
+  const scanResult = await runtime.projectScanner.scan(projectPath);
   if (scanResult.ok) {
     const s = scanResult.value;
     runtime.vce.setProjectContext({
@@ -488,6 +491,7 @@ Examples:
   viskod start http://localhost:5173
   viskod capture ".dashboard-header"
   viskod capture "#my-button" --url http://localhost:5173
+  viskod capture ".card" --project-path ./my-app
   viskod serve --url http://localhost:3000`);
 }
 

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 12C Source Hint Validation</title>
+  <link rel="stylesheet" href="/src/components/TargetCard.css">
+  <style>
+    *,*::before,*::after{box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;padding:20px;background:#f0f2f5}
+    .app-container{max-width:640px;margin:0 auto}
+    .app-header{text-align:center;margin-bottom:24px}
+    .app-header h1{margin:0 0 4px;font-size:24px;color:#1a1a2e}
+    .app-header p{margin:0;color:#666;font-size:14px}
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <h1>Phase 12C Source Hint Validation</h1>
+      <p>Testing source hint agent loop</p>
+    </header>
+    <main>
+      <!-- TargetCard component -->
+      <div class="target-card" id="source-target-card">
+        <h2 class="target-card-title">Phase 12C Source Hint Target</h2>
+        <p class="target-card-description">
+          This card is the target for source hint validation. Select it with .phase12-source-target-card.
+        </p>
+        <button class="target-card-button" id="phase12-source-submit-button">Submit</button>
+      </div>
+    </main>
+  </div>
+  <script src="/src/main.js"></script>
+</body>
+</html>
