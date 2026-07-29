@@ -21,26 +21,28 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "baseUrl": ".",
-    "paths": {
-      "@viskod/shared": ["./packages/shared/src/index.ts"],
-      "@viskod/event-bus": ["./packages/event-bus/src/index.ts"],
-      "@viskod/browser-runtime": ["./packages/browser-runtime/src/index.ts"],
-      "@viskod/capture-pipeline": ["./packages/capture-pipeline/src/index.ts"],
-      "@viskod/overlay-system": ["./packages/overlay-system/src/index.ts"],
-      "@viskod/context-engine": ["./packages/context-engine/src/index.ts"],
-      "@viskod/config": ["./packages/config/src/index.ts"],
-      "@viskod/selection-engine": ["./packages/selection-engine/src/index.ts"],
-      "@viskod/project-scanner": ["./packages/project-scanner/src/index.ts"],
-      "@viskod/source-hint-engine": ["./packages/source-hint-engine/src/index.ts"],
-      "@viskod/mcp-server": ["./packages/mcp-server/src/index.ts"],
-      "@viskod/cli": ["./packages/cli/src/index.ts"],
-      "@viskod/diagnostics": ["./packages/diagnostics/src/index.ts"],
-      "@viskod/sdk": ["./packages/sdk/src/index.ts"],
-      "@viskod/plugin-system": ["./packages/plugin-system/src/index.ts"],
-      "@viskod/permissions": ["./packages/permissions/src/index.ts"],
-      "@viskod/audit": ["./packages/audit/src/index.ts"],
-      "@viskod/workspace": ["./packages/workspace/src/index.ts"],
-      "@viskod/runtime-session": ["./packages/runtime-session/src/index.ts"]
-    }
-  }
+    "paths": {}
+  },
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/event-bus" },
+    { "path": "./packages/config" },
+    { "path": "./packages/browser-runtime" },
+    { "path": "./packages/capture-pipeline" },
+    { "path": "./packages/overlay-system" },
+    { "path": "./packages/context-engine" },
+    { "path": "./packages/selection-engine" },
+    { "path": "./packages/project-scanner" },
+    { "path": "./packages/source-hint-engine" },
+    { "path": "./packages/mcp-server" },
+    { "path": "./packages/cli" },
+    { "path": "./packages/diagnostics" },
+    { "path": "./packages/sdk" },
+    { "path": "./packages/plugin-system" },
+    { "path": "./packages/permissions" },
+    { "path": "./packages/audit" },
+    { "path": "./packages/workspace" },
+    { "path": "./packages/runtime-session" },
+    { "path": "./apps/studio" }
+  ]
 }

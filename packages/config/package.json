@@ -12,5 +12,8 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@viskod/shared": "workspace:*"
+  }
 }

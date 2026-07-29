@@ -1,6 +1,43 @@
 {
   "include": ["src"],
-  "compilerOptions": { "rootDir": "./src", "outDir": "./dist" },
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist"
+  },
   "extends": "../../tsconfig.json",
-  "references": []
+  "references": [
+    {
+      "path": "../shared"
+    },
+    {
+      "path": "../event-bus"
+    },
+    {
+      "path": "../browser-runtime"
+    },
+    {
+      "path": "../capture-pipeline"
+    },
+    {
+      "path": "../context-engine"
+    },
+    {
+      "path": "../selection-engine"
+    },
+    {
+      "path": "../project-scanner"
+    },
+    {
+      "path": "../source-hint-engine"
+    },
+    {
+      "path": "../mcp-server"
+    },
+    {
+      "path": "../config"
+    },
+    {
+      "path": "../runtime-session"
+    }
+  ]
 }

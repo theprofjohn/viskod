@@ -5,5 +5,12 @@
     "outDir": "./dist"
   },
   "extends": "../../tsconfig.json",
-  "references": []
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/event-bus" },
+    { "path": "../../packages/browser-runtime" },
+    { "path": "../../packages/capture-pipeline" },
+    { "path": "../../packages/context-engine" },
+    { "path": "../../packages/selection-engine" }
+  ]
 }

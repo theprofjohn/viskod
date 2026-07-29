@@ -38,22 +38,234 @@ importers:
       '@viskod/event-bus':
         specifier: workspace:*
         version: link:../../packages/event-bus
+      '@viskod/selection-engine':
+        specifier: workspace:*
+        version: link:../../packages/selection-engine
       '@viskod/shared':
         specifier: workspace:*
         version: link:../../packages/shared
 
-  packages/browser-runtime: {}
+  packages/audit:
+    dependencies:
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
 
-  packages/capture-pipeline: {}
+  packages/browser-runtime:
+    dependencies:
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      playwright:
+        specifier: ^1.46.0
+        version: 1.62.0
 
-  packages/config: {}
+  packages/capture-pipeline:
+    dependencies:
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
 
-  packages/context-engine: {}
+  packages/cli:
+    dependencies:
+      '@viskod/browser-runtime':
+        specifier: workspace:*
+        version: link:../browser-runtime
+      '@viskod/capture-pipeline':
+        specifier: workspace:*
+        version: link:../capture-pipeline
+      '@viskod/config':
+        specifier: workspace:*
+        version: link:../config
+      '@viskod/context-engine':
+        specifier: workspace:*
+        version: link:../context-engine
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
+      '@viskod/project-scanner':
+        specifier: workspace:*
+        version: link:../project-scanner
+      '@viskod/runtime-session':
+        specifier: workspace:*
+        version: link:../runtime-session
+      '@viskod/selection-engine':
+        specifier: workspace:*
+        version: link:../selection-engine
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@viskod/source-hint-engine':
+        specifier: workspace:*
+        version: link:../source-hint-engine
 
-  packages/event-bus: {}
+  packages/config:
+    dependencies:
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/context-engine:
+    dependencies:
+      '@viskod/browser-runtime':
+        specifier: workspace:*
+        version: link:../browser-runtime
+      '@viskod/capture-pipeline':
+        specifier: workspace:*
+        version: link:../capture-pipeline
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/selection-engine':
+        specifier: workspace:*
+        version: link:../selection-engine
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@viskod/source-hint-engine':
+        specifier: workspace:*
+        version: link:../source-hint-engine
+
+  packages/diagnostics:
+    dependencies:
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/event-bus:
+    dependencies:
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/mcp-server:
+    dependencies:
+      '@viskod/browser-runtime':
+        specifier: workspace:*
+        version: link:../browser-runtime
+      '@viskod/capture-pipeline':
+        specifier: workspace:*
+        version: link:../capture-pipeline
+      '@viskod/config':
+        specifier: workspace:*
+        version: link:../config
+      '@viskod/context-engine':
+        specifier: workspace:*
+        version: link:../context-engine
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/project-scanner':
+        specifier: workspace:*
+        version: link:../project-scanner
+      '@viskod/selection-engine':
+        specifier: workspace:*
+        version: link:../selection-engine
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@viskod/source-hint-engine':
+        specifier: workspace:*
+        version: link:../source-hint-engine
 
   packages/overlay-system:
     dependencies:
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/permissions:
+    dependencies:
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/plugin-system:
+    dependencies:
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/project-scanner:
+    dependencies:
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/runtime-session:
+    dependencies:
+      '@viskod/browser-runtime':
+        specifier: workspace:*
+        version: link:../browser-runtime
+      '@viskod/capture-pipeline':
+        specifier: workspace:*
+        version: link:../capture-pipeline
+      '@viskod/context-engine':
+        specifier: workspace:*
+        version: link:../context-engine
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/project-scanner':
+        specifier: workspace:*
+        version: link:../project-scanner
+      '@viskod/selection-engine':
+        specifier: workspace:*
+        version: link:../selection-engine
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@viskod/source-hint-engine':
+        specifier: workspace:*
+        version: link:../source-hint-engine
+
+  packages/sdk:
+    dependencies:
+      '@viskod/browser-runtime':
+        specifier: workspace:*
+        version: link:../browser-runtime
+      '@viskod/capture-pipeline':
+        specifier: workspace:*
+        version: link:../capture-pipeline
+      '@viskod/context-engine':
+        specifier: workspace:*
+        version: link:../context-engine
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/project-scanner':
+        specifier: workspace:*
+        version: link:../project-scanner
+      '@viskod/selection-engine':
+        specifier: workspace:*
+        version: link:../selection-engine
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@viskod/source-hint-engine':
+        specifier: workspace:*
+        version: link:../source-hint-engine
+
+  packages/selection-engine:
+    dependencies:
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
       '@viskod/shared':
         specifier: workspace:*
         version: link:../shared
@@ -63,6 +275,21 @@ importers:
       zod:
         specifier: ^3.23.0
         version: 3.25.76
+
+  packages/source-hint-engine:
+    dependencies:
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/workspace:
+    dependencies:
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
 
 packages:
 
@@ -464,6 +691,11 @@ packages:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
 
+  fsevents@2.3.2:
+    resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
+
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -492,6 +724,16 @@ packages:
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
+
+  playwright-core@1.62.0:
+    resolution: {integrity: sha512-nsNRyq0r2zsG8AcRHWknc9QRA5XCueC7gWMrs+Gx2tlZn9hcl8zudfh00lhJPY1DE7NmZ6bDsT9g2yey8mXljA==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.62.0:
+    resolution: {integrity: sha512-Z14dG305dgaLu6foB1TXQagFiW8JfSUIUaUuPaKQ6NtBPKF1P/qXcqfh6c6K/icPqdy37JmjbiBXf6JNg6Sylw==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   postcss@8.5.24:
     resolution: {integrity: sha512-8RyVklq0owXUTa4xlpzu4l9AaVKIdQvAcOHZWaMh98HgySsUtxRVf/chRe3dsSLqb6i40BzGRzEUddRaI+9TSw==}
@@ -893,6 +1135,9 @@ snapshots:
 
   expect-type@1.4.0: {}
 
+  fsevents@2.3.2:
+    optional: true
+
   fsevents@2.3.3:
     optional: true
 
@@ -911,6 +1156,14 @@ snapshots:
   pathval@2.0.1: {}
 
   picocolors@1.1.1: {}
+
+  playwright-core@1.62.0: {}
+
+  playwright@1.62.0:
+    dependencies:
+      playwright-core: 1.62.0
+    optionalDependencies:
+      fsevents: 2.3.2
 
   postcss@8.5.24:
     dependencies:

@@ -24,6 +24,7 @@
     "@viskod/project-scanner": "workspace:*",
     "@viskod/source-hint-engine": "workspace:*",
     "@viskod/mcp-server": "workspace:*",
-    "@viskod/config": "workspace:*"
+    "@viskod/config": "workspace:*",
+    "@viskod/runtime-session": "workspace:*"
   }
 }

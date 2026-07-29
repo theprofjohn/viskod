@@ -13,5 +13,7 @@
     ".": "./src/index.ts"
   },
   "private": true,
-  "dependencies": {}
+  "dependencies": {
+    "@viskod/shared": "workspace:*"
+  }
 }

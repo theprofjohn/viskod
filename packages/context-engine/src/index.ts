@@ -76,6 +76,7 @@ interface ScreenshotInfo {
   height: number;
   format: string;
   sizeBytes: number;
+  captureDir?: string;
 }
 
 interface SourceHintEntry {
@@ -410,7 +411,7 @@ export class VisualContextEngine {
       // Persist via Capture Pipeline
       if (this.capturePipeline && captureScreenshot) {
         try {
-          await this.capturePipeline.persistCapture(
+          const persistResult = await this.capturePipeline.persistCapture(
             { packetId: packet.packetId },
             [
               {
@@ -425,6 +426,13 @@ export class VisualContextEngine {
             packet.browser.url,
             packet.browser.viewport,
           );
+          if (persistResult.ok) {
+            packet.screenshots = packet.screenshots.map((s) => ({
+              ...s,
+              captureDir: persistResult.value.captureDir,
+              path: `${s.type}.${s.format}`,
+            }));
+          }
         } catch {
           // Capture persistence is best-effort
         }

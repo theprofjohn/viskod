@@ -31,7 +31,7 @@ export class RuntimeSession {
     this.storageDir = storageDir ?? path.join(process.cwd(), STORAGE_DIR);
     this.eventBus = new EventBus({ enableHistory: true, historySize: 100 });
     this.browserRuntime = new BrowserRuntime(this.eventBus);
-    this.capturePipeline = new CapturePipeline(this.storageDir);
+    this.capturePipeline = new CapturePipeline(path.join(this.storageDir, 'captures'));
     this.selectionEngine = new SelectionEngine(this.eventBus);
     this.projectScanner = new ProjectScanner(this.eventBus);
     this.sourceHintEngine = new SourceHintEngine(this.eventBus);

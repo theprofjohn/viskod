@@ -18,6 +18,7 @@
     "@viskod/event-bus": "workspace:*",
     "@viskod/browser-runtime": "workspace:*",
     "@viskod/capture-pipeline": "workspace:*",
-    "@viskod/selection-engine": "workspace:*"
+    "@viskod/selection-engine": "workspace:*",
+    "@viskod/source-hint-engine": "workspace:*"
   }
 }

@@ -5,5 +5,24 @@
     "outDir": "./dist"
   },
   "extends": "../../tsconfig.json",
-  "references": []
+  "references": [
+    {
+      "path": "../shared"
+    },
+    {
+      "path": "../event-bus"
+    },
+    {
+      "path": "../browser-runtime"
+    },
+    {
+      "path": "../capture-pipeline"
+    },
+    {
+      "path": "../selection-engine"
+    },
+    {
+      "path": "../source-hint-engine"
+    }
+  ]
 }

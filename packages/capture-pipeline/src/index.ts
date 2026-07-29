@@ -27,6 +27,7 @@ export interface StoredCapture {
   retentionDays?: number;
   tags?: string[];
   page: { url: string; viewport: { width: number; height: number } };
+  captureDir: string;
 }
 
 export interface CaptureFilter {
@@ -166,6 +167,7 @@ export class CapturePipeline {
         screenshotCount: screenshots.length,
         totalSizeBytes,
         page: { url: pageUrl, viewport },
+        captureDir,
       };
 
       return ok(stored);
@@ -200,6 +202,7 @@ export class CapturePipeline {
         screenshotCount: meta.screenshots.length,
         totalSizeBytes: totalSize,
         page: meta.page,
+        captureDir,
       });
     } catch (parseError) {
       return err(
