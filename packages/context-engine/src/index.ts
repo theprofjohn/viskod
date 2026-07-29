@@ -126,6 +126,7 @@ export class VisualContextEngine {
   private failedCount = 0;
   private processingTimes: number[] = [];
   private isProcessingFromEvent = false;
+  private isGeneratingPacket = false;
   private projectScan: {
     projectId: string;
     name: string;
@@ -148,7 +149,7 @@ export class VisualContextEngine {
     });
 
     this.eventBus.subscribe('SE_EVENT:SELECTION_CHANGED', async (event: BaseEvent) => {
-      if (this.isProcessingFromEvent) return;
+      if (this.isProcessingFromEvent || this.isGeneratingPacket) return;
       this.isProcessingFromEvent = true;
       try {
         const payload = event.payload as { selectionId: string; selector: string };
@@ -198,10 +199,14 @@ export class VisualContextEngine {
     selection?: SelectionTarget,
     profile?: ProfileConfig,
   ): Promise<Result<ContextPacket>> {
+    if (this.isGeneratingPacket) {
+      return err(this.vceError('VCE_REENTRANT', 'generatePacket is not re-entrant'));
+    }
     if (!this.currentHandle) {
       return err(this.vceError('VCE_NO_BROWSER', 'Browser not started'));
     }
 
+    this.isGeneratingPacket = true;
     const startTime = Date.now();
     const packetId = crypto.randomUUID();
     const handle = this.currentHandle;
@@ -546,6 +551,8 @@ export class VisualContextEngine {
         payload: { error: String(error) },
       });
       return err(this.vceError('VCE_ASSEMBLY_FAILED', 'Unexpected error during packet generation'));
+    } finally {
+      this.isGeneratingPacket = false;
     }
   }
 

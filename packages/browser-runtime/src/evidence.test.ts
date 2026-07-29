@@ -106,13 +106,13 @@ describe('redaction', () => {
   it('redacts API keys from text', () => {
     const { text, redactions } = applyRedaction('api_key = sk-proj-abc123def456ghi789jkl');
     expect(text).toContain('[API_KEY_REDACTED]');
-    expect(redactions).toContain('api-key');
+    expect(redactions).toContain('api-key-assignment');
   });
 
   it('redacts secret patterns like password=value', () => {
     const { text, redactions } = applyRedaction('password = mySecretPassword123');
     expect(text).toContain('[SECRET_REDACTED]');
-    expect(redactions).toContain('secret');
+    expect(redactions).toContain('assign-secret');
   });
 
   it('redacts full evidence object', () => {
@@ -131,10 +131,10 @@ describe('redaction', () => {
     const { evidence: redacted, redactions } = redactEvidence(evidence);
     expect(first(redacted.console ?? []).message).toContain('[EMAIL_REDACTED]');
     expect(first(redacted.console ?? []).message).not.toContain('user@example.com');
-    expect(first(redacted.network ?? []).request.url).toContain('[API_KEY_REDACTED]');
+    expect(first(redacted.network ?? []).request.url).toContain('[REDACTED]');
     expect(redacted.selectedElement?.text).toContain('[EMAIL_REDACTED]');
     expect(redactions).toContain('email');
-    expect(redactions).toContain('api-key');
+    expect(redactions).toContain('query-param-sensitive');
   });
 
   it('redacts card numbers', () => {
@@ -207,8 +207,121 @@ describe('runtimeEvidence schema', () => {
 
   it('accepts empty evidence', () => {
     const evidence: RuntimeEvidence = {};
-    expect(evidence.console).toBeUndefined();
-    expect(evidence.network).toBeUndefined();
-    expect(evidence.selectedElement).toBeUndefined();
+    const { evidence: result } = redactEvidence(evidence);
+    expect(result.console).toBeUndefined();
+    expect(result.network).toBeUndefined();
+    expect(result.selectedElement).toBeUndefined();
+  });
+
+  it('redacts sk_test_123456 in console messages', () => {
+    const { text, redactions } = applyRedaction(
+      'VISKOD_SMOKE_ERROR: fake api key sk_test_123456 should be redacted',
+    );
+    expect(text).toContain('[API_KEY_REDACTED]');
+    expect(text).not.toContain('sk_test_123456');
+    expect(redactions).toContain('api-key');
+  });
+
+  it('redacts sk_live_ prefixed keys in console messages', () => {
+    const { text } = applyRedaction('leaked key: sk_live_ABCDEF1234567890');
+    expect(text).toContain('[API_KEY_REDACTED]');
+    expect(text).not.toContain('sk_live_');
+  });
+
+  it('redacts api key assignment pattern', () => {
+    const { text } = applyRedaction("api key 'sk_test_abc123def456' should be secret");
+    expect(text).toContain('[API_KEY_REDACTED]');
+    expect(text).not.toContain('sk_test_abc123def456');
+  });
+
+  it('redacts token= in URL query parameters', () => {
+    const { text } = applyRedaction(
+      'http://localhost:3000/api/missing?email=user@test.com&token=secret-token-123',
+    );
+    expect(text).toContain('[EMAIL_REDACTED]');
+    expect(text).toContain('[REDACTED]');
+    expect(text).not.toContain('secret-token-123');
+  });
+
+  it('redacts sensitive query parameters by name', () => {
+    const urls = [
+      'http://example.com?access_token=abc123',
+      'http://example.com?api_key=abc123',
+      'http://example.com?session=abc123',
+      'http://example.com?csrf=abc123',
+      'http://example.com?password=s3cret',
+    ];
+    for (const url of urls) {
+      const { text } = applyRedaction(url);
+      expect(text).toContain('[REDACTED]');
+      expect(text).not.toMatch(/=(?:abc123|s3cret)(?:&|$)/);
+    }
+  });
+
+  it('redacts console.stack recursively', () => {
+    const evidence: RuntimeEvidence = {
+      console: [
+        {
+          level: 'error',
+          message: 'error with sk_test_abcdef key',
+          timestamp: 'now',
+          stack: 'Error: key sk_test_xyzabc leaked in stack',
+        },
+      ],
+    };
+    const { evidence: result, redactions } = redactEvidence(evidence);
+    expect(result.console?.[0]?.message).toContain('[API_KEY_REDACTED]');
+    expect(result.console?.[0]?.stack).toContain('[API_KEY_REDACTED]');
+    expect(result.console?.[0]?.stack).not.toContain('sk_test_xyzabc');
+    expect(redactions).toContain('api-key');
+  });
+
+  it('redacts network statusText recursively', () => {
+    const evidence: RuntimeEvidence = {
+      network: [
+        {
+          request: { method: 'GET', url: 'http://example.com' },
+          response: { status: 401, statusText: 'Unauthorized: token=abc123' },
+          timestamp: 'now',
+        },
+      ],
+    };
+    const { evidence: result } = redactEvidence(evidence);
+    expect(result.network?.[0]?.response?.statusText).toContain('[SECRET_REDACTED]');
+    expect(result.network?.[0]?.response?.statusText).not.toContain('abc123');
+  });
+
+  it('full redaction of mixed evidence', () => {
+    const evidence: RuntimeEvidence = {
+      console: [
+        {
+          level: 'error',
+          message: 'VISKOD_SMOKE_ERROR: fake api key sk_test_123456 should be redacted',
+          timestamp: 'now',
+        },
+      ],
+      network: [
+        {
+          request: {
+            method: 'GET',
+            url: 'http://localhost:3000/api/missing?email=test@example.com&token=secret-token-123',
+          },
+          timestamp: 'now',
+        },
+      ],
+    };
+    const { evidence: result, redactions } = redactEvidence(evidence);
+    // Console
+    expect(result.console?.[0]?.message).toContain('[API_KEY_REDACTED]');
+    expect(result.console?.[0]?.message).not.toContain('sk_test_123456');
+    // Network URL
+    expect(result.network?.[0]?.request.url).toContain('[EMAIL_REDACTED]');
+    expect(result.network?.[0]?.request.url).not.toContain('test@example.com');
+    expect(result.network?.[0]?.request.url).toContain('[REDACTED]');
+    expect(result.network?.[0]?.request.url).not.toContain('secret-token-123');
+    // Evidence across multiple fields
+    expect(redactions).toContain('email');
+    expect(redactions).toContain('api-key');
+    expect(redactions).toContain('query-param-sensitive');
   });
 });

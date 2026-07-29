@@ -431,7 +431,7 @@ async function cmdStatus(): Promise<void> {
   const client = new DaemonClient(sessionInfo.port, sessionInfo.token);
   const result = await client.status();
   if (result.ok) {
-    console.log(JSON.stringify(result.value, null, 2));
+    console.log(JSON.stringify({ ...result.value, token: '[REDACTED]' }, null, 2));
   } else {
     console.log(`Session file found but daemon not reachable: ${result.error?.message}`);
     RuntimeSession.clearSessionFile();

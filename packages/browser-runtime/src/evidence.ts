@@ -3,6 +3,7 @@ export interface ConsoleEntry {
   message: string;
   timestamp: string;
   source?: string;
+  stack?: string;
 }
 
 export interface NetworkRequest {
@@ -57,7 +58,7 @@ export const DEFAULT_TRUNCATION: TruncationConfig = {
 
 export interface RedactionRule {
   pattern: RegExp;
-  replacement: string;
+  replacement: string | ((match: string) => string);
   label: string;
 }
 
@@ -68,18 +69,44 @@ const DEFAULT_RULES: RedactionRule[] = [
     label: 'email',
   },
   { pattern: /\b(?:\d{4}[- ]?){3}\d{4}\b/g, replacement: '[CARD_REDACTED]', label: 'card-number' },
+  // URL query parameters with sensitive names — must come before assign-secret
   {
     pattern:
-      /\b(?:sk-[A-Za-z0-9]{20,}|pk-[A-Za-z0-9]{20,}|api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9_\-]{16,})/gi,
+      /(?:[?&])(token|access_token|refresh_token|id_token|api_key|apikey|key|secret|password|session|csrf|auth|authorization)=[^&\s]{4,}/gi,
+    replacement: (match: string) => {
+      const eqIdx = match.indexOf('=');
+      return `${match.slice(0, eqIdx + 1)}[REDACTED]`;
+    },
+    label: 'query-param-sensitive',
+  },
+  // API keys: sk_test/sk_live/pk_test/pk_live with 3+ alphanumeric suffix
+  {
+    pattern:
+      /\b(?:sk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|pk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|sk-[A-Za-z0-9]{6,}|pk-[A-Za-z0-9]{6,})/gi,
     replacement: '[API_KEY_REDACTED]',
     label: 'api-key',
   },
+  // api_key = value, apikey: value, "api key": value
+  {
+    pattern: /\b(?:api[_-]?key|apikey)['"]?\s*[:=]\s*['"]?(?:[A-Za-z0-9_\-]{8,})/gi,
+    replacement: '[API_KEY_REDACTED]',
+    label: 'api-key-assignment',
+  },
+  // key=value / secret=value / password=value / token=value in text (not ?query)
   {
     pattern:
-      /\b(?:password|passwd|pwd|secret|bearer|auth)\s*[:=]\s*['"]?(?:[A-Za-z0-9_\-./]{8,})/gi,
+      /(?<![?&_\w])\b(?:secret|password|passwd|pwd|token|access_token|refresh_token|id_token|api_key|apikey)\s*[:=]\s*['"]?(?:[A-Za-z0-9_\-./]{4,})/gi,
     replacement: '[SECRET_REDACTED]',
-    label: 'secret',
+    label: 'assign-secret',
   },
+  // "token <value>", "secret <value>", "key <value>" in prose
+  {
+    pattern:
+      /\b(?:token|secret|password|passwd|pwd|bearer|auth)\s+['"]?(?:[A-Za-z0-9_\-./@#$%^&*+=-]{6,})/gi,
+    replacement: '[SECRET_REDACTED]',
+    label: 'inline-secret',
+  },
+  // Base64-like tokens (16+ base64 chars with padding)
   {
     pattern: /\b(?:[A-Za-z0-9+/]{16,})(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})\b/g,
     replacement: '[TOKEN_REDACTED]',
@@ -95,7 +122,10 @@ export function applyRedaction(
   const applied: string[] = [];
   let result = text;
   for (const rule of rules) {
-    const candidate = result.replace(rule.pattern, rule.replacement);
+    const candidate =
+      typeof rule.replacement === 'function'
+        ? result.replace(rule.pattern, rule.replacement as (match: string) => string)
+        : result.replace(rule.pattern, rule.replacement);
     if (candidate !== result) {
       if (!applied.includes(rule.label)) {
         applied.push(rule.label);
@@ -170,12 +200,32 @@ export function redactEvidence(
   const consoleEntries = evidence.console?.map((e) => {
     const { text, redactions } = applyRedaction(e.message, extraRules);
     for (const r of redactions) allRedactions.add(r);
-    return { ...e, message: text };
+    const stack = e.stack
+      ? (() => {
+          const { text: st, redactions: stRedactions } = applyRedaction(
+            e.stack as string,
+            extraRules,
+          );
+          for (const r of stRedactions) allRedactions.add(r);
+          return st;
+        })()
+      : undefined;
+    return { ...e, message: text, stack };
   });
 
   const networkEntries = evidence.network?.map((e) => {
     const { text: urlText, redactions: urlRedactions } = applyRedaction(e.request.url, extraRules);
     for (const r of urlRedactions) allRedactions.add(r);
+    const responseStatusText = e.response?.statusText
+      ? (() => {
+          const { text: st, redactions: stRedactions } = applyRedaction(
+            e.response?.statusText,
+            extraRules,
+          );
+          for (const r of stRedactions) allRedactions.add(r);
+          return st;
+        })()
+      : undefined;
     return {
       ...e,
       request: {
@@ -188,6 +238,7 @@ export function redactEvidence(
       response: e.response
         ? {
             ...e.response,
+            statusText: responseStatusText ?? e.response.statusText,
             headers: e.response.headers
               ? redactRecord(e.response.headers, extraRules, allRedactions)
               : undefined,
