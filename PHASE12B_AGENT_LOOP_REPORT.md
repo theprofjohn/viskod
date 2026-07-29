@@ -1,4 +1,4 @@
-# Phase 12B Agent Loop Dogfood Report
+# Phase 12B Agent Loop Dogfood Report (Corrected)
 
 **Date:** 2026-07-28
 
@@ -10,164 +10,165 @@
 
 | File | Purpose |
 |---|---|
-| `index.html` | Page with two cards — target card has form elements, second card shows activity log |
-| `styles.css` | **Intentionally broken** — 7 UI bugs (missing border, low contrast, uneven padding, full-width button, tight spacing, no flex layout, no focus styles) |
-| `app.js` | Console.error with fake API key (`sk_test_phase12_abc123`), failed fetch to `/api/phase12/submit` |
+| `index.html` | Page with two cards — target card has form elements and activity log |
+| `styles.css` | Intentionally broken (7 UI bugs) |
+| `app.js` | Console.error with fake API key + failed fetch |
 | `server.cjs` | Static file server with mock API endpoint returning 500 |
-| `README.md` | Setup and usage instructions |
 
-## Bug Description
+## Bugs
 
-The `.phase12-target-card` component had 7 visual/accessibility bugs:
-
-| # | Bug | CSS Property | Before | After |
-|---|---|---|---|---|
-| 1 | No visible boundary | `border` | none | `1px solid #e0e0e0` |
-| 2 | Uneven padding | `padding` | `12px 10px` | `20px` |
-| 3 | Low contrast description | `color` | `#999` (fails WCAG) | `#555` |
-| 4 | Full-width button | `width` | `100%` | `auto` (content width) |
-| 5 | No flex alignment | `display` | `block` | `flex` with `gap: 10px` |
-| 6 | Tight form spacing | `margin-bottom` | `4px` | `10px` (via flex gap) |
-| 7 | Missing focus style | `:focus-visible` | none | `outline: 2px solid` |
-
-Plus 2 runtime evidence markers:
-- Console: `VISKOD_SMOKE_ERROR: fake api key sk_test_phase12_abc123`
-- Network: Failed `POST /api/phase12/submit`
-
----
+1. Card has no visible border — blends into background
+2. Card padding uneven: `12px 10px` (tight sides)
+3. Description colour `#999` on white fails WCAG contrast
+4. Button `width: 100%` — fills entire container
+5. Form uses `display: block` instead of flex — no alignment control
+6. Form elements too tightly spaced (`margin-bottom: 4px`)
+7. No `:focus-visible` style for keyboard users
 
 ## Commands Run
 
-```powershell
+All captures used standalone mode (no daemon):
+
+```
 # Terminal 1 — fixture server
 node examples/phase12-agent-loop-app/server.cjs
 
-# Terminal 2 — before-fix captures (standalone)
-pnpm dlx tsx packages/cli/src/index.ts capture ".phase12-target-card" --profile default --url http://127.0.0.1:3000
-pnpm dlx tsx packages/cli/src/index.ts capture ".phase12-target-card" --profile debug --url http://127.0.0.1:3000
-pnpm dlx tsx packages/cli/src/index.ts capture ".phase12-target-card" --profile audit --url http://127.0.0.1:3000
-pnpm dlx tsx packages/cli/src/index.ts capture "#phase12-submit-button" --profile debug --url http://127.0.0.1:3000
+# Terminal 2 — 4 before-fix captures
+npx tsx packages/cli/src/index.ts capture ".phase12-target-card" --profile default --url http://127.0.0.1:3000
+npx tsx packages/cli/src/index.ts capture ".phase12-target-card" --profile debug --url http://127.0.0.1:3000
+npx tsx packages/cli/src/index.ts capture ".phase12-target-card" --profile audit --url http://127.0.0.1:3000
+npx tsx packages/cli/src/index.ts capture "#phase12-submit-button" --profile debug --url http://127.0.0.1:3000
 
-# Fix applied to styles.css
+# CSS fix applied to styles.css
 
-# After-fix captures
-pnpm dlx tsx packages/cli/src/index.ts capture ".phase12-target-card" --profile default --url http://127.0.0.1:3000
-pnpm dlx tsx packages/cli/src/index.ts capture "#phase12-submit-button" --profile debug --url http://127.0.0.1:3000
+# Terminal 2 — 2 after-fix captures
+npx tsx packages/cli/src/index.ts capture ".phase12-target-card" --profile default --url http://127.0.0.1:3000
+npx tsx packages/cli/src/index.ts capture "#phase12-submit-button" --profile debug --url http://127.0.0.1:3000
 ```
+
+**Total CLI invocations: 6. Total capture directories: 6. Total packet.json files: 6.**
 
 ---
 
-## Before/After Packet Comparison
+## Capture Directory Listing
 
-### Card Bounding Box
+| # | Label | Directory | packet.json | selection.png | .tmp files |
+|---|---|---|---|---|---|
+| 1 | card-default-before | `e787ca7e` | ✅ | ✅ | 0 |
+| 2 | card-debug-before | `422b701e` | ✅ | ✅ | 0 |
+| 3 | card-audit-before | `95e858f6` | ✅ | ❌ (0 screenshots) | 0 |
+| 4 | button-debug-before | `325693a4` | ✅ | ✅ | 0 |
+| 5 | card-default-after | `fc6332d3` | ✅ | ✅ | 0 |
+| 6 | button-debug-after | `26255b9d` | ✅ | ✅ | 0 |
 
-| Metric | Before (broken) | After (fixed) | Delta |
-|---|---|---|---|
-| `x` | 320 | 320 | 0 |
-| `y` | 99 | 99 | 0 |
-| `width` | 640 | 640 | 0 |
-| `height` | 244.89 | 303.5 | **+58.6px** (padding increase) |
+**No stray `.tmp` files. No orphan directories. Exactly 1 capture per CLI invocation.**
 
-### Button Bounding Box (key fix evidence)
+---
 
-| Metric | Before (broken) | After (fixed) | Delta |
-|---|---|---|---|
-| `x` | 330 | 341 | +11px (card padding increased from 10px to 20px) |
-| `width` | **620** | **163.9** | **-456px** (was full-width, now content-width) |
+## Evidence Collected Per Profile
 
-The width drop from 620px to 164px is the clearest signal that the `width: 100%` bug was fixed.
+| Profile | Console | Network | Screenshots | Source Hints | Redactions Applied |
+|---|---|---|---|---|---|
+| default (before) | 2 entries | 0 entries | ✅ 1 | 0 (empty) | none |
+| debug (before) | 2 entries | 4 entries | ✅ 1 | 0 (empty) | base64-token |
+| audit (before) | 2 entries | 4 entries | ❌ 0 | 0 (empty) | base64-token |
+| debug button (before) | 2 entries | 4 entries | ✅ 1 | 0 (empty) | base64-token |
+| default (after) | 2 entries | 0 entries | ✅ 1 | 0 (empty) | none |
+| debug button (after) | 2 entries | 4 entries | ✅ 1 | 0 (empty) | base64-token |
 
-### Evidence Collection
+**Source hints: field present but empty (`sourceHints: []`) for all captures.** The fixture app has no `components/` directory, so `SourceHintEngine` finds no candidates. This is expected behaviour.
 
-| Profile | Console | Network | Screenshot | Source Hints |
+---
+
+## Before/After Bounding Box Comparison
+
+### Card (`.phase12-target-card`)
+
+| Metric | Before (broken) | After (fixed) | Change | Root Cause |
 |---|---|---|---|---|
-| default | 2 entries | **0 entries** | ✅ | ✅ |
-| debug | 2 entries | **4 entries** | ✅ | ✅ |
-| audit | 2 entries | **4 entries** | ❌ (0) | ✅ |
+| `x` | 320 | 320 | — | — |
+| `y` | 99 | 99 | — | — |
+| `width` | 640 | 640 | — | — |
+| `height` | **246.89** | **303.50** | **+56.61px** | Padding increased from `12px 10px` to `20px`; flex `gap: 10px` added |
 
-### Redaction Verification
+### Button (`#phase12-submit-button`)
 
-Search across all 7 `packet.json` files:
+| Metric | Before (broken) | After (fixed) | Change | Root Cause |
+|---|---|---|---|---|
+| `x` | 330 | 341 | +11px | Card padding increased from 10px to 20px |
+| `y` | 297.89 | 345.50 | +47.61px | Card taller due to padding + flex gap |
+| `width` | **620** | **163.92** | **-456.08px** | `width: 100%` removed; `align-self: flex-start` added |
+| `height` | 36 | 36 | — | — |
+
+**The width drop from 620px to 164px is the primary fix signal.** The before packet proved the button filled the container; the after packet proved it now sizes to content.
+
+---
+
+## Redaction Verification
+
+Search across all 6 `packet.json` files:
 
 | Pattern | Matches | Status |
 |---|---|---|
-| `sk_test_phase12` | 0 | ✅ Redacted |
-| `test@example.com` | 0 | ✅ Redacted |
-| `secret-token` | 0 | ✅ Redacted |
+| `sk_test_phase12` | 0 | ✅ Redacted to `[API_KEY_REDACTED]` |
+| `test@example.com` | 0 | ✅ Redacted to `[EMAIL_REDACTED]` |
+| `secret-token` | 0 | ✅ Redacted (query param `api/missing?token=` → `[REDACTED]`) |
+
+Redactions applied: `api-key`, `email`, `query-param-sensitive`, `base64-token`.
+
+---
 
 ## Files Changed by the Fix
 
 **1 file modified:**
 
-`examples/phase12-agent-loop-app/styles.css` — all 7 bugs fixed.
+`examples/phase12-agent-loop-app/styles.css` — all 7 bugs fixed (border, padding, contrast, button width, flex layout, spacing, focus style).
+
+---
 
 ## What Viskod Helped With
 
-1. **DOM identification** — `.phase12-target-card` correctly resolved to the `<div>` with 3 children (title, description, form). Bounding box matched the visible card.
+1. **DOM identification** — `.phase12-target-card` resolved to correct `<div>` with 3 children. Bounding box matched the visible card position.
+2. **Button sizing evidence** — Before packet showed `width: 620` (full container). After packet showed `width: 164` (content-width). This proved the fix worked without visual inspection.
+3. **Console evidence** — Debug packets captured `VISKOD_SMOKE_ERROR` messages. API key was redacted to `[API_KEY_REDACTED]`.
+4. **Network evidence** — Debug/audit packets captured the failed `POST /api/phase12/submit` request with 4 network entries. URL was redacted.
+5. **Evidence source tracking** — `browser-runtime:evidence` in `evidenceSources` confirmed runtime evidence was collected.
+6. **Packet persistence** — All 6 captures produced `packet.json` with full `ContextPacket` including `runtimeEvidence`. No `.tmp` files.
 
-2. **Button sizing** — The before-fix debug packet proved `#phase12-submit-button` had `width: 620px` (full container width), confirming the `width: 100%` bug. After fix, `width: 164px` confirmed the fix worked. **This was the key evidence** — without the Context Packet, an AI agent would need to infer the button width from code alone.
+## What Viskod Did Not Help With
 
-3. **Console evidence** — Debug packet included `VISKOD_SMOKE_ERROR` messages with the fake API key. The key was properly redacted to `[API_KEY_REDACTED]` in the persisted `packet.json`.
-
-4. **Network evidence** — Debug packet captured the failed `POST /api/phase12/submit` request with 500 response. Network `url` was redacted in `packet.json`.
-
-5. **EvidenceSources** — The `browser-runtime:evidence` source confirmed runtime evidence was collected and attached.
-
-6. **Packet persistence** — All 7 captures produced `packet.json` with full `ContextPacket` including `runtimeEvidence`. No `.tmp` files remained.
+1. **Source hints were empty** — `sourceHints: []` in all packets. The fixture has no `components/` directory, so `SourceHintEngine` found no candidates. An AI agent would need to know the file path independently.
+2. **No CSS property suggestions** — Viskod reports the bounding box (button is 620px wide) but does not identify the CSS property causing it (`width: 100%`). The AI agent must read the source code to determine the fix. This is the intended architecture boundary.
+3. **Default profile omitted network evidence** — Network collection requires debug or audit profile. A default-only capture would miss the API failure URL.
+4. **No visual diff tool** — Before/after screenshots exist but Viskod provides no automated comparison. Manual inspection or external tooling is required.
 
 ## How the Fix Actually Happened
 
-The CSS fix was applied by reading the source code (`styles.css`) directly, not by the Context Packet alone. The fix process required both:
+The fix was applied by reading the source code directly. The Context Packet provided the *what* (button is 620px wide, card is 246.89px tall), but the *how* (remove `width: 100%`, add `align-self: flex-start`) required reading `styles.css`.
 
-| Step | Source of Truth | Tool |
+| Step | Source of Truth | Provided By |
 |---|---|---|
-| Identify broken element | Visual inspection of screenshot + packet `selection.boundingBox` | Viskod |
-| Confirm button is too wide | Packet `selection.boundingBox.width: 620px` (vs container 640px) | Viskod |
-| Pinpoint CSS property | Read `styles.css` line 104: `width: 100%` | Code read |
-| Apply fix | Remove `width: 100%`, add `align-self: flex-start` | Code edit |
-| Verify fix worked | Re-capture shows `width: 164px` | Viskod |
+| Which element is broken | Screenshot + packet `selection.boundingBox` | Viskod |
+| What is the visual issue | Button width = 620px in 640px container | Viskod |
+| Which CSS property causes it | Read `styles.css` line 104: `width: 100%` | Agent (code read) |
+| How to fix it | Remove `width: 100%`, add `align-self: flex-start` | Agent (domain knowledge) |
+| Did the fix work | Re-capture shows button width = 164px | Viskod |
 
-This is by design, not a limitation. Per [CLAUDE.md](../../CLAUDE.md):
+This matches the intended architecture: Viskod provides visual context; the AI agent owns code changes.
 
-> **Viskod provides context. Viskod does not own implementation.**
-> The AI coding agent is responsible for code changes.
-
-The intended agent loop is:
-1. Viskod captures visual evidence (screenshot, DOM, bounding box, runtime errors, network failures)
-2. AI agent uses the packet to understand *what* is broken
-3. AI agent reads the source code to determine *how* to fix it
-4. AI agent applies the fix
-5. Viskod re-captures to confirm the fix worked
-
-Without Viskod, the AI agent would need to guess the visual state from code alone.
-
-## What Viskod Failed to Help With
-
-1. **Source hints were not populated** — the project scanner has no `app.js` or `styles.css` in its `directories` list, so `SourceHintEngine` couldn't generate hints. The fixture app doesn't follow a framework convention (no components/ directory). This is expected — source hints need a real project structure.
-
-2. **No CSS property suggestions** — Viskod captures DOM and computed styles but doesn't suggest *what* to change. It provides evidence (button is 620px wide) but not the fix (remove `width: 100%`). The AI agent must read the source to determine the fix. This is the intended architecture boundary.
-
-3. **Default profile omitted network evidence** — The `VISKOD_FETCH_FAILED` message was in console (which default collects) but the network request detail was only in debug/audit profiles. A user running only default profile would miss the API failure URL.
-
-## Remaining Blockers
-
-| # | Issue | Priority |
-|---|---|---|
-| 1 | Source hints require framework-aware project structure | P2 |
-| 2 | No visual diff between before/after screenshots in CLI | P3 |
-| 3 | Capture re-launches browser each time (daemon not used in this test) | P2 |
+---
 
 ## Verdict
 
 **PASS.**
 
 The agent loop proved:
-- Viskod correctly identifies DOM elements with real bounding boxes
-- Debug profile collects meaningful console + network evidence
-- Redaction works — sensitive values never leaked to disk
-- After-fix captures confirmed all 7 UI bugs were addressed
-- The button width change (620px → 164px) provided measurable before/after evidence
-- No sensitive values persisted in any `packet.json`
-
-**Caveat:** the fix was applied by reading the source code directly, not by the Context Packet alone. This is expected — Viskod provides visual evidence (what's broken), but the AI agent must read the source to determine the fix (how to fix it). The evidence Viskod provided (button is 620px wide) eliminated the need to guess the visual state from code alone. Without Viskod, the agent would not know the button appeared full-width without running the app themselves.
-- No sensitive values persisted in any `packet.json`
+- 6 CLI invocations produced exactly 6 capture directories with 6 `packet.json` files
+- Bounding boxes correctly identified the broken UI (button 620px wide in 640px container)
+- Debug profile collected 2 console errors + 4 network entries
+- Redaction works — `sk_test_phase12`, `test@example.com`, `secret-token` all redacted
+- After-fix captures confirmed the fix: button width dropped from 620px to 164px
+- No `.tmp` files remained after any capture
+- Source hints correctly empty (no component directories in fixture)
+- Default profile correctly omitted network evidence (0 entries)
+- Audit profile correctly omitted screenshot artefact (0 screenshots)
