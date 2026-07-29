@@ -78,23 +78,43 @@ Primary: target-card.tsx  (confidence: 0.65)
 
 ## Did Source Hints Help Locate the File?
 
-**PARTIALLY.** The source hints pointed to `target-card.tsx` / `target-card.jsx` as file candidates, which would lead an agent to look in `src/components/`. The actual file was `TargetCard.jsx` — close enough that an agent would find it. However:
+**NOT USED.** The agent (OpenCode/AI) who performed the fix already knew the file paths because it created the fixture. The source hints were verified to be populated (10 candidates, primary `target-card.tsx`), but they were never consulted to navigate to the source file.
 
-- The hints are purely string-pattern-based — they don't check if the file actually exists on disk
-- Confidence is fixed at 0.65 for all `class-name-match` evidence — no distinction between likely and unlikely candidates
-- The agent must still scan the directory to find the exact filename (`TargetCard.jsx` vs `target-card.jsx`)
-- The `--project-path` flag was required to point the scanner at the fixture
+This is a methodological gap in the dogfood design, not a source hint failure. A genuine agent loop would require an agent that does not already know the codebase.
 
-## How the Agent Would Use Source Hints
+## How the Agent Actually Used Source Hints
 
-| Step | Evidence Used | Source |
+The agent did not use source hints. Here is what actually happened:
+
+| Step | How It Was Done | Evidence Used |
 |---|---|---|
-| Which element is broken | `selection.boundingBox` width: 624px | Viskod packet |
-| What component owns it | Source hint `target-card.jsx` suggests `src/components/` | Viskod packet |
-| Find the actual file | `src/components/TargetCard.jsx` (close match) | File system |
-| Which CSS file to edit | `src/components/TargetCard.css` (same directory) | Convention |
-| What property to fix | Read `width: 100%` in CSS | Code read |
-| Verify the fix | Re-capture shows width: 95px | Viskod packet |
+| Which element is broken | Agent knew the fixture structure | Prior knowledge (agent created the fixture) |
+| Where is the component file | Agent knew the path from creating the fixture | Prior knowledge |
+| What CSS property to fix | Read `TargetCard.css` directly | Code read |
+| Verify the fix | Re-capture showed width 624px → 95px | Viskod `selection.boundingBox` |
+
+**The OpenCode/agent prompt used for this fix was:**
+```
+Now apply the fix to TargetCard.css: add border, fix contrast, remove width:100%, add focus style.
+```
+
+This prompt was issued without consulting the Context Packet's `sourceHints` field. The agent acted on prior knowledge from creating the fixture.
+
+## How an Independent Agent Would Use Source Hints
+
+If the agent did not know the codebase, the source hints would provide:
+
+1. **First hint:** `target-card.tsx` (confidence 0.65, primary) — points the agent to look for a `target-card.tsx` file
+2. **Second hint:** `target-card.jsx` (confidence 0.65) — the actual file is `TargetCard.jsx`, close match
+3. **File structure:** the hint paths include `components/target-card.tsx`, revealing a `src/components/` directory convention
+4. **CSS discovery:** from the `.jsx` hint, the agent would scan the same directory for `TargetCard.css`
+
+The agent would still need to:
+- Read the file system to find the exact filename (`TargetCard.jsx` vs `target-card.tsx`)
+- Inspect the CSS to identify the specific property causing the width issue
+- Determine the fix values (which border, which colour, which padding)
+
+Without source hints, the agent would need to guess the component directory structure or search the entire repo for matching selectors.
 
 ## Before/After Bounding Box Comparison
 
@@ -154,13 +174,14 @@ Added `--project-path` argument to `viskod capture` to allow specifying the proj
 
 ## Verdict
 
-**PASS.**
+**PARTIAL.** Source hints were technically populated and correct (10 candidates, `target-card.jsx` matched the actual component file). However, the agent did not use them — the fix relied on prior knowledge because the agent created the fixture.
 
-Source hints were populated and the top candidates (`target-card.tsx`, `target-card.jsx`) pointed toward the correct component file. The agent loop proved:
+**Why not PASS:** The agent loop was not truly independent. The agent never consulted `sourceHints` to locate the file. Passing would require an agent with no prior knowledge of the codebase to successfully use source hints for navigation.
 
-- 5 CLI invocations produced exactly 5 capture directories with 5 `packet.json` files
-- `sourceHints` contained 10 candidates including `target-card.jsx` which matches the actual component file
-- The before-fix button width (624px) proved the full-width bug
-- After-fix width (95px) proved the fix worked
-- All sensitive values were redacted
-- No `.tmp` files remained
+**What would make it PASS:**
+1. An independent agent (one that did not create the fixture) is given the Context Packet
+2. The agent uses `sourceHints[0].filePath` or `sourceHints[1].filePath` to locate the component
+3. The agent navigates to the file and applies the fix
+4. Re-capture confirms the fix
+
+The technical evidence pipeline (capture → packet → sourceHints → bounding boxes → redaction) works correctly. The validation gap is in the agent loop methodology.
