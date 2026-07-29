@@ -74,6 +74,12 @@ export class CapturePipeline {
 
   constructor(baseDir?: string) {
     this.baseDir = baseDir ?? path.join(process.cwd(), STORAGE_DIR, CAPTURES_DIR);
+    // Eagerly create storage dir so first capture always has a writable target
+    try {
+      fs.mkdirSync(this.baseDir, { recursive: true });
+    } catch {
+      /* best effort */
+    }
   }
 
   async persistCapture(

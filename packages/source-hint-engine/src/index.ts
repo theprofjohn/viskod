@@ -133,7 +133,8 @@ interface ResolvedCandidate {
     | 'case-insensitive'
     | 'style-adjacent'
     | 'generated-non-existing'
-    | 'generated';
+    | 'generated'
+    | 'usage-site';
   reason: string;
   relatedSelector?: string;
   confidence: number;
@@ -219,6 +220,260 @@ function collectResolvedCandidates(input: HintInput): ResolvedCandidate[] {
           discoveryMethod: 'class-name-match',
         });
       }
+    }
+  }
+
+  return candidates;
+}
+
+// ---- Usage-site matcher (finds files containing visible text + component references) ----
+
+interface UsageSiteCandidate {
+  filePath: string;
+  reason: string;
+  confidence: number;
+  matchedText: string[];
+}
+
+function findUsageSiteCandidates(input: HintInput): UsageSiteCandidate[] {
+  const candidates: UsageSiteCandidate[] = [];
+  const rootPath = input.project.metadata.rootPath;
+  const dirs = input.project.componentIndex?.directories ?? [];
+  const dc = input.domContext;
+  if (!rootPath || dirs.length === 0) return candidates;
+
+  // Extract meaningful visible text from the DOM (skip short fragments)
+  const visibleText = (dc.text || '').trim();
+  if (!visibleText || visibleText.length < 5) return candidates;
+
+  // Collect significant phrases (exclude common Tailwind utility prefix words)
+  const UTILITY_BLACKLIST = new Set([
+    'flex',
+    'grid',
+    'inline',
+    'block',
+    'items',
+    'justify',
+    'content',
+    'self',
+    'place',
+    'auto',
+    'min',
+    'max',
+    'none',
+    'full',
+    'size',
+    'text',
+    'font',
+    'tracking',
+    'leading',
+    'align',
+    'break',
+    'whitespace',
+    'truncate',
+    'overflow',
+    'scroll',
+    'visible',
+    'hidden',
+    'absolute',
+    'relative',
+    'fixed',
+    'sticky',
+    'static',
+    'inset',
+    'start',
+    'end',
+    'left',
+    'right',
+    'top',
+    'bottom',
+    'zindex',
+    'order',
+    'col',
+    'row',
+    'cols',
+    'rows',
+    'float',
+    'clear',
+    'object',
+    'aspect',
+    'basis',
+    'grow',
+    'shrink',
+    'shadow',
+    'opacity',
+    'cursor',
+    'select',
+    'pointer',
+    'resize',
+    'transition',
+    'duration',
+    'ease',
+    'delay',
+    'animate',
+    'scale',
+    'rotate',
+    'translate',
+    'skew',
+    'transform',
+    'origin',
+    'ring',
+    'filter',
+    'backdrop',
+    'divide',
+    'space',
+    'gap',
+    'between',
+    'around',
+    'evenly',
+    'children',
+    'first',
+    'last',
+    'odd',
+    'even',
+    'visited',
+    'checked',
+    'focus',
+    'hover',
+    'active',
+    'disabled',
+    'group',
+    'peer',
+    'dark',
+    'light',
+    'motion',
+    'supports',
+    'aria',
+    'data',
+    'state',
+    'open',
+    'closed',
+    'selected',
+    'expanded',
+    'border',
+    'rounded',
+    'outline',
+    'decoration',
+    'underline',
+    'capitalize',
+    'italic',
+    'bold',
+    'semibold',
+    'extrabold',
+    'black',
+    'thin',
+    'extralight',
+    'light',
+    'medium',
+    'normal',
+    'wght',
+    'bgcard',
+    'surface',
+    'muted',
+    'destructive',
+    'primary',
+    'secondary',
+    'accent',
+    'chart',
+    'foreground',
+    'background',
+    'input',
+    'popover',
+    'sidebar',
+    'linethrough',
+    'overline',
+    'normalcase',
+    'lowercase',
+    'uppercase',
+    'linethrough',
+  ]);
+  const words = visibleText
+    .split(/[\s\n]+/)
+    .map((w) => w.replace(/[^a-zA-Z0-9]/g, ''))
+    .filter(
+      (w) => w.length >= 4 && !UTILITY_BLACKLIST.has(w.toLowerCase()) && Number.isNaN(Number(w)),
+    );
+  const uniqueWords = [...new Set(words.map((w) => w.toLowerCase()))];
+  if (uniqueWords.length === 0) return candidates;
+
+  // Collect component names from the hierarchy hint (data-slot, tag names)
+  const componentNames: string[] = [];
+  // data-slot attributes often contain component family names
+  if (dc.role === 'card' || dc.className?.includes('card') || dc.tagName === 'div') {
+    componentNames.push('Card');
+  }
+
+  const seenPaths = new Set<string>();
+
+  // Also search common page/feature directories where usage sites typically live
+  const usageSiteDirs = [
+    ...dirs,
+    'src/features',
+    'src/pages',
+    'src/routes',
+    'src/app',
+    'features',
+    'pages',
+    'routes',
+    'app',
+  ];
+  const uniqueDirs = [...new Set(usageSiteDirs)];
+
+  // Search project files in component AND page directories
+  for (const dir of uniqueDirs) {
+    const dirPath = path.join(rootPath, dir.replace(/\//g, path.sep));
+    if (!fs.existsSync(dirPath)) continue;
+
+    try {
+      const walkDir = (dir: string) => {
+        let items: fs.Dirent[];
+        try {
+          items = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const entry of items) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walkDir(fullPath);
+            continue;
+          }
+          if (!entry.isFile()) continue;
+          const ext = path.extname(entry.name).toLowerCase();
+          if (!EXTENSION_PATTERNS.includes(ext) && !STYLE_EXTENSIONS.includes(ext)) continue;
+
+          const relPath = path.relative(rootPath, fullPath).replace(/\\/g, '/');
+          if (seenPaths.has(relPath)) continue;
+
+          try {
+            const content = fs.readFileSync(fullPath, 'utf-8');
+            const contentLower = content.toLowerCase();
+            const matchedWords = uniqueWords.filter((w) => contentLower.includes(w));
+            if (matchedWords.length === 0) continue;
+
+            const hasComponentRef =
+              componentNames.length === 0 ||
+              componentNames.some((cn) => content.includes(`<${cn}`) || content.includes(cn));
+
+            if (hasComponentRef) {
+              seenPaths.add(relPath);
+              const matchRatio = matchedWords.length / uniqueWords.length;
+              const confidence = 0.6 + matchRatio * 0.35;
+              candidates.push({
+                filePath: relPath,
+                reason: `Usage-site: file contains visible text "${matchedWords.slice(0, 3).join(', ')}"${componentNames.length > 0 ? ` and references ${componentNames[0]}` : ''}`,
+                confidence: Math.min(confidence, 0.95),
+                matchedText: matchedWords,
+              });
+            }
+          } catch {
+            // skip unreadable files
+          }
+        }
+      };
+      walkDir(dirPath);
+    } catch {
+      // skip unreadable directories
     }
   }
 
@@ -386,14 +641,32 @@ export class SourceHintEngine {
         }
       }
 
-      // Merge existence-aware candidates with legacy evidence
-      // Priority: exact existing > case-insensitive > style-adjacent > existing with legacy > generated non-existing
+      // Phase 3: usage-site candidates (visible text + component reference matching)
+      const usageSiteCandidates = findUsageSiteCandidates(input);
+
+      // Merge existence-aware candidates with legacy evidence and usage-site candidates
+      // Priority: usage-site > exact existing > case-insensitive > style-adjacent > existing with legacy > generated non-existing
       const existingPaths = new Set(
         resolvedCandidates.filter((c) => c.exists).map((c) => c.filePath.toLowerCase()),
       );
 
       // Boost existing resolved candidates with any matching legacy evidence
       const scoredMap = new Map<string, ResolvedCandidate>();
+
+      // Insert usage-site candidates FIRST (highest priority)
+      for (const uc of usageSiteCandidates) {
+        const key = uc.filePath.toLowerCase();
+        const confidence = uc.confidence;
+        scoredMap.set(key, {
+          filePath: uc.filePath,
+          exists: true,
+          matchType: 'usage-site',
+          reason: uc.reason,
+          confidence,
+          discoveryMethod: 'usage-site',
+        });
+      }
+
       for (const rc of resolvedCandidates) {
         const key = rc.filePath.toLowerCase();
         if (!scoredMap.has(key) || rc.confidence > (scoredMap.get(key)?.confidence ?? 0)) {

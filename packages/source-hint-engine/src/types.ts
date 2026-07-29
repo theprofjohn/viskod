@@ -6,7 +6,8 @@ export type DiscoveryMethod =
   | 'file-exists'
   | 'style-adjacent'
   | 'case-insensitive'
-  | 'heuristic-match';
+  | 'heuristic-match'
+  | 'usage-site';
 
 export type EvidenceType =
   | 'route-match'
@@ -21,7 +22,8 @@ export type EvidenceType =
   | 'file-exists'
   | 'case-insensitive-match'
   | 'style-adjacent'
-  | 'heuristic';
+  | 'heuristic'
+  | 'text-content-match';
 
 export interface HintEvidence {
   type: EvidenceType;
@@ -46,7 +48,8 @@ export interface SourceHint {
     | 'case-insensitive'
     | 'style-adjacent'
     | 'generated-non-existing'
-    | 'generated';
+    | 'generated'
+    | 'usage-site';
   reason: string;
   relatedSelector?: string;
 }
