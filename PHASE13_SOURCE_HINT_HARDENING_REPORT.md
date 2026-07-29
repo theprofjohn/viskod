@@ -76,43 +76,109 @@ Each `SourceHint` now includes:
 | accepts className and generates hints | Hints derived from DOM class name |
 | uses cache for repeated inputs | Identical inputs return cached results |
 
+## Phase 12D Re-Run (With Hardened Engine)
+
+### Blind Packet Path
+`.viskod/captures/b59c649e-55bf-4133-a42e-478535fe71ee/packet.json`
+
+### sourceHints Content (from packet.json)
+
+```
+  src/components/TargetCard.jsx   (confidence=0.85  matchType=case-insensitive  exists=True)  [PRIMARY]
+  src/components/TargetCard.css   (confidence=0.80  matchType=style-adjacent    exists=True)
+  target-card.tsx                 (confidence=0.65  matchType=generated          exists=False)
+  target-card.jsx                 (confidence=0.65  matchType=generated          exists=False)
+  target-card.vue                 (confidence=0.65  matchType=generated          exists=False)
+  target-card.svelte              (confidence=0.65  matchType=generated          exists=False)
+  components/target-card/index.tsx(confidence=0.65  matchType=generated          exists=False)
+  components/target-card.tsx      (confidence=0.65  matchType=generated          exists=False)
+  target-card/index.tsx           (confidence=0.65  matchType=generated          exists=False)
+  target-card/index.jsx           (confidence=0.65  matchType=generated          exists=False)
+```
+
+### Ranking Validation
+
+| Property | Before (Phase 12D) | After (Phase 13) |
+|---|---|---|
+| PRIMARY hint | `target-card.tsx` (does not exist) | `src/components/TargetCard.jsx` (exists on disk) |
+| CSS hint | None | `src/components/TargetCard.css` (style-adjacent) |
+| `exists` field | Not present | ✅ All hints have `exists: boolean` |
+| Confidence spread | Flat 0.65 | 0.85 (existing CI) → 0.80 (style) → 0.65 (generated) |
+| Non-existing rank | Tied with existing | ✅ Lower confidence, sorted below |
+
+### Before/After Bounding Boxes
+
+| Element | Before (broken) | After (fixed) | Change |
+|---|---|---|---|
+| `.target-card` height | **110.89** | **147.50** | +36.61px (padding `10px 8px` → `20px`) |
+| `.target-card` width | 640 | 640 | — |
+| `#phase12-source-submit-button` width | ~624 (inferred) | **95.45** | -528.55px (`width: 100%` removed) |
+
+### Redaction Results
+
+| Pattern | Matches | Status |
+|---|---|---|
+| `sk_test_sourcehint` | 0 | ✅ Redacted |
+| `test@example.com` | 0 | ✅ Redacted |
+
+### Additional Checks
+
+| Check | Result |
+|---|---|
+| `.tmp` files | **0** — none in any capture directory |
+| Capture count | **3** directories, **3** packet.json files (1:1) |
+| Console evidence | 2 entries (broken page) |
+| Network evidence | 4 entries (broken page) |
+
+## CSS matchType Clarification
+
+If `TargetCard.css` is found via the **style-adjacent** path (after removing `.css` from `EXTENSION_PATTERNS`), it gets `matchType: style-adjacent` with confidence `0.80`. If `.css` is left in `EXTENSION_PATTERNS`, the file is found via direct case-insensitive matching before the style-adjacency logic runs, resulting in `matchType: case-insensitive` with confidence `0.85`.
+
+**Phase 13 removes `.css` from `EXTENSION_PATTERNS`** so CSS files are always classified as style-adjacent. This is the correct classification — CSS files don't match component source extensions.
+
 ## Before/After SourceHints Comparison
 
-### Before (Phase 12D)
+### Before (Phase 12D, unhardened)
 
 ```
 PRIMARY: target-card.tsx  (confidence: 0.65)  ← does not exist on disk
          target-card.jsx  (confidence: 0.65)  ← does not exist on disk (TargetCard.jsx exists)
          target-card.vue  (confidence: 0.65)  ← does not exist
          ...
-All flat 0.65. No CSS hints. No `exists` field.
+All flat 0.65. No CSS hints. No exists field.
 ```
 
-### After (Phase 13)
+### After (Phase 13, hardened)
 
 ```
-PRIMARY: src/components/TargetCard.jsx  (confidence: 0.95)  ← EXISTS (exact)
-         src/components/TargetCard.css   (confidence: 0.85)  ← EXISTS (case-insensitive)
-         src/components/target-card.jsx  (confidence: 0.30)  ← does not exist
-         src/components/target-card.tsx  (confidence: 0.30)  ← does not exist
+PRIMARY: src/components/TargetCard.jsx  (confidence: 0.85)  ← EXISTS (case-insensitive)
+         src/components/TargetCard.css   (confidence: 0.80)  ← EXISTS (style-adjacent)
+         target-card.tsx                (confidence: 0.65)  ← does not exist
          ...
 ```
 
-## Files Changed
+## Validation Results
 
-| File | Change |
+| Check | Result |
 |---|---|
-| `packages/source-hint-engine/src/types.ts` | Added `exists`, `matchType`, `reason`, `relatedSelector` to `SourceHint`. Expanded `DiscoveryMethod`, `EvidenceType` |
-| `packages/source-hint-engine/src/index.ts` | Replaced `collectCandidates` with `collectResolvedCandidates` using `resolvePathWithCase`, `findAdjacentStyleFiles`. New scoring. New evidence metadata. Updated `explainHint`. Removed unused legacy matchers |
-| `packages/source-hint-engine/src/source-hint-engine.test.ts` | 10 new tests for existence, case-insensitive, CSS adjacency, confidence, metadata |
-| `packages/context-engine/src/index.ts` | Updated `SourceHintEntry` with new fields; map them in `generatePacket` |
+| `pnpm check` (biome + tsc + vitest) | ✅ Pass |
+| `biome check .` | ✅ 0 errors across 113 files |
+| `tsc -b` (TypeScript strict) | ✅ 0 errors |
+| `vitest run` | ✅ **193 tests**, 0 failed (18 files) |
+| Source hint tests | ✅ 10 new hardening tests |
+| Phase 12D re-run | ✅ 3 captures, 3 packet.json, no leaks |
 
 ## Remaining Limitations
 
-1. **MAX_HINTS = 10** — In a large project, useful hints may be truncated by the limit
-2. **No file-existence check for legacy route/framework matchers** — Only class-name-derived candidates get existence checked
-3. **Style adjacency only checks one directory** — Won't find CSS in a shared styles directory
+1. **MAX_HINTS = 10** — Useful hints may be truncated in large projects.
+2. **No file-existence check for legacy route/framework matchers** — Only class-name-derived candidates get existence checked.
+3. **Style adjacency only checks one directory** — Won't find CSS in a shared styles directory.
 
 ## Verdict
 
-**PASS.** The source hint engine now grounds candidates in actual repository files rather than generated name patterns alone.
+**PASS.** The source hint engine now grounds candidates in actual repository files. The Phase 12D re-run confirms:
+- Existing `TargetCard.jsx` and `TargetCard.css` rank above generated non-existing candidates
+- Confidence is differentiated (0.85 → 0.80 → 0.65)
+- All hints include `exists`, `matchType`, `reason`, `relatedSelector`
+- CSS files are correctly classified as style-adjacent
+- Sensitive values remain redacted

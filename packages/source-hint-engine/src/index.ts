@@ -20,7 +20,7 @@ const MIN_CONFIDENCE = 0.1;
 const MAX_HINTS = 10;
 const SUBSYSTEM = 'source-hint-engine';
 
-const EXTENSION_PATTERNS = ['.tsx', '.jsx', '.vue', '.svelte', '.ts', '.js', '.css'];
+const EXTENSION_PATTERNS = ['.tsx', '.jsx', '.vue', '.svelte', '.ts', '.js'];
 
 const STYLE_EXTENSIONS = ['.css', '.scss', '.less', '.module.css', '.module.scss'];
 
