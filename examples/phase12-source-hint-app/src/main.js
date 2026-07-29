@@ -12,19 +12,23 @@
 
   addLog('App initialized');
 
-  console.error('VISKOD_SOURCE_HINT_ERROR: fake api key sk_test_sourcehint_abc123 should be redacted');
+  console.error(
+    'VISKOD_SOURCE_HINT_ERROR: fake api key sk_test_sourcehint_abc123 should be redacted',
+  );
 
   fetch('/api/source-hint/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source: 'hint-validation' }),
   }).catch((err) => {
-    console.error('VISKOD_SOURCE_FETCH_FAILED: POST /api/source-hint/submit failed — ' + err.message);
+    console.error(
+      `VISKOD_SOURCE_FETCH_FAILED: POST /api/source-hint/submit failed — ${err.message}`,
+    );
     addLog('Network request failed (expected fixture behaviour)');
   });
 
   document.getElementById('phase12-source-submit-button')?.addEventListener('click', () => {
     console.error('VISKOD_SOURCE_HINT_ERROR: fake api key sk_test_sourcehint_abc123');
-    addLog('Submit clicked at ' + new Date().toLocaleTimeString());
+    addLog(`Submit clicked at ${new Date().toLocaleTimeString()}`);
   });
 })();
