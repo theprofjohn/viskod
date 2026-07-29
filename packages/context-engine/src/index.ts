@@ -25,6 +25,8 @@ import type { ViskodError } from '@viskod/shared';
 import type { SourceHintEngine } from '@viskod/source-hint-engine';
 
 export type { SelectionTarget } from '@viskod/selection-engine';
+export { generateExport } from './agent-exporter';
+export type { ExportFormat, ExportOptions, CompactPacket } from './agent-exporter';
 
 export interface ContextPacket {
   packetId: string;

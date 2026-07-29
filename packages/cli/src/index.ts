@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { BrowserRuntime, resolveProfile } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
-import { VisualContextEngine } from '@viskod/context-engine';
+import { VisualContextEngine, generateExport } from '@viskod/context-engine';
 import { EventBus } from '@viskod/event-bus';
 import { MCPServer } from '@viskod/mcp-server';
 import { ProjectScanner } from '@viskod/project-scanner';
@@ -59,6 +59,9 @@ async function main(): Promise<void> {
       break;
     case 'stop':
       await cmdStop();
+      break;
+    case 'export':
+      await cmdExport(args.slice(1));
       break;
     default:
       printHelp();
@@ -414,6 +417,79 @@ async function cmdServe(): Promise<void> {
     },
   );
 
+  server.registerTool(
+    {
+      name: 'export_context',
+      description: 'Export a Context Packet to an agent-friendly brief (markdown or compact JSON)',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          packetPath: { type: 'string', description: 'Path to packet.json file' },
+          format: {
+            type: 'string',
+            description: 'Output format: markdown or json (default: markdown)',
+            enum: ['markdown', 'json'],
+          },
+        },
+        required: ['packetPath'],
+      },
+    },
+    async (args) => {
+      const packetPath = args.packetPath as string;
+      const format = (args.format as string | undefined) ?? 'markdown';
+
+      if (format !== 'markdown' && format !== 'json') {
+        return {
+          content: [{ type: 'text', text: 'Format must be "markdown" or "json"' }],
+          isError: true,
+        };
+      }
+
+      let raw: string;
+      try {
+        const { readFileSync } = await import('node:fs');
+        raw = readFileSync(packetPath, 'utf-8');
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Failed to read packet: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      let packet: Record<string, unknown>;
+      try {
+        packet = JSON.parse(raw);
+      } catch {
+        return {
+          content: [{ type: 'text', text: 'Failed to parse packet: not valid JSON' }],
+          isError: true,
+        };
+      }
+
+      try {
+        const output = generateExport(packet as unknown as Parameters<typeof generateExport>[0], {
+          format: format as 'markdown' | 'json',
+        });
+        return { content: [{ type: 'text', text: output }] };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Export failed: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+
   await server.start();
 }
 
@@ -458,6 +534,54 @@ async function cmdStop(): Promise<void> {
   }
 }
 
+async function cmdExport(subArgs: string[]): Promise<void> {
+  const packetPath = subArgs[0];
+  if (!packetPath) {
+    console.error('Usage: viskod export <packet-path> [--format markdown|json] [--out <file>]');
+    process.exit(1);
+  }
+
+  const formatIdx = subArgs.indexOf('--format');
+  const format = formatIdx >= 0 ? (subArgs[formatIdx + 1] ?? 'markdown') : 'markdown';
+
+  const outIdx = subArgs.indexOf('--out');
+  const outPath = outIdx >= 0 ? subArgs[outIdx + 1] : undefined;
+
+  if (format !== 'markdown' && format !== 'json') {
+    console.error('Usage: --format must be "markdown" or "json"');
+    process.exit(1);
+  }
+
+  let raw: string;
+  try {
+    const { readFileSync } = await import('node:fs');
+    raw = readFileSync(packetPath, 'utf-8');
+  } catch (err) {
+    console.error(`Failed to read packet: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+
+  let packet: Record<string, unknown>;
+  try {
+    packet = JSON.parse(raw);
+  } catch {
+    console.error('Failed to parse packet: not valid JSON');
+    process.exit(1);
+  }
+
+  const output = generateExport(packet as unknown as Parameters<typeof generateExport>[0], {
+    format: format as 'markdown' | 'json',
+  });
+
+  if (outPath) {
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(outPath, output, 'utf-8');
+    console.log(`Exported to ${outPath}`);
+  } else {
+    console.log(output);
+  }
+}
+
 async function cmdHealth(): Promise<void> {
   const runtime = createRuntime();
   console.log(
@@ -484,6 +608,7 @@ Usage:
   viskod serve [--url]   Start MCP server (with optional browser)
   viskod status          Show session status
   viskod stop            Stop the runtime session
+  viskod export <path>   Export Context Packet to agent brief (--format markdown|json, --out <file>)
   viskod scan [path]     Scan project for metadata
   viskod health          Show subsystem health
 
