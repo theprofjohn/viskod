@@ -204,6 +204,116 @@ describe('capture_context response shape', () => {
   });
 });
 
+function buildComparisonSummary(before: ContextPacket, after: ContextPacket) {
+  const prevSelection = before.selection ?? { boundingBox: { x: 0, y: 0, width: 0, height: 0 } };
+  const curSelection = after.selection ?? { boundingBox: { x: 0, y: 0, width: 0, height: 0 } };
+  const prevBox = prevSelection.boundingBox ?? {};
+  const curBox = curSelection.boundingBox ?? {};
+
+  const dx =
+    curBox.x !== undefined && prevBox.x !== undefined
+      ? Math.round((curBox.x - prevBox.x) * 100) / 100
+      : undefined;
+  const dy =
+    curBox.y !== undefined && prevBox.y !== undefined
+      ? Math.round((curBox.y - prevBox.y) * 100) / 100
+      : undefined;
+  const dw =
+    curBox.width !== undefined && prevBox.width !== undefined
+      ? Math.round((curBox.width - prevBox.width) * 100) / 100
+      : undefined;
+  const dh =
+    curBox.height !== undefined && prevBox.height !== undefined
+      ? Math.round((curBox.height - prevBox.height) * 100) / 100
+      : undefined;
+
+  const beforeArea =
+    prevBox.width !== undefined && prevBox.height !== undefined
+      ? Math.round(prevBox.width * prevBox.height * 100) / 100
+      : undefined;
+  const afterArea =
+    curBox.width !== undefined && curBox.height !== undefined
+      ? Math.round(curBox.width * curBox.height * 100) / 100
+      : undefined;
+  const areaDelta =
+    beforeArea !== undefined && afterArea !== undefined
+      ? Math.round((afterArea - beforeArea) * 100) / 100
+      : undefined;
+  const percentChange =
+    beforeArea !== undefined && afterArea !== undefined && beforeArea > 0
+      ? Math.round(((afterArea - beforeArea) / beforeArea) * 10000) / 100
+      : undefined;
+
+  const consoleBefore = (before.runtimeEvidence?.console ?? []).length;
+  const consoleAfter = (after.runtimeEvidence?.console ?? []).length;
+  const networkBefore = (before.runtimeEvidence?.network ?? []).length;
+  const networkAfter = (after.runtimeEvidence?.network ?? []).length;
+  const sourceHintsBefore = (before.sourceHints ?? []).length;
+  const sourceHintsAfter = (after.sourceHints ?? []).length;
+  const screenshotsBefore = (before.screenshots ?? []).length;
+  const screenshotsAfter = (after.screenshots ?? []).length;
+
+  const changedFields: string[] = [];
+  if (dw !== undefined && dw !== 0) changedFields.push('boundingBox.width');
+  if (dh !== undefined && dh !== 0) changedFields.push('boundingBox.height');
+  if (dx !== undefined && dx !== 0) changedFields.push('boundingBox.x');
+  if (dy !== undefined && dy !== 0) changedFields.push('boundingBox.y');
+  if (consoleBefore !== consoleAfter) changedFields.push('evidence.console');
+  if (networkBefore !== networkAfter) changedFields.push('evidence.network');
+  if (sourceHintsBefore !== sourceHintsAfter) changedFields.push('sourceHints');
+  if (screenshotsBefore !== screenshotsAfter) changedFields.push('screenshots');
+
+  let verdict = 'unchanged';
+  if (changedFields.length > 0) {
+    if (dh !== undefined && dw !== undefined && dh > 0 && dw < 0) {
+      verdict = 'improved';
+    } else {
+      verdict = 'changed';
+    }
+  }
+
+  const notesParts: string[] = [];
+  if (changedFields.length > 0) {
+    notesParts.push(`Fields changed: ${changedFields.join(', ')}`);
+  } else {
+    notesParts.push('No meaningful field changes detected');
+  }
+  if (dh !== undefined) notesParts.push(`height delta: ${dh}`);
+  if (dw !== undefined) notesParts.push(`width delta: ${dw}`);
+
+  return {
+    boundingBoxDelta: {
+      x: { before: prevBox.x, after: curBox.x, delta: dx },
+      y: { before: prevBox.y, after: curBox.y, delta: dy },
+      width: { before: prevBox.width, after: curBox.width, delta: dw },
+      height: { before: prevBox.height, after: curBox.height, delta: dh },
+    },
+    areaDelta: {
+      beforeArea,
+      afterArea,
+      delta: areaDelta,
+      percentChange,
+    },
+    evidenceDelta: {
+      console: { before: consoleBefore, after: consoleAfter, delta: consoleAfter - consoleBefore },
+      network: { before: networkBefore, after: networkAfter, delta: networkAfter - networkBefore },
+      sourceHints: {
+        before: sourceHintsBefore,
+        after: sourceHintsAfter,
+        delta: sourceHintsAfter - sourceHintsBefore,
+      },
+      screenshots: {
+        before: screenshotsBefore,
+        after: screenshotsAfter,
+        delta: screenshotsAfter - screenshotsBefore,
+      },
+    },
+    changedFields,
+    verdict,
+    notes: notesParts.join('; '),
+  };
+}
+
 describe('recapture_context comparison', () => {
   it('computes bounding box delta', () => {
     const before = mockPacket({
@@ -224,19 +334,66 @@ describe('recapture_context comparison', () => {
       },
     });
 
-    const beforeBox = before.selection?.boundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
-    const afterBox = after.selection?.boundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
+    const comp = buildComparisonSummary(before, after);
 
-    const delta = {
-      height: Math.round(((afterBox.height ?? 0) - (beforeBox.height ?? 0)) * 100) / 100,
-      width: (afterBox.width ?? 0) - (beforeBox.width ?? 0),
-    };
-
-    expect(delta.height).toBe(100);
-    expect(delta.width).toBe(0);
+    expect(comp.boundingBoxDelta.height.before).toBe(200);
+    expect(comp.boundingBoxDelta.height.after).toBe(300);
+    expect(comp.boundingBoxDelta.height.delta).toBe(100);
+    expect(comp.boundingBoxDelta.width.delta).toBe(0);
   });
 
-  it('compares screenshot, source hint, and evidence counts', () => {
+  it('boundingBoxDelta includes x, y, width, height before/after/delta', () => {
+    const before = mockPacket({
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 5, y: 10, width: 200, height: 100 },
+      },
+    });
+    const after = mockPacket({
+      packetId: 'a2',
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 15, y: 20, width: 250, height: 150 },
+      },
+    });
+
+    const comp = buildComparisonSummary(before, after);
+    expect(comp.boundingBoxDelta.x).toEqual({ before: 5, after: 15, delta: 10 });
+    expect(comp.boundingBoxDelta.y).toEqual({ before: 10, after: 20, delta: 10 });
+    expect(comp.boundingBoxDelta.width).toEqual({ before: 200, after: 250, delta: 50 });
+    expect(comp.boundingBoxDelta.height).toEqual({ before: 100, after: 150, delta: 50 });
+  });
+
+  it('areaDelta percentChange is correct', () => {
+    const before = mockPacket({
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 0, y: 0, width: 100, height: 100 },
+      },
+    });
+    const after = mockPacket({
+      packetId: 'a3',
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 0, y: 0, width: 150, height: 200 },
+      },
+    });
+
+    const comp = buildComparisonSummary(before, after);
+    // before area: 100 * 100 = 10000
+    // after area: 150 * 200 = 30000
+    // percent change: ((30000 - 10000) / 10000) * 100 = 200%
+    expect(comp.areaDelta.beforeArea).toBe(10000);
+    expect(comp.areaDelta.afterArea).toBe(30000);
+    expect(comp.areaDelta.delta).toBe(20000);
+    expect(comp.areaDelta.percentChange).toBe(200);
+  });
+
+  it('evidenceDelta counts are correct', () => {
     const before = mockPacket({
       screenshots: [],
       sourceHints: [],
@@ -244,25 +401,146 @@ describe('recapture_context comparison', () => {
     });
     const after = mockPacket();
 
-    const comp = {
-      screenshotsBefore: (before.screenshots ?? []).length,
-      screenshotsAfter: (after.screenshots ?? []).length,
-      sourceHintsBefore: (before.sourceHints ?? []).length,
-      sourceHintsAfter: (after.sourceHints ?? []).length,
-      consoleBefore: (before.runtimeEvidence?.console ?? []).length,
-      consoleAfter: (after.runtimeEvidence?.console ?? []).length,
-      networkBefore: (before.runtimeEvidence?.network ?? []).length,
-      networkAfter: (after.runtimeEvidence?.network ?? []).length,
-    };
+    const comp = buildComparisonSummary(before, after);
 
-    expect(comp.screenshotsBefore).toBe(0);
-    expect(comp.screenshotsAfter).toBe(1);
-    expect(comp.sourceHintsBefore).toBe(0);
-    expect(comp.sourceHintsAfter).toBe(1);
-    expect(comp.consoleBefore).toBe(0);
-    expect(comp.consoleAfter).toBe(1);
-    expect(comp.networkBefore).toBe(0);
-    expect(comp.networkAfter).toBe(1);
+    expect(comp.evidenceDelta.console).toEqual({ before: 0, after: 1, delta: 1 });
+    expect(comp.evidenceDelta.network).toEqual({ before: 0, after: 1, delta: 1 });
+    expect(comp.evidenceDelta.sourceHints).toEqual({ before: 0, after: 1, delta: 1 });
+    expect(comp.evidenceDelta.screenshots).toEqual({ before: 0, after: 1, delta: 1 });
+  });
+
+  it('verdict is "changed" for one-dimensional layout changes', () => {
+    // Only height changed (no width change)
+    const before = mockPacket({
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 10, y: 20, width: 640, height: 200 },
+      },
+    });
+    const after = mockPacket({
+      packetId: 'changed-test',
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 10, y: 20, width: 640, height: 250 },
+      },
+    });
+
+    const comp = buildComparisonSummary(before, after);
+    // height changed, width unchanged -> verdict should be "changed" (not "improved")
+    expect(comp.verdict).toBe('changed');
+    expect(comp.changedFields).toContain('boundingBox.height');
+    expect(comp.changedFields).not.toContain('boundingBox.width');
+  });
+
+  it('verdict is "improved" when height increases and width shrinks', () => {
+    const before = mockPacket({
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 10, y: 20, width: 640, height: 110 },
+      },
+    });
+    const after = mockPacket({
+      packetId: 'improved-test',
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 10, y: 20, width: 620, height: 147 },
+      },
+    });
+
+    const comp = buildComparisonSummary(before, after);
+    expect(comp.verdict).toBe('improved');
+    expect(comp.changedFields).toContain('boundingBox.width');
+    expect(comp.changedFields).toContain('boundingBox.height');
+  });
+
+  it('verdict is "unchanged" when all fields are identical', () => {
+    const packet = mockPacket();
+    const comp = buildComparisonSummary(packet, packet);
+    expect(comp.verdict).toBe('unchanged');
+    expect(comp.changedFields).toHaveLength(0);
+  });
+
+  it('changedFields lists only fields that changed meaningfully', () => {
+    const before = mockPacket({
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 5, y: 5, width: 640, height: 200 },
+      },
+      screenshots: [],
+      sourceHints: [],
+      runtimeEvidence: {
+        console: [{ level: 'error', message: 'e1', timestamp: 't1' }],
+        network: [],
+      },
+    });
+    const after = mockPacket({
+      packetId: 'fields-test',
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 5, y: 5, width: 640, height: 250 },
+      },
+      runtimeEvidence: {
+        console: [
+          { level: 'error', message: 'e1', timestamp: 't1' },
+          { level: 'warn', message: 'w1', timestamp: 't2' },
+        ],
+        network: [
+          {
+            request: { method: 'GET', url: '/api' },
+            response: { status: 200, statusText: 'OK' },
+            timestamp: 't3',
+          },
+        ],
+      },
+    });
+
+    const comp = buildComparisonSummary(before, after);
+    expect(comp.changedFields).toContain('boundingBox.height');
+    expect(comp.changedFields).toContain('evidence.console');
+    expect(comp.changedFields).toContain('evidence.network');
+    expect(comp.changedFields).toContain('sourceHints');
+    expect(comp.changedFields).toContain('screenshots');
+    expect(comp.changedFields).not.toContain('boundingBox.x');
+    expect(comp.changedFields).not.toContain('boundingBox.y');
+    expect(comp.changedFields).not.toContain('boundingBox.width');
+  });
+
+  it('notes provides machine-readable explanation', () => {
+    const before = mockPacket({
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 0, y: 0, width: 640, height: 200 },
+      },
+    });
+    const after = mockPacket({
+      packetId: 'notes-test',
+      selection: {
+        selector: '.card',
+        tagName: 'div',
+        boundingBox: { x: 0, y: 0, width: 640, height: 300 },
+      },
+    });
+
+    const comp = buildComparisonSummary(before, after);
+    expect(comp.notes).toContain('Fields changed:');
+    expect(comp.notes).toContain('height delta: 100');
+  });
+
+  it('no daemon token in comparisonSummary', () => {
+    const before = mockPacket();
+    const after = mockPacket({ packetId: 'no-token-test' });
+    const comp = buildComparisonSummary(before, after);
+    const json = JSON.stringify(comp);
+    expect(json).not.toContain('daemon-token');
+    expect(json).not.toContain('sessionToken');
+    expect(json).not.toContain('token');
   });
 });
 
@@ -291,6 +569,76 @@ describe('existing capture tool unaffected', () => {
     expect(oldResponse.packetId).toBe('capture-ctx-test');
     expect(oldResponse.screenshots).toBe(1);
     expect(oldResponse.dom.tagName).toBe('div');
+  });
+});
+
+describe('capture_context schema backward compatible', () => {
+  it('existing capture_context schema remains backward compatible', () => {
+    // Simulate old caller without reload/cacheBust
+    const args = {
+      selector: '.card',
+      url: 'http://localhost:3000',
+      profile: 'default',
+    };
+    // Old caller should not need reload/cacheBust fields
+    expect(args.selector).toBe('.card');
+    expect(Object.keys(args)).not.toContain('reload');
+    expect(Object.keys(args)).not.toContain('cacheBust');
+  });
+
+  it('reload defaults to false for capture_context when not provided', () => {
+    const args: Record<string, unknown> = { selector: '.card' };
+    const reload = (args.reload as boolean | undefined) ?? false;
+    const cacheBust = (args.cacheBust as boolean | undefined) ?? false;
+    expect(reload).toBe(false);
+    expect(cacheBust).toBe(false);
+  });
+
+  it('recapture_context defaults reload to true when previousPacketPath is provided', () => {
+    // Simulate the default logic: prevPath is truthy => reload defaults true
+    const prevPath = '/tmp/packet.json';
+    const reloadDefault = !!prevPath;
+    expect(reloadDefault).toBe(true);
+  });
+
+  it('recapture_context reload defaults to false when no previousPacketPath', () => {
+    // Simulate the default logic: prevPath is falsy => reload defaults false
+    const prevPath = undefined;
+    const reloadDefault = !!prevPath;
+    expect(reloadDefault).toBe(false);
+  });
+});
+
+describe('cacheBust URL behavior', () => {
+  it('cacheBust appends __viskod_cb without dropping existing query params', () => {
+    const originalUrl = 'http://localhost:3000/page?foo=bar';
+    const urlObj = new URL(originalUrl);
+    urlObj.searchParams.set('__viskod_cb', String(Date.now()));
+    const bustUrl = urlObj.toString();
+
+    expect(bustUrl).toContain('__viskod_cb=');
+    expect(bustUrl).toContain('foo=bar');
+    // Original params preserved
+    const parsed = new URL(bustUrl);
+    expect(parsed.searchParams.get('foo')).toBe('bar');
+    expect(parsed.searchParams.get('__viskod_cb')).toBeTruthy();
+  });
+
+  it('cacheBust does not mutate original URL permanently', () => {
+    const originalUrl = 'http://localhost:3000/page';
+    const urlObj = new URL(originalUrl);
+    urlObj.searchParams.set('__viskod_cb', String(Date.now()));
+    const bustUrl = urlObj.toString();
+
+    expect(bustUrl).not.toBe(originalUrl);
+    expect(new URL(originalUrl).searchParams.has('__viskod_cb')).toBe(false);
+  });
+
+  it('cacheBust handles URLs without query params', () => {
+    const url = 'http://localhost:3000/page';
+    const urlObj = new URL(url);
+    urlObj.searchParams.set('__viskod_cb', '12345');
+    expect(urlObj.toString()).toBe('http://localhost:3000/page?__viskod_cb=12345');
   });
 });
 

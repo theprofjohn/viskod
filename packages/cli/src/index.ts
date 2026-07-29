@@ -513,6 +513,14 @@ async function cmdServe(): Promise<void> {
             description: 'Brief format: markdown or json (default: markdown)',
             enum: ['markdown', 'json'],
           },
+          reload: {
+            type: 'boolean',
+            description: 'Reload the page before capturing (default: false)',
+          },
+          cacheBust: {
+            type: 'boolean',
+            description: 'Append cache-busting query param before capturing (default: false)',
+          },
         },
         required: ['selector'],
       },
@@ -523,6 +531,8 @@ async function cmdServe(): Promise<void> {
       const profileName = (args.profile as string | undefined) ?? 'default';
       const projectPath = args.projectPath as string | undefined;
       const format = (args.format as string | undefined) ?? 'markdown';
+      const reload = (args.reload as boolean | undefined) ?? false;
+      const cacheBust = (args.cacheBust as boolean | undefined) ?? false;
 
       const profile = resolveProfile(profileName);
 
@@ -555,7 +565,7 @@ async function cmdServe(): Promise<void> {
         }
       }
 
-      const result = await session.capture(selector, url, profile);
+      const result = await session.capture(selector, url, profile, { reload, cacheBust });
       if (!result.ok) {
         return {
           content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }],
@@ -622,6 +632,15 @@ async function cmdServe(): Promise<void> {
             description: 'Path to previous packet.json for comparison',
           },
           format: { type: 'string', description: 'Brief format', enum: ['markdown', 'json'] },
+          reload: {
+            type: 'boolean',
+            description:
+              'Reload the page before re-capturing (default: true when previousPacketPath provided)',
+          },
+          cacheBust: {
+            type: 'boolean',
+            description: 'Append cache-busting query param before re-capturing (default: false)',
+          },
         },
         required: ['selector'],
       },
@@ -633,6 +652,9 @@ async function cmdServe(): Promise<void> {
       const projectPath = args.projectPath as string | undefined;
       const prevPath = args.previousPacketPath as string | undefined;
       const format = (args.format as string | undefined) ?? 'markdown';
+      // Default reload to true when previousPacketPath is provided
+      const reload = (args.reload as boolean | undefined) ?? !!prevPath;
+      const cacheBust = (args.cacheBust as boolean | undefined) ?? false;
 
       const profile = resolveProfile(profileName);
 
@@ -665,7 +687,7 @@ async function cmdServe(): Promise<void> {
         }
       }
 
-      const result = await session.capture(selector, url, profile);
+      const result = await session.capture(selector, url, profile, { reload, cacheBust });
       if (!result.ok) {
         return {
           content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }],
@@ -681,42 +703,130 @@ async function cmdServe(): Promise<void> {
         try {
           const { readFileSync } = await import('node:fs');
           const raw = readFileSync(prevPath, 'utf-8');
-          const prev: Record<string, unknown> = JSON.parse(raw);
-          const prevSelection = (prev as any).selection ?? {};
+          const prev = JSON.parse(raw) as Record<string, unknown>;
+          const prevSelection = (prev.selection as Record<string, unknown>) ?? {};
           const curSelection = packet.selection ?? {};
-          const prevBox = prevSelection.boundingBox ?? {};
+          const prevBox = (prevSelection.boundingBox as Record<string, number>) ?? {};
           const curBox = curSelection.boundingBox ?? {};
+
+          const dx =
+            curBox.x !== undefined && prevBox.x !== undefined
+              ? Math.round((curBox.x - prevBox.x) * 100) / 100
+              : undefined;
+          const dy =
+            curBox.y !== undefined && prevBox.y !== undefined
+              ? Math.round((curBox.y - prevBox.y) * 100) / 100
+              : undefined;
+          const dw =
+            curBox.width !== undefined && prevBox.width !== undefined
+              ? Math.round((curBox.width - prevBox.width) * 100) / 100
+              : undefined;
+          const dh =
+            curBox.height !== undefined && prevBox.height !== undefined
+              ? Math.round((curBox.height - prevBox.height) * 100) / 100
+              : undefined;
+
+          const beforeArea =
+            prevBox.width !== undefined && prevBox.height !== undefined
+              ? Math.round(prevBox.width * prevBox.height * 100) / 100
+              : undefined;
+          const afterArea =
+            curBox.width !== undefined && curBox.height !== undefined
+              ? Math.round(curBox.width * curBox.height * 100) / 100
+              : undefined;
+          const areaDelta =
+            beforeArea !== undefined && afterArea !== undefined
+              ? Math.round((afterArea - beforeArea) * 100) / 100
+              : undefined;
+          const percentChange =
+            beforeArea !== undefined && afterArea !== undefined && beforeArea > 0
+              ? Math.round(((afterArea - beforeArea) / beforeArea) * 10000) / 100
+              : undefined;
+
+          const prevEvidence = prev.runtimeEvidence as Record<string, unknown> | undefined;
+          const consoleBefore = (prevEvidence?.console as unknown[] | undefined)?.length ?? 0;
+          const consoleAfter = (packet.runtimeEvidence?.console ?? []).length;
+          const networkBefore = (prevEvidence?.network as unknown[] | undefined)?.length ?? 0;
+          const networkAfter = (packet.runtimeEvidence?.network ?? []).length;
+          const sourceHintsBefore = (prev.sourceHints as unknown[] | undefined)?.length ?? 0;
+          const sourceHintsAfter = (packet.sourceHints ?? []).length;
+          const screenshotsBefore = (prev.screenshots as unknown[] | undefined)?.length ?? 0;
+          const screenshotsAfter = (packet.screenshots ?? []).length;
+
+          // Determine changed fields
+          const changedFields: string[] = [];
+          if (dw !== undefined && dw !== 0) changedFields.push('boundingBox.width');
+          if (dh !== undefined && dh !== 0) changedFields.push('boundingBox.height');
+          if (dx !== undefined && dx !== 0) changedFields.push('boundingBox.x');
+          if (dy !== undefined && dy !== 0) changedFields.push('boundingBox.y');
+          if (consoleBefore !== consoleAfter) changedFields.push('evidence.console');
+          if (networkBefore !== networkAfter) changedFields.push('evidence.network');
+          if (sourceHintsBefore !== sourceHintsAfter) changedFields.push('sourceHints');
+          if (screenshotsBefore !== screenshotsAfter) changedFields.push('screenshots');
+
+          // Determine verdict
+          let verdict = 'unchanged';
+          if (changedFields.length > 0) {
+            // "improved" requires directional evidence: positive height delta + negative width delta (card layout fix)
+            if (dh !== undefined && dw !== undefined && dh > 0 && dw < 0) {
+              verdict = 'improved';
+            } else {
+              verdict = 'changed';
+            }
+          }
+
+          const notesParts: string[] = [];
+          if (changedFields.length > 0) {
+            notesParts.push(`Fields changed: ${changedFields.join(', ')}`);
+          } else {
+            notesParts.push('No meaningful field changes detected');
+          }
+          if (dh !== undefined) notesParts.push(`height delta: ${dh}`);
+          if (dw !== undefined) notesParts.push(`width delta: ${dw}`);
 
           comparisonSummary = {
             boundingBoxDelta: {
-              x:
-                curBox.x !== undefined && prevBox.x !== undefined
-                  ? curBox.x - prevBox.x
-                  : undefined,
-              y:
-                curBox.y !== undefined && prevBox.y !== undefined
-                  ? curBox.y - prevBox.y
-                  : undefined,
-              width:
-                curBox.width !== undefined && prevBox.width !== undefined
-                  ? curBox.width - prevBox.width
-                  : undefined,
-              height:
-                curBox.height !== undefined && prevBox.height !== undefined
-                  ? Math.round((curBox.height - prevBox.height) * 100) / 100
-                  : undefined,
+              x: { before: prevBox.x, after: curBox.x, delta: dx },
+              y: { before: prevBox.y, after: curBox.y, delta: dy },
+              width: { before: prevBox.width, after: curBox.width, delta: dw },
+              height: { before: prevBox.height, after: curBox.height, delta: dh },
             },
-            screenshotsBefore: (prev as any).screenshots?.length ?? 0,
-            screenshotsAfter: (packet.screenshots ?? []).length,
-            sourceHintsBefore: (prev as any).sourceHints?.length ?? 0,
-            sourceHintsAfter: (packet.sourceHints ?? []).length,
-            consoleBefore: (prev as any).runtimeEvidence?.console?.length ?? 0,
-            consoleAfter: (packet.runtimeEvidence?.console ?? []).length,
-            networkBefore: (prev as any).runtimeEvidence?.network?.length ?? 0,
-            networkAfter: (packet.runtimeEvidence?.network ?? []).length,
+            areaDelta: {
+              beforeArea,
+              afterArea,
+              delta: areaDelta,
+              percentChange,
+            },
+            evidenceDelta: {
+              console: {
+                before: consoleBefore,
+                after: consoleAfter,
+                delta: consoleAfter - consoleBefore,
+              },
+              network: {
+                before: networkBefore,
+                after: networkAfter,
+                delta: networkAfter - networkBefore,
+              },
+              sourceHints: {
+                before: sourceHintsBefore,
+                after: sourceHintsAfter,
+                delta: sourceHintsAfter - sourceHintsBefore,
+              },
+              screenshots: {
+                before: screenshotsBefore,
+                after: screenshotsAfter,
+                delta: screenshotsAfter - screenshotsBefore,
+              },
+            },
+            changedFields,
+            verdict,
+            notes: notesParts.join('; '),
           };
-        } catch {
-          comparisonSummary = { error: 'Failed to read previous packet for comparison' };
+        } catch (e) {
+          comparisonSummary = {
+            error: `Failed to read previous packet for comparison: ${e instanceof Error ? e.message : String(e)}`,
+          };
         }
       }
 

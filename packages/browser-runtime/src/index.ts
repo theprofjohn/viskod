@@ -246,6 +246,21 @@ export class BrowserRuntime {
     return ok(undefined);
   }
 
+  async reloadPage(handle: BrowserHandle): Promise<Result<void>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Browser handle not found'));
+
+    try {
+      await entry.page.reload({
+        timeout: this.config.timeout.navigate,
+        waitUntil: 'load',
+      });
+      return ok(undefined);
+    } catch (error) {
+      return err(this.brError('BR_RELOAD_FAILED', `Page reload failed: ${String(error)}`));
+    }
+  }
+
   async navigate(handle: BrowserHandle, url: string): Promise<Result<PageHandle>> {
     const entry = this.handles.get(handle.contextId);
     if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Browser handle not found'));

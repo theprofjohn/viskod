@@ -78,11 +78,16 @@ export class DaemonServer {
         const selector = request.params?.selector as string | undefined;
         const url = request.params?.url as string | undefined;
         const profileName = request.params?.profile as string | undefined;
+        const reload = request.params?.reload as boolean | undefined;
+        const cacheBust = request.params?.cacheBust as boolean | undefined;
         if (!selector) {
           return { id: request.id, error: { code: -32602, message: 'Missing selector' } };
         }
         const profile = profileName ? resolveProfile(profileName) : undefined;
-        const result = await this.session.capture(selector, url, profile);
+        const result = await this.session.capture(selector, url, profile, {
+          reload: reload ?? false,
+          cacheBust: cacheBust ?? false,
+        });
         if (!result.ok) {
           return { id: request.id, error: { code: -32000, message: result.error.message } };
         }

@@ -15,7 +15,7 @@ const MIME = {
 
 http
   .createServer((req, res) => {
-    const url = req.url || '/';
+    const url = (req.url || '/').split('?')[0];
 
     if (url.startsWith('/api/')) {
       res.writeHead(500, { 'Content-Type': 'application/json' });

@@ -120,6 +120,7 @@ export class RuntimeSession {
     selector: string,
     targetUrl?: string,
     profile?: ProfileConfig,
+    options?: { reload?: boolean; cacheBust?: boolean },
   ): Promise<Result<ContextPacket>> {
     if (this._info?.status !== 'running') {
       return err(
@@ -128,14 +129,45 @@ export class RuntimeSession {
     }
 
     const currentUrl = this._info.browserUrl;
-    if (targetUrl && targetUrl !== currentUrl) {
-      const navResult = await this.vce.navigate(targetUrl);
-      if (!navResult.ok) {
-        return err(
-          this.sessionError('SESSION_NAV_FAILED', `Failed to navigate: ${navResult.error.message}`),
-        );
+    const effectiveUrl = targetUrl ?? currentUrl;
+
+    if (effectiveUrl) {
+      if (options?.cacheBust) {
+        const urlObj = new URL(effectiveUrl);
+        urlObj.searchParams.set('__viskod_cb', String(Date.now()));
+        const bustUrl = urlObj.toString();
+        const navResult = await this.vce.navigate(bustUrl);
+        if (!navResult.ok) {
+          return err(
+            this.sessionError(
+              'SESSION_NAV_FAILED',
+              `Failed to navigate (cache bust): ${navResult.error.message}`,
+            ),
+          );
+        }
+        // Do not persist cacheBust URL in session info
+      } else if (options?.reload && effectiveUrl === currentUrl) {
+        const reloadResult = await this.vce.reloadPage();
+        if (!reloadResult.ok) {
+          return err(
+            this.sessionError(
+              'SESSION_RELOAD_FAILED',
+              `Failed to reload page: ${reloadResult.error.message}`,
+            ),
+          );
+        }
+      } else if (targetUrl && targetUrl !== currentUrl) {
+        const navResult = await this.vce.navigate(targetUrl);
+        if (!navResult.ok) {
+          return err(
+            this.sessionError(
+              'SESSION_NAV_FAILED',
+              `Failed to navigate: ${navResult.error.message}`,
+            ),
+          );
+        }
+        this._info.browserUrl = targetUrl;
       }
-      this._info.browserUrl = targetUrl;
     }
 
     const selection: SelectionTarget = {

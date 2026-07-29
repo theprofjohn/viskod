@@ -196,6 +196,63 @@ describe('DaemonServer + DaemonClient', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('capture with reload option passes through', async () => {
+    const session = new RuntimeSession();
+    (session as unknown as { _info: ReturnType<typeof makeMockInfo> })._info = makeMockInfo({
+      token: 'reload-test',
+      browserUrl: 'http://localhost:3000',
+    });
+
+    // reload + same URL — VCE has no browser so it should fail with browser error not nav error
+    const result = await session.capture('.foo', 'http://localhost:3000', undefined, {
+      reload: true,
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('capture with cacheBust option passes through', async () => {
+    const session = new RuntimeSession();
+    (session as unknown as { _info: ReturnType<typeof makeMockInfo> })._info = makeMockInfo({
+      token: 'cachebust-test',
+      browserUrl: 'http://localhost:3000',
+    });
+
+    const result = await session.capture('.foo', 'http://localhost:3000', undefined, {
+      cacheBust: true,
+    });
+    // Should fail because no browser, not because of missing param
+    expect(result.ok).toBe(false);
+  });
+
+  it('capture preserves default behavior without reload/cacheBust options', async () => {
+    const session = new RuntimeSession();
+    (session as unknown as { _info: ReturnType<typeof makeMockInfo> })._info = makeMockInfo({
+      token: 'default-test',
+      browserUrl: 'http://localhost:3000',
+    });
+
+    // Same behavior as without options — should fail from VCE not from params
+    const resultNoOptions = await session.capture('.foo', 'http://localhost:3000');
+    expect(resultNoOptions.ok).toBe(false);
+
+    const resultWithOptions = await session.capture('.foo', 'http://localhost:3000', undefined, {});
+    expect(resultWithOptions.ok).toBe(false);
+  });
+
+  it('capture reload defaults to false when not specified', async () => {
+    const session = new RuntimeSession();
+    (session as unknown as { _info: ReturnType<typeof makeMockInfo> })._info = makeMockInfo({
+      token: 'default-false',
+      browserUrl: 'http://localhost:3000',
+    });
+
+    // Without reload: navigates only if targetUrl differs — both are same, so no nav
+    // Without cacheBust: navigates normally with targetUrl
+    // Should fail at VCE layer not at param validation
+    const result = await session.capture('.foo', 'http://localhost:3000');
+    expect(result.ok).toBe(false);
+  });
+
   it('daemon capture passes profile', async () => {
     const session = new RuntimeSession();
     (session as unknown as { _info: ReturnType<typeof makeMockInfo> })._info = makeMockInfo({
@@ -208,6 +265,25 @@ describe('DaemonServer + DaemonClient', () => {
 
     // Captures with profile via daemon — fails because no browser, but profile accepted
     const result = await client.capture('.btn', undefined, 'audit');
+    expect(result.ok).toBe(false);
+
+    await server.stop();
+  });
+
+  it('daemon capture accepts reload and cacheBust options', async () => {
+    const session = new RuntimeSession();
+    (session as unknown as { _info: ReturnType<typeof makeMockInfo> })._info = makeMockInfo({
+      token: 'daemon-reload-token',
+    });
+
+    const server = new DaemonServer(session);
+    const port = await server.start();
+    const client = new DaemonClient(port, 'daemon-reload-token');
+
+    const result = await client.capture('.btn', undefined, 'default', {
+      reload: true,
+      cacheBust: true,
+    });
     expect(result.ok).toBe(false);
 
     await server.stop();

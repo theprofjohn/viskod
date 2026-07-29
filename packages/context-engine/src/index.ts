@@ -195,6 +195,15 @@ export class VisualContextEngine {
     return ok(undefined);
   }
 
+  async reloadPage(): Promise<Result<void>> {
+    if (!this.currentHandle) {
+      return err(this.vceError('VCE_NO_BROWSER', 'Browser not started'));
+    }
+    const result = await this.browserRuntime.reloadPage(this.currentHandle);
+    if (!result.ok) return err(result.error);
+    return ok(undefined);
+  }
+
   async stopBrowser(): Promise<Result<void>> {
     if (!this.currentHandle) return ok(undefined);
     const result = await this.browserRuntime.shutdown(this.currentHandle);

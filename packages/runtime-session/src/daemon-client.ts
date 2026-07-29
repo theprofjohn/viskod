@@ -15,8 +15,19 @@ export class DaemonClient {
     this.token = token;
   }
 
-  async capture(selector: string, url?: string, profile?: string): Promise<Result<ContextPacket>> {
-    const response = await this.request('capture', { selector, url, profile });
+  async capture(
+    selector: string,
+    url?: string,
+    profile?: string,
+    options?: { reload?: boolean; cacheBust?: boolean },
+  ): Promise<Result<ContextPacket>> {
+    const response = await this.request('capture', {
+      selector,
+      url,
+      profile,
+      reload: options?.reload,
+      cacheBust: options?.cacheBust,
+    });
     if (!response) {
       return err(this.clientError('DAEMON_NO_RESPONSE', 'No response from daemon'));
     }
