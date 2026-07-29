@@ -1,16 +1,28 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { EventBus } from '@viskod/event-bus';
 import type { Result, ViskodError } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 
-import type { HintEngineHealth, HintEvidence, HintInput, SourceHint } from './types';
+import type {
+  DiscoveryMethod,
+  HintEngineHealth,
+  HintEvidence,
+  HintInput,
+  SourceHint,
+} from './types';
 
 export type { HintEngineHealth, HintEvidence, HintInput, SourceHint };
 export * from './types';
 
-const SCHEMA_VERSION = '0.0.1';
+const SCHEMA_VERSION = '1.0.0';
 const MIN_CONFIDENCE = 0.1;
 const MAX_HINTS = 10;
 const SUBSYSTEM = 'source-hint-engine';
+
+const EXTENSION_PATTERNS = ['.tsx', '.jsx', '.vue', '.svelte', '.ts', '.js', '.css'];
+
+const STYLE_EXTENSIONS = ['.css', '.scss', '.less', '.module.css', '.module.scss'];
 
 function dirBasename(dir: string): string {
   const parts = dir.split('/');
@@ -43,9 +55,54 @@ function djb2(str: string): string {
   return (hash >>> 0).toString(16);
 }
 
+function resolvePathWithCase(
+  rootPath: string,
+  relativePath: string,
+): { resolved: string | null; matchType: 'exact' | 'case-insensitive' | null } {
+  const full = path.join(rootPath, relativePath.replace(/\//g, path.sep));
+  if (fs.existsSync(full)) return { resolved: full, matchType: 'exact' };
+  const parent = path.dirname(full);
+  const targetBase = path.basename(full);
+  if (!fs.existsSync(parent)) return { resolved: null, matchType: null };
+  try {
+    const entries = fs.readdirSync(parent);
+    // Normalize by removing non-alphanumeric chars for case-insensitive comparison
+    const normalizeForCompare = (s: string) => s.replace(/[^a-z0-9.]/gi, '').toLowerCase();
+    const normalizedTarget = normalizeForCompare(targetBase);
+    const ciMatch = entries.find((e) => normalizeForCompare(e) === normalizedTarget);
+    if (ciMatch) return { resolved: path.join(parent, ciMatch), matchType: 'case-insensitive' };
+  } catch {
+    // permission error
+  }
+  return { resolved: null, matchType: null };
+}
+
+function findAdjacentStyleFiles(
+  rootPath: string,
+  componentDir: string,
+  componentName: string,
+): string[] {
+  const results: string[] = [];
+  const dirPath = path.join(rootPath, componentDir.replace(/\//g, path.sep));
+  if (!fs.existsSync(dirPath)) return results;
+  try {
+    const entries = fs.readdirSync(dirPath);
+    const baseName = path.basename(componentName, path.extname(componentName));
+    for (const entry of entries) {
+      const ext = path.extname(entry).toLowerCase();
+      const entryBase = path.basename(entry, ext);
+      if (STYLE_EXTENSIONS.includes(ext) && entryBase.toLowerCase() === baseName.toLowerCase()) {
+        results.push(`${componentDir}/${entry}`);
+      }
+    }
+  } catch {
+    // permission error
+  }
+  return results;
+}
+
 function scoreHint(evidence: HintEvidence[]): number {
   if (evidence.length === 0) return 0;
-
   let weightedSum = 0;
   let totalWeight = 0;
   for (const e of evidence) {
@@ -65,6 +122,110 @@ function buildHintId(filePath: string, evidence: HintEvidence[]): string {
   const evidenceHash = djb2(evidence.map((e) => e.type).join(','));
   return `${encodeURIComponent(filePath)}#${evidenceHash}`;
 }
+
+// ---- Existence + case-insensitive aware class-name matching ----
+
+interface ResolvedCandidate {
+  filePath: string;
+  exists: boolean;
+  matchType:
+    | 'exact'
+    | 'case-insensitive'
+    | 'style-adjacent'
+    | 'generated-non-existing'
+    | 'generated';
+  reason: string;
+  relatedSelector?: string;
+  confidence: number;
+  discoveryMethod: DiscoveryMethod;
+}
+
+function collectResolvedCandidates(input: HintInput): ResolvedCandidate[] {
+  const candidates: ResolvedCandidate[] = [];
+  const rootPath = input.project.metadata.rootPath;
+  const dirs = input.project.componentIndex?.directories ?? [];
+  const dc = input.domContext;
+  if (!rootPath || dirs.length === 0) return candidates;
+
+  const searchTerms: string[] = [];
+  if (dc.className) {
+    searchTerms.push(...dc.className.split(/\s+/).filter(Boolean));
+  }
+
+  const seenPaths = new Set<string>();
+
+  for (const term of searchTerms) {
+    const lowerTerm = term.toLowerCase();
+    // Generate candidate file paths from class name patterns
+    const generatedPaths: string[] = [];
+    for (const dir of dirs) {
+      for (const ext of EXTENSION_PATTERNS) {
+        generatedPaths.push(`${dir}/${lowerTerm}${ext}`);
+        generatedPaths.push(`${dir}/${lowerTerm}/index${ext}`);
+        generatedPaths.push(`${dir}/components/${lowerTerm}${ext}`);
+      }
+    }
+
+    for (const genPath of generatedPaths) {
+      if (seenPaths.has(genPath)) continue;
+      seenPaths.add(genPath);
+
+      const { resolved, matchType } = resolvePathWithCase(rootPath, genPath);
+
+      if (resolved) {
+        // File exists (exact or case-insensitive)
+        const relPath = path.relative(rootPath, resolved).replace(/\\/g, '/');
+        const ci = matchType === 'case-insensitive';
+        const confidence = ci ? 0.85 : 0.95;
+        candidates.push({
+          filePath: relPath,
+          exists: true,
+          matchType: ci ? 'case-insensitive' : 'exact',
+          reason: ci
+            ? `Case-insensitive match: generated "${genPath}" resolved to "${relPath}"`
+            : `File exists: ${relPath} (matched from class "${term}")`,
+          relatedSelector: term,
+          confidence,
+          discoveryMethod: ci ? 'case-insensitive' : 'file-exists',
+        });
+
+        // Adjacent style files
+        const componentName = path.basename(resolved);
+        const relativeDir = path.dirname(relPath).replace(/\\/g, '/');
+        const styleFiles = findAdjacentStyleFiles(rootPath, relativeDir, componentName);
+        for (const sf of styleFiles) {
+          if (seenPaths.has(sf)) continue;
+          seenPaths.add(sf);
+          candidates.push({
+            filePath: sf,
+            exists: true,
+            matchType: 'style-adjacent',
+            reason: `Style file adjacent to component "${relPath}": ${sf}`,
+            relatedSelector: term,
+            confidence: 0.8,
+            discoveryMethod: 'style-adjacent',
+          });
+        }
+      } else {
+        // Generated candidate does not exist
+        const confidence = 0.3;
+        candidates.push({
+          filePath: genPath,
+          exists: false,
+          matchType: 'generated-non-existing',
+          reason: `Generated from class "${term}": ${genPath} (file does not exist)`,
+          relatedSelector: term,
+          confidence,
+          discoveryMethod: 'class-name-match',
+        });
+      }
+    }
+  }
+
+  return candidates;
+}
+
+// ---- Legacy matchers (used for non-existence-based evidence) ----
 
 function matchRoute(input: HintInput): HintEvidence[] {
   const evidence: HintEvidence[] = [];
@@ -105,7 +266,7 @@ function matchComponentName(input: HintInput): HintEvidence[] {
   return evidence;
 }
 
-function matchClassName(input: HintInput): HintEvidence[] {
+function matchClassNameLegacy(input: HintInput): HintEvidence[] {
   const evidence: HintEvidence[] = [];
   const dirs = input.project.componentIndex?.directories;
   const dc = input.domContext;
@@ -132,7 +293,6 @@ function matchClassName(input: HintInput): HintEvidence[] {
       `${term}.component.tsx`,
       `${term}.component.jsx`,
     ];
-
     for (const pattern of patterns) {
       for (const dir of dirs) {
         const candidate = `${dir}/${pattern}`.toLowerCase();
@@ -149,193 +309,6 @@ function matchClassName(input: HintInput): HintEvidence[] {
     }
   }
   return evidence;
-}
-
-function matchFrameworkConvention(input: HintInput): HintEvidence[] {
-  const evidence: HintEvidence[] = [];
-  const fw = input.framework?.framework ?? input.project.framework?.primary;
-  if (!fw) return evidence;
-
-  const matched = input.route.matchedRoute;
-  if (!matched) return evidence;
-
-  const conventions: Record<string, (path: string, file: string) => HintEvidence | null> = {
-    nextjs: (path, _file) => {
-      const cleanPath = path.replace(/\[.*?\]/g, '[param]');
-      const pageFile = `app${cleanPath}/page.tsx`;
-      return {
-        type: 'framework-convention',
-        weight: 0.25,
-        detail: `Next.js App Router convention: route "${path}" maps to "${pageFile}"`,
-        confidence: 0.75,
-      };
-    },
-    nuxt: (path, _file) => {
-      const cleanPath = path.replace(/:.*?(\/|$)/g, '_$1');
-      const pageFile = `pages${cleanPath}.vue`;
-      return {
-        type: 'framework-convention',
-        weight: 0.25,
-        detail: `Nuxt Pages convention: route "${path}" maps to "${pageFile}"`,
-        confidence: 0.7,
-      };
-    },
-    sveltekit: (path, _file) => {
-      const pageFile = `routes${path}/+page.svelte`;
-      return {
-        type: 'framework-convention',
-        weight: 0.25,
-        detail: `SvelteKit convention: route "${path}" maps to "${pageFile}"`,
-        confidence: 0.75,
-      };
-    },
-  };
-
-  const fwLower = fw.toLowerCase();
-  for (const [key, fn] of Object.entries(conventions)) {
-    if (fwLower.includes(key) || key.includes(fwLower)) {
-      const item = fn(matched.path, matched.file);
-      if (item) evidence.push(item);
-    }
-  }
-  return evidence;
-}
-
-function matchId(input: HintInput): HintEvidence[] {
-  const evidence: HintEvidence[] = [];
-  const dc = input.domContext;
-  if (!dc.id) return evidence;
-
-  const dirs = input.project.componentIndex?.directories ?? [];
-  for (const dir of dirs) {
-    const lowerDir = dir.toLowerCase();
-    const lowerId = dc.id.toLowerCase();
-    if (lowerDir.includes(lowerId) || lowerId.includes(dirBasename(lowerDir))) {
-      evidence.push({
-        type: 'id-match',
-        weight: 0.3,
-        detail: `Element id "${dc.id}" matches directory "${dir}"`,
-        confidence: 0.6,
-      });
-    }
-  }
-  return evidence;
-}
-
-function matchDataAttribute(input: HintInput): HintEvidence[] {
-  const evidence: HintEvidence[] = [];
-  const dc = input.domContext;
-  if (!dc.testId) return evidence;
-
-  const dirs = input.project.componentIndex?.directories ?? [];
-  for (const dir of dirs) {
-    const lowerDir = dir.toLowerCase();
-    const lowerTestId = dc.testId.toLowerCase();
-    if (lowerDir.includes(lowerTestId) || lowerTestId.includes(dirBasename(lowerDir))) {
-      evidence.push({
-        type: 'testid-match',
-        weight: 0.3,
-        detail: `Test ID "${dc.testId}" matches directory "${dir}"`,
-        confidence: 0.55,
-      });
-    }
-  }
-  return evidence;
-}
-
-function collectCandidates(
-  input: HintInput,
-): Array<{ filePath: string; evidence: HintEvidence[] }> {
-  const candidates: Array<{ filePath: string; evidence: HintEvidence[] }> = [];
-  const matched = input.route.matchedRoute;
-
-  // a) Route correlation
-  const routeEvidence = matchRoute(input);
-  if (routeEvidence.length > 0 && matched) {
-    candidates.push({ filePath: matched.file, evidence: routeEvidence });
-  }
-
-  // b) Component naming
-  const componentEvidence = matchComponentName(input);
-  if (componentEvidence.length > 0) {
-    const seen = new Set<string>();
-    for (const ev of componentEvidence) {
-      const fp = ev.detail.match(/"(.+?)"/)?.[1] ?? '';
-      if (fp && !seen.has(fp)) {
-        seen.add(fp);
-        candidates.push({ filePath: fp, evidence: [ev] });
-      }
-    }
-  }
-
-  // c) Class name matching
-  const classNameEvidence = matchClassName(input);
-  if (classNameEvidence.length > 0) {
-    const seen = new Set<string>();
-    for (const ev of classNameEvidence) {
-      const match = ev.detail.match(/"(.*?)"/g);
-      const fp = match?.[1]?.replace(/^"|"$/g, '') ?? '';
-      if (fp && !seen.has(fp)) {
-        seen.add(fp);
-        candidates.push({ filePath: fp, evidence: [ev] });
-      }
-    }
-  }
-
-  // d) Framework convention
-  const fwEvidence = matchFrameworkConvention(input);
-  if (fwEvidence.length > 0) {
-    const seen = new Set<string>();
-    for (const ev of fwEvidence) {
-      const match = ev.detail.match(/"(.*?)"/);
-      const fp = match?.[1] ?? '';
-      if (fp && !seen.has(fp)) {
-        seen.add(fp);
-        candidates.push({ filePath: fp, evidence: [ev] });
-      }
-    }
-  }
-
-  // e) ID matching
-  const idEvidence = matchId(input);
-  if (idEvidence.length > 0) {
-    const seen = new Set<string>();
-    for (const ev of idEvidence) {
-      const match = ev.detail.match(/"(.+?)"/);
-      const fp = match?.[1] ?? '';
-      if (fp && !seen.has(fp)) {
-        seen.add(fp);
-        candidates.push({ filePath: fp, evidence: [ev] });
-      }
-    }
-  }
-
-  // f) Data attribute
-  const dataEvidence = matchDataAttribute(input);
-  if (dataEvidence.length > 0) {
-    const seen = new Set<string>();
-    for (const ev of dataEvidence) {
-      const match = ev.detail.match(/"(.+?)"/);
-      const fp = match?.[1] ?? '';
-      if (fp && !seen.has(fp)) {
-        seen.add(fp);
-        candidates.push({ filePath: fp, evidence: [ev] });
-      }
-    }
-  }
-
-  return candidates;
-}
-
-function determineDiscoveryMethod(evidence: HintEvidence[]): SourceHint['discoveryMethod'] {
-  const types = evidence.map((e) => e.type);
-  if (types.some((t) => t === 'route-match' || t === 'framework-convention'))
-    return 'route-correlation';
-  if (types.some((t) => t === 'component-name-match')) return 'component-naming';
-  if (types.some((t) => t === 'class-name-match' || t === 'id-match' || t === 'testid-match'))
-    return 'class-name-match';
-  if (types.some((t) => t === 'framework-convention')) return 'framework-convention';
-  return 'heuristic-match';
 }
 
 export class SourceHintEngine {
@@ -364,52 +337,111 @@ export class SourceHintEngine {
         );
       }
 
-      const cacheKey = buildCacheKey(input);
-      const cached = this.cache.get(cacheKey);
-      if (cached) {
-        return ok(cached);
-      }
-
-      const fromCandidates = collectCandidates(input);
-
-      if (fromCandidates.length === 0) {
-        this.hintsFailed++;
+      if (!input.project.metadata.rootPath) {
         return err(
           shError(
-            'SH_NO_CANDIDATES',
-            'No source hint candidates were found.',
-            'The DOM evidence and project data did not yield any candidates.',
-            'Try capturing more specific UI elements or ensure the project has been scanned.',
+            'SH_NO_ROOT_PATH',
+            'Project root path is missing.',
+            'SourceHintEngine needs rootPath to check file existence.',
+            'Ensure ProjectScanner provides rootPath in project metadata.',
           ),
         );
       }
 
-      // Merge duplicate filePaths: combine evidence, keep highest-confidence entry
-      const merged = new Map<string, HintEvidence[]>();
-      for (const c of fromCandidates) {
-        const existing = merged.get(c.filePath);
-        if (!existing || c.evidence.length > existing.length) {
-          merged.set(c.filePath, c.evidence);
+      const cacheKey = buildCacheKey(input);
+      const cached = this.cache.get(cacheKey);
+      if (cached) return ok(cached);
+
+      // Phase 1: existence-aware resolution (new)
+      const resolvedCandidates = collectResolvedCandidates(input);
+
+      // Phase 2: legacy evidence collection for additional context
+      const legacyCandidates: Array<{ filePath: string; evidence: HintEvidence[] }> = [];
+      const matched = input.route.matchedRoute;
+      const routeEvidence = matchRoute(input);
+      if (routeEvidence.length > 0 && matched) {
+        legacyCandidates.push({ filePath: matched.file, evidence: routeEvidence });
+      }
+      const componentEvidence = matchComponentName(input);
+      if (componentEvidence.length > 0) {
+        const seen = new Set<string>();
+        for (const ev of componentEvidence) {
+          const fp = ev.detail.match(/"(.+?)"/)?.[1] ?? '';
+          if (fp && !seen.has(fp)) {
+            seen.add(fp);
+            legacyCandidates.push({ filePath: fp, evidence: [ev] });
+          }
+        }
+      }
+      const legacyClassNameEvidence = matchClassNameLegacy(input);
+      if (legacyClassNameEvidence.length > 0) {
+        const seen = new Set<string>();
+        for (const ev of legacyClassNameEvidence) {
+          const match = ev.detail.match(/"(.*?)"/g);
+          const fp = match?.[1]?.replace(/^"|"$/g, '') ?? '';
+          if (fp && !seen.has(fp)) {
+            seen.add(fp);
+            legacyCandidates.push({ filePath: fp, evidence: [ev] });
+          }
+        }
+      }
+
+      // Merge existence-aware candidates with legacy evidence
+      // Priority: exact existing > case-insensitive > style-adjacent > existing with legacy > generated non-existing
+      const existingPaths = new Set(
+        resolvedCandidates.filter((c) => c.exists).map((c) => c.filePath.toLowerCase()),
+      );
+
+      // Boost existing resolved candidates with any matching legacy evidence
+      const scoredMap = new Map<string, ResolvedCandidate>();
+      for (const rc of resolvedCandidates) {
+        const key = rc.filePath.toLowerCase();
+        if (!scoredMap.has(key) || rc.confidence > (scoredMap.get(key)?.confidence ?? 0)) {
+          scoredMap.set(key, rc);
+        }
+      }
+
+      // Add legacy candidates that weren't found by existence check
+      for (const lc of legacyCandidates) {
+        const key = lc.filePath.toLowerCase();
+        if (!existingPaths.has(key) && !scoredMap.has(key)) {
+          const confidence = scoreHint(lc.evidence);
+          scoredMap.set(key, {
+            filePath: lc.filePath,
+            exists: false,
+            matchType: 'generated',
+            reason: `Generated from evidence: ${lc.evidence.map((e) => e.type).join(', ')}`,
+            confidence,
+            discoveryMethod: 'class-name-match',
+          });
         }
       }
 
       const scored: SourceHint[] = [];
-
-      for (const [filePath, evidence] of merged) {
-        const confidence = scoreHint(evidence);
-
-        if (confidence < MIN_CONFIDENCE) continue;
-
+      for (const [, hint] of scoredMap) {
+        if (hint.confidence < MIN_CONFIDENCE) continue;
+        const evidence: HintEvidence[] = [
+          {
+            type: 'file-exists',
+            weight: 0.5,
+            detail: hint.reason,
+            confidence: hint.confidence,
+          },
+        ];
         scored.push({
-          hintId: buildHintId(filePath, evidence),
-          filePath,
-          confidence: Math.round(confidence * 10000) / 10000,
+          hintId: buildHintId(hint.filePath, evidence),
+          filePath: hint.filePath,
+          confidence: Math.round(hint.confidence * 10000) / 10000,
           evidence,
-          discoveryMethod: determineDiscoveryMethod(evidence),
+          discoveryMethod: hint.discoveryMethod,
           framework: input.framework?.framework ?? input.project.framework?.primary ?? undefined,
           isPrimary: false,
           timestamp: new Date().toISOString(),
           schemaVersion: SCHEMA_VERSION,
+          exists: hint.exists,
+          matchType: hint.matchType,
+          reason: hint.reason,
+          relatedSelector: hint.relatedSelector,
         });
       }
 
@@ -419,45 +451,39 @@ export class SourceHintEngine {
           shError(
             'SH_INSUFFICIENT_EVIDENCE',
             'No hints met the minimum confidence threshold.',
-            `All ${fromCandidates.length} candidates scored below ${MIN_CONFIDENCE}.`,
-            'Provide additional DOM evidence (id, testId, classList) or re-scan the project.',
+            `All candidates scored below ${MIN_CONFIDENCE}.`,
+            'Provide additional DOM evidence or re-scan the project.',
           ),
         );
       }
 
       scored.sort((a, b) => b.confidence - a.confidence);
 
-      // Deduplicate by filePath: keep highest confidence
       const deduped: SourceHint[] = [];
       const seenFilePaths = new Set<string>();
       for (const hint of scored) {
-        if (seenFilePaths.has(hint.filePath)) continue;
-        seenFilePaths.add(hint.filePath);
+        if (seenFilePaths.has(hint.filePath.toLowerCase())) continue;
+        seenFilePaths.add(hint.filePath.toLowerCase());
         deduped.push(hint);
         if (deduped.length >= MAX_HINTS) break;
       }
 
-      if (deduped[0]) {
-        deduped[0].isPrimary = true;
-      }
+      if (deduped[0]) deduped[0].isPrimary = true;
 
       this.cache.set(cacheKey, deduped);
       this.hintsGenerated++;
-
-      const elapsed = performance.now() - startTime;
-      this.processingTimes.push(elapsed);
 
       this.eventBus.publish({
         eventId: crypto.randomUUID(),
         eventType: 'SH_EVENT:HINTS_GENERATED',
         timestamp: new Date().toISOString(),
-        version: '0.0.1',
+        version: SCHEMA_VERSION,
         source: 'source-hint-engine',
         correlationId: input.captureId ?? crypto.randomUUID(),
         payload: {
           hintCount: deduped.length,
           primaryHint: deduped[0]?.filePath ?? null,
-          processingTimeMs: Math.round(elapsed),
+          processingTimeMs: Math.round(performance.now() - startTime),
         },
       });
 
@@ -486,13 +512,15 @@ export class SourceHintEngine {
         ),
       );
     }
-
     const lines: string[] = [];
     lines.push(`## Source Hint: \`${hint.filePath}\``);
     lines.push('');
     lines.push(`- **Confidence:** ${(hint.confidence * 100).toFixed(1)}%`);
+    lines.push(`- **Exists:** ${hint.exists ? 'Yes' : 'No'}`);
+    lines.push(`- **Match Type:** ${hint.matchType}`);
     lines.push(`- **Discovery Method:** ${hint.discoveryMethod}`);
-    lines.push(`- **Framework:** ${hint.framework ?? 'unknown'}`);
+    lines.push(`- **Reason:** ${hint.reason}`);
+    if (hint.relatedSelector) lines.push(`- **Related Selector:** ${hint.relatedSelector}`);
     lines.push(`- **Primary Hint:** ${hint.isPrimary ? 'Yes' : 'No'}`);
     lines.push('');
     lines.push('### Evidence');
@@ -506,17 +534,19 @@ export class SourceHintEngine {
     }
     lines.push('');
     lines.push('### Interpretation');
-    lines.push('');
-    if (hint.confidence >= 0.8) {
-      lines.push('High confidence. This is likely the correct source file.');
-    } else if (hint.confidence >= 0.5) {
+    if (hint.exists && hint.matchType === 'exact') {
       lines.push(
-        'Moderate confidence. This file may be the source, but verification is recommended.',
+        'File confirmed on disk with exact name match. High confidence this is the correct source file.',
       );
+    } else if (hint.exists && hint.matchType === 'case-insensitive') {
+      lines.push('File found on disk via case-insensitive match. Likely the correct source file.');
+    } else if (hint.exists && hint.matchType === 'style-adjacent') {
+      lines.push('Style file adjacent to a confirmed component. Likely the correct style source.');
     } else {
-      lines.push('Low confidence. Treat this as a suggestion only. More evidence is needed.');
+      lines.push(
+        'Low confidence. Treat this as a suggestion only — the file does not exist on disk.',
+      );
     }
-
     return ok(lines.join('\n'));
   }
 
@@ -526,17 +556,12 @@ export class SourceHintEngine {
       this.processingTimes.length > 0
         ? Math.round(this.processingTimes.reduce((a, b) => a + b, 0) / this.processingTimes.length)
         : 0;
-
     let status: HintEngineHealth['status'] = 'healthy';
     if (total > 0) {
       const failRate = this.hintsFailed / total;
-      if (failRate >= 0.5) {
-        status = 'unavailable';
-      } else if (failRate >= 0.25) {
-        status = 'degraded';
-      }
+      if (failRate >= 0.5) status = 'unavailable';
+      else if (failRate >= 0.25) status = 'degraded';
     }
-
     return {
       status,
       hintsGenerated: this.hintsGenerated,

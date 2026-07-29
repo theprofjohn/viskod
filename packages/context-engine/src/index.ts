@@ -96,6 +96,10 @@ interface SourceHintEntry {
   confidence: number;
   evidence: string;
   isPrimary?: boolean;
+  exists?: boolean;
+  matchType?: string;
+  reason?: string;
+  relatedSelector?: string;
 }
 
 export interface VCEHealth {
@@ -405,6 +409,10 @@ export class VisualContextEngine {
                 confidence: hint.confidence,
                 evidence: hint.evidence.map((e) => e.detail).join('; '),
                 isPrimary: hint.isPrimary,
+                exists: hint.exists,
+                matchType: hint.matchType,
+                reason: hint.reason,
+                relatedSelector: hint.relatedSelector,
               });
             }
           }

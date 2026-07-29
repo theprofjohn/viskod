@@ -3,6 +3,9 @@ export type DiscoveryMethod =
   | 'component-naming'
   | 'class-name-match'
   | 'framework-convention'
+  | 'file-exists'
+  | 'style-adjacent'
+  | 'case-insensitive'
   | 'heuristic-match';
 
 export type EvidenceType =
@@ -15,6 +18,9 @@ export type EvidenceType =
   | 'framework-convention'
   | 'directory-convention'
   | 'data-attribute-match'
+  | 'file-exists'
+  | 'case-insensitive-match'
+  | 'style-adjacent'
   | 'heuristic';
 
 export interface HintEvidence {
@@ -34,6 +40,15 @@ export interface SourceHint {
   isPrimary: boolean;
   timestamp: string;
   schemaVersion: string;
+  exists: boolean;
+  matchType:
+    | 'exact'
+    | 'case-insensitive'
+    | 'style-adjacent'
+    | 'generated-non-existing'
+    | 'generated';
+  reason: string;
+  relatedSelector?: string;
 }
 
 export interface DOMContext {
