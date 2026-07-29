@@ -184,9 +184,53 @@ An agent receiving only this brief could:
 
 | Check | Result |
 |---|---|
+| `pnpm check` (biome + tsc + vitest) | ✅ Pass (pre-existing `.opencode/` lint only) |
+| `biome check .` (project code) | ✅ 0 errors on 118 project files |
 | `tsc -b` (TypeScript strict) | ✅ 0 errors |
 | `vitest run` | ✅ **205 tests**, 0 failed (19 files) |
 | New exporter tests | ✅ 12/12 pass |
+
+## Brief-Only Dogfood Test
+
+### Setup
+
+1. **Fixtured reverted to broken state** — `TargetCard.css` restored to broken CSS
+2. **Server started** — `node examples/phase12-source-hint-app/server.cjs`
+3. **Capture with debug profile**:
+   ```
+   npx tsx packages/cli/src/index.ts capture ".target-card" --profile debug --url http://127.0.0.1:3000 --project-path examples/phase12-source-hint-app
+   ```
+4. **Export markdown brief**:
+   ```
+   npx tsx packages/cli/src/index.ts export .viskod/captures/.../packet.json --format markdown --out phase14-brief.md
+   ```
+
+**Output file:** `C:\Viskod\phase14-brief.md` (76 lines)
+
+### Blind Agent Process
+
+The agent received **only** `phase14-brief.md` — no raw packet.json, no file paths beyond what appeared in the brief.
+
+| Step | Action | Source from Brief |
+|---|---|---|
+| 1 | Read PRIMARY source hint `src/components/TargetCard.jsx` (85%) | Source Hints table (#1) |
+| 2 | Read style hint `src/components/TargetCard.css` (80%) | Source Hints table (#2) |
+| 3 | Searched for `TargetCard.css` in repo root | Found at `src/components/TargetCard.css` |
+| 4 | Read bounding box: `w=640 h=110.89` — confirmed tight padding | Bounding Box line |
+| 5 | Read `TargetCard.css`, found `padding: 10px 8px`, `width: 100%`, `color: #999` | Code read (guided by brief) |
+| 6 | Applied fix: `padding: 20px`, removed `width: 100%`, fixed contrast `#555`, added border | Code edit |
+| 7 | Re-captured: height increased from **110.89 → 147.50** | Re-capture after fix |
+
+### Did the Brief Suffice?
+
+**YES.** The agent was able to:
+- Identify the component file: `src/components/TargetCard.jsx` (from brief hint #1)
+- Identify the style file: `src/components/TargetCard.css` (from brief hint #2)
+- Confirm the visual issue: bounding box `h=110.89` (too tight for a card)
+- Identify the network failure: `POST 500` (button click failed, suggesting full-width issue)
+- Apply the fix and verify with re-capture (height 110.89 → 147.50)
+
+**Without the brief, the agent would have:** no selector, no bounding box, no source file hints, no runtime evidence summary.
 
 ## Remaining Limitations
 
