@@ -44,7 +44,7 @@ describe('CapturePipeline', () => {
   }
 
   describe('screenshot path metadata', () => {
-    it('includes capture directory in StoredCapture after persist', async () => {
+    it('includes absolute capture directory in StoredCapture after persist', async () => {
       const packet = { packetId: crypto.randomUUID() };
       const screenshots = [
         {
@@ -65,7 +65,7 @@ describe('CapturePipeline', () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.captureDir).toBeDefined();
-        expect(result.value.captureDir).toContain(TEST_DIR);
+        expect(path.isAbsolute(result.value.captureDir)).toBe(true);
         expect(fs.existsSync(result.value.captureDir)).toBe(true);
         expect(result.value.screenshotCount).toBe(1);
       }
@@ -107,6 +107,53 @@ describe('CapturePipeline', () => {
         const meta = JSON.parse(fs.readFileSync(path.join(captureDir, 'metadata.json'), 'utf-8'));
         expect(meta.screenshots[0].path).toBe('viewport.png');
         expect(meta.screenshots[1].path).toBe('selection.jpeg');
+      }
+    });
+
+    it('allows resolving screenshot files via captureDir without exposing bare local paths as normal data', async () => {
+      const packet = { packetId: crypto.randomUUID() };
+      const screenshots = [
+        {
+          captureId: crypto.randomUUID(),
+          type: 'viewport' as const,
+          buffer: Buffer.alloc(256),
+          format: 'png' as const,
+          width: 1280,
+          height: 720,
+        },
+      ];
+
+      const result = await pipeline.persistCapture(packet, screenshots, 'http://localhost:3000', {
+        width: 1280,
+        height: 720,
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const stored = result.value;
+
+        // Consumer can resolve the full path using cwd or project root
+        const resolvedFromRelative = path.resolve(
+          process.cwd(),
+          path.relative(process.cwd(), stored.captureDir),
+        );
+        expect(fs.existsSync(path.join(resolvedFromRelative, 'viewport.png'))).toBe(true);
+
+        // Consumer does NOT need to parse the captureDir to locate files:
+        // screenshot paths within metadata.json are simple filenames (viewport.png, selection.png)
+        const meta = JSON.parse(
+          fs.readFileSync(path.join(stored.captureDir, 'metadata.json'), 'utf-8'),
+        );
+        for (const shot of meta.screenshots) {
+          expect(shot.path).not.toContain(path.sep);
+          expect(shot.path).toMatch(/^\w+\.\w+$/);
+        }
+
+        // Consumer can reconstruct the full screenshot path from metadata + captureDir
+        for (const shot of meta.screenshots) {
+          const fullPath = path.join(stored.captureDir, shot.path);
+          expect(fs.existsSync(fullPath)).toBe(true);
+        }
       }
     });
   });

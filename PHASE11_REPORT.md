@@ -19,7 +19,7 @@ Fix remaining P2 engineering hygiene issues: TypeScript project references, scre
 **After:**
 - Root `tsconfig.json` has `references` listing all 19 packages + `apps/studio`
 - Every package `tsconfig.json` has correct `references` declaring its dependency graph
-- Missing workspace dependencies added to 5 packages (`event-bus`, `config`, `browser-runtime`, `capture-pipeline`, `context-engine`, `cli`)
+- Missing workspace dependencies added to 6 packages (`event-bus`, `config`, `browser-runtime`, `capture-pipeline`, `context-engine`, `cli`)
 - `paths` removed from root tsconfig (vitest uses its own `resolve.alias`; runtime resolution uses pnpm node_modules symlinks)
 - Stale `.js`/`.d.ts` artifacts in `src/` and `dist/` directories cleaned up
 - `**/dist` and root-level compiled artifacts added to `.gitignore`
@@ -30,11 +30,12 @@ Fix remaining P2 engineering hygiene issues: TypeScript project references, scre
 **Before:** `ContextPacket.screenshots[].path` stored an unresolvable relative filename (`<captureId>.png` from browser-runtime). `StoredCapture` had no directory information. A consumer holding a `ContextPacket` could not locate the persisted screenshot on disk.
 
 **After:**
-- `StoredCapture.captureDir: string` — absolute path to the capture directory on disk
-- `ScreenshotInfo.captureDir?: string` — absolute path set after persistence
+- `StoredCapture.captureDir: string` — absolute path to the capture directory on disk (internal)
+- `ScreenshotInfo.captureDir?: string` — workspace-relative path (no absolute local path exposed in packet)
+- `ScreenshotInfo.absoluteCaptureDir?: string` — absolute path (local-only, not for external distribution)
 - `capture-pipeline.persistCapture()` returns `captureDir` in the `StoredCapture`
-- `context-engine` updates `packet.screenshots[].captureDir` after persist succeeds
-- Paths are resolvable: `path.join(captureDir, screenshot.path)` gives the actual file
+- `context-engine` computes workspace-relative `captureDir` from project root (if known) and stores absolute in `absoluteCaptureDir`
+- External consumers resolve screenshots via: `path.resolve(projectRoot, captureDir, screenshot.path)`
 
 ### 3. RuntimeSession Path Bug Fixed
 
@@ -59,15 +60,15 @@ Fix remaining P2 engineering hygiene issues: TypeScript project references, scre
 
 ## Files Changed
 
-**30 files changed, +556 / -57 lines**
+**32 files changed, +883 / -57 lines**
 
 | Category | Files | Changes |
 |---|---|---|
 | **Tsconfig references** | `tsconfig.json`, 19× `packages/*/tsconfig.json`, `apps/studio/tsconfig.json` | Added `references` arrays; removed `paths` from root |
 | **Missing deps** | `packages/event-bus/package.json`, `config/package.json`, `browser-runtime/package.json`, `capture-pipeline/package.json`, `context-engine/package.json`, `cli/package.json` | Added `@viskod/*: "workspace:*"` dependencies |
-| **Screenshot path** | `packages/capture-pipeline/src/index.ts`, `packages/context-engine/src/index.ts` | Added `captureDir` to `StoredCapture`, `ScreenshotInfo`; update after persist |
+| **Screenshot path** | `packages/capture-pipeline/src/index.ts`, `packages/context-engine/src/index.ts` | Added `captureDir` to `StoredCapture`; `ScreenshotInfo` now uses workspace-relative `captureDir` + internal `absoluteCaptureDir` |
 | **RuntimeSession bug** | `packages/runtime-session/src/runtime-session.ts` | Fixed `CapturePipeline` baseDir path |
-| **New tests** | `packages/capture-pipeline/src/capture-pipeline.test.ts` | 7 tests for path metadata + cleanup |
+| **New tests** | `packages/capture-pipeline/src/capture-pipeline.test.ts` | 8 tests for path metadata, privacy, + cleanup |
 | **Gitignore** | `.gitignore` | Added `**/dist`, root `/*.js`, test artifacts |
 | **Lockfile** | `pnpm-lock.yaml` | Updated automatically |
 
@@ -79,7 +80,7 @@ Fix remaining P2 engineering hygiene issues: TypeScript project references, scre
 |---|---|
 | `pnpm biome check .` | ✅ 0 errors, 95 files checked |
 | `tsc -b` | ✅ 0 errors (clean, including second run) |
-| `vitest run` | ✅ 128 tests, 14 test files |
+| `vitest run` | ✅ 129 tests, 14 test files |
 | `pnpm check` (biome + tsc + vitest) | ✅ Full suite passes |
 
 ---

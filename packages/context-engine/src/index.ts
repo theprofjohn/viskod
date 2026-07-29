@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import type {
   BrowserHandle,
   BrowserRuntime,
@@ -77,6 +78,7 @@ interface ScreenshotInfo {
   format: string;
   sizeBytes: number;
   captureDir?: string;
+  absoluteCaptureDir?: string;
 }
 
 interface SourceHintEntry {
@@ -427,9 +429,13 @@ export class VisualContextEngine {
             packet.browser.viewport,
           );
           if (persistResult.ok) {
+            const absoluteDir = persistResult.value.captureDir;
+            const projectRoot = this.projectScan?.rootPath;
+            const relativeDir = projectRoot ? path.relative(projectRoot, absoluteDir) : absoluteDir;
             packet.screenshots = packet.screenshots.map((s) => ({
               ...s,
-              captureDir: persistResult.value.captureDir,
+              captureDir: relativeDir,
+              absoluteCaptureDir: absoluteDir,
               path: `${s.type}.${s.format}`,
             }));
           }
