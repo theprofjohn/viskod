@@ -369,6 +369,10 @@ export class BrowserRuntime {
 
     try {
       const escaped = selector.replace(/[\\"]/g, '\\$&');
+      // Wait briefly for the element (handles SPA/React hydration timing)
+      await entry.page
+        .waitForSelector(escaped, { state: 'attached', timeout: 5000 })
+        .catch(() => {});
       const snapshot = await entry.page.evaluate(
         `(function(){var el = document.querySelector("${escaped}");if (!el) return null;var walk = function(n, d){if (d > 20) return null;var r = n.getBoundingClientRect();var a = {};for (var i = 0; i < n.attributes.length; i++) a[n.attributes[i].name] = n.attributes[i].value;var c = [];for (var i = 0; i < n.children.length; i++){var ch = n.children[i];if (ch) { var w = walk(ch, d + 1); if (w) c.push(w); }}return {tagName: n.tagName.toLowerCase(), attributes: a, boundingBox: {x: r.x, y: r.y, width: r.width, height: r.height}, children: c, text: (n.textContent || "").slice(0, 500)};};return walk(el, 0);})()`,
       );

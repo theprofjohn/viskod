@@ -308,6 +308,12 @@ async function cmdServe(): Promise<void> {
   }
 
   const session = new RuntimeSession();
+  // Warm up the browser session early so the SPA has time to render
+  // before the first tool call.  Otherwise React/SPA hydration may not
+  // complete in time for the first capture_context DOM query.
+  if (targetUrl) {
+    session.start(targetUrl).catch(() => {});
+  }
   const server = new MCPServer();
 
   server.registerTool(
