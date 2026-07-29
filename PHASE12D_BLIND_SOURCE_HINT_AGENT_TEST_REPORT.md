@@ -139,3 +139,14 @@ The agent successfully used source hints to locate the source file without prior
 **Limitation noted:** the source hint `target-card.tsx` (PRIMARY) did not exist on disk. The actual file was `TargetCard.jsx` (capitalised). The agent needed a case-insensitive search as a bridge. This could be improved by either:
 - Making the source hint engine suggest case-insensitive file lookups
 - Or adding a confidence penalty when the hinted file doesn't exist on disk
+
+---
+
+## P2 Backlog Items (Discovered During Phase 12D)
+
+| # | Item | Rationale |
+|---|---|---|
+| 1 | `SourceHintEngine` should check actual file existence before returning candidates | The PRIMARY hint `target-card.tsx` doesn't exist on disk. Engine wastes agent time with non-existent paths. |
+| 2 | `SourceHintEngine` should support case-insensitive matching on Windows/macOS | Actual file is `TargetCard.jsx` but hint says `target-card.jsx`. Case-insensitive FS would find it, but the engine doesn't account for this. |
+| 3 | Confidence should drop when the hinted path does not exist | All 10 candidates have flat 0.65 confidence. A non-existent file should score lower than one confirmed on disk. |
+| 4 | Exact existing files should rank above generated candidate names | The pattern `target-card.tsx` is generated from class name + extension template. If `TargetCard.jsx` exists on disk, it should rank higher than the speculative `target-card.tsx`.
