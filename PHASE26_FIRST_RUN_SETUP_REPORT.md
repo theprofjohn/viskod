@@ -143,7 +143,7 @@ Two levels — both required:
 - If timeout: falls back to static check (reports fail)
 - Required tools: `viskod_capture_context`, `create_agent_handoff`, `get_agent_handoff`, `list_agent_handoffs`, `create_visual_review`, `get_visual_review`, `recapture_visual_review`, `resolve_usage_site_hints`
 
-## 8. Capture Smoke
+## 9. Capture Smoke
 
 Real capture smoke using VCE generatePacket:
 1. Import BrowserRuntime, CapturePipeline, SelectionEngine, SourceHintEngine, VisualContextEngine
@@ -157,7 +157,9 @@ Real capture smoke using VCE generatePacket:
 7. Return packetId (opaque UUID)
 8. Stop browser cleanly
 
-## 9. Redaction and Path Safety
+When `appUrl` is already persisted in setup state, `run_setup_smoke` uses that URL; otherwise it falls back to data URI.
+
+## 10. Redaction and Path Safety
 
 - Absolute paths stripped from user-facing output
 - Packet paths (`.viskod/`, `captures/`) marked as not user-visible
@@ -166,7 +168,7 @@ Real capture smoke using VCE generatePacket:
 - Root fingerprint is sha256 hash (no raw paths)
 - All check summaries sanitized
 
-## 10. Tests Added
+## 11. Tests Added
 
 ### Setup package unit tests (51)
 
@@ -225,7 +227,7 @@ Real capture smoke using VCE generatePacket:
 | DF26-19 | Real first capture smoke (opaque packetId) | ✅ |
 | DF26-20 | No packet paths/raw JSON/selectors in output | ✅ |
 
-## 11. Regression Results
+## 12. Regression Results
 
 | Suite | Tests | Status |
 |-------|-------|:------:|
@@ -249,7 +251,7 @@ Real capture smoke using VCE generatePacket:
 | All others | 250 | ✅ |
 | **Total non-dogfood** | **626** | **✅** |
 
-## 12. Known Limitations
+## 13. Known Limitations
 
 1. **MCP server startup is slow (~20s)**: The MCP server imports all packages at module level, and tsx transpiles TypeScript on-the-fly. Lazy-load fixes saved ~7-12s but the remaining overhead is from tsx transpilation of 25+ packages. This is a pre-existing architectural issue that affects all MCP tool calls, not just setup. Full fix would require building TypeScript to JS before running.
 
@@ -261,7 +263,7 @@ Real capture smoke using VCE generatePacket:
 
 5. **Capture smoke uses data: URI for fast testing**: When no app URL is provided, the capture smoke uses a `data:text/html` page. When an app URL is provided, it navigates to the real URL. Both paths produce real opaque packetIds via VCE generatePacket.
 
-## 13. Final Decision
+## 14. Final Decision
 
 **PASS**
 
