@@ -1,4 +1,4 @@
-import { BrowserRuntime } from '@viskod/browser-runtime';
+import { BrowserRuntime, resolveProfile } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
 import { VisualContextEngine } from '@viskod/context-engine';
 import type { SelectionTarget as VCESelectionTarget } from '@viskod/context-engine';
@@ -7,6 +7,11 @@ import { ProjectScanner } from '@viskod/project-scanner';
 import { SelectionEngine } from '@viskod/selection-engine';
 import type { SelectionTarget } from '@viskod/selection-engine';
 import { SourceHintEngine } from '@viskod/source-hint-engine';
+import { IssueServiceImpl, IssuePersistence } from '@viskod/visual-issue';
+import { HandoffServiceImpl, HandoffPersistence } from '@viskod/agent-handoff';
+import { ReviewServiceImpl, ReviewPersistence } from '@viskod/visual-review';
+import type { RecaptureAdapter } from '@viskod/visual-review';
+// Lazy-loaded: @viskod/setup is imported dynamically in tool handlers
 import { MCPServer } from './index';
 import type { MCPToolDefinition } from './index';
 
@@ -22,7 +27,70 @@ const vce = new VisualContextEngine({
   eventBus,
   capturePipeline,
   selectionEngine,
+  sourceHintEngine,
 });
+
+const issuePersistence = new IssuePersistence();
+const issueService = new IssueServiceImpl(eventBus, issuePersistence);
+const handoffPersistence = new HandoffPersistence();
+const handoffService = new HandoffServiceImpl(eventBus, issueService, handoffPersistence);
+const reviewPersistence = new ReviewPersistence();
+
+const mcpRecaptureAdapter: RecaptureAdapter = async (options) => {
+  const selector = options.selector;
+  if (!selector) return null;
+
+  const url = options.url;
+  if (!url) return null;
+
+  const profile = resolveProfile('default');
+
+  try {
+    if (options.reload) {
+      if (options.cacheBust) {
+        const urlObj = new URL(url);
+        urlObj.searchParams.set('__viskod_cb', String(Date.now()));
+        await vce.navigate(urlObj.toString());
+      } else {
+        await vce.navigate(url);
+      }
+    }
+
+    const boundingBox = options.boundingBox ?? { x: 0, y: 0, width: 100, height: 100 };
+
+    const selectionTarget: VCESelectionTarget = {
+      selector,
+      boundingBox,
+      source: 'mcp',
+    };
+
+    const packetResult = await vce.generatePacket(selectionTarget, profile);
+    if (!packetResult.ok) return null;
+
+    const packet = packetResult.value;
+
+    return {
+      packetId: packet.packetId,
+      selector: packet.selection.selector,
+      tagName: packet.selection.tagName,
+      boundingBox: packet.selection.boundingBox,
+      text: packet.selection.text,
+      url: packet.browser.url,
+      viewport: packet.browser.viewport,
+      screenshotPath: packet.screenshots?.[0]?.path,
+      sourceHints: packet.sourceHints?.map((h) => ({
+        filePath: h.filePath,
+        confidence: h.confidence,
+        evidence: h.evidence,
+      })),
+      runtimeEvidence: packet.runtimeEvidence as Record<string, unknown> | undefined,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const reviewService = new ReviewServiceImpl(eventBus, issueService, handoffService, reviewPersistence, mcpRecaptureAdapter);
 
 let currentTarget: SelectionTarget | null = null;
 
@@ -556,9 +624,812 @@ server.registerTool(navigateTool, async (args) => {
   }
 });
 
+// =========================================================================
+// Phase 23: Agent Handoff Tools
+// =========================================================================
+
+const createAgentHandoffTool: MCPToolDefinition = {
+  name: 'create_agent_handoff',
+  description:
+    'Create a local agent handoff from an existing VisualIssue. Returns an opaque handoff ID that a coding agent can use to retrieve the issue context.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      issueId: {
+        type: 'string',
+        description: 'The issue ID to create a handoff for',
+      },
+      userInstruction: {
+        type: 'string',
+        description: 'Optional instruction from the user to include in the agent brief',
+      },
+    },
+    required: ['issueId'],
+  },
+};
+
+const getAgentHandoffTool: MCPToolDefinition = {
+  name: 'get_agent_handoff',
+  description:
+    'Retrieve the safe agent handoff brief and context for a coding agent. Marks the handoff as opened on first fetch.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      handoffId: {
+        type: 'string',
+        description: 'The handoff ID to retrieve',
+      },
+    },
+    required: ['handoffId'],
+  },
+};
+
+const listAgentHandoffsTool: MCPToolDefinition = {
+  name: 'list_agent_handoffs',
+  description:
+    'List all local agent handoffs. Returns handoff IDs, titles, statuses, and timestamps.',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
+const updateAgentHandoffStatusTool: MCPToolDefinition = {
+  name: 'update_agent_handoff_status',
+  description:
+    'Update the status of an agent handoff. Allowed transitions: ready→opened, opened→in_progress, in_progress→completed/failed, any active→cancelled.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      handoffId: {
+        type: 'string',
+        description: 'The handoff ID to update',
+      },
+      status: {
+        type: 'string',
+        description: 'The new status',
+        enum: ['opened', 'in_progress', 'completed', 'failed', 'cancelled'],
+      },
+    },
+    required: ['handoffId', 'status'],
+  },
+};
+
+const cancelAgentHandoffTool: MCPToolDefinition = {
+  name: 'cancel_agent_handoff',
+  description:
+    'Cancel an agent handoff that should no longer be used.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      handoffId: {
+        type: 'string',
+        description: 'The handoff ID to cancel',
+      },
+    },
+    required: ['handoffId'],
+  },
+};
+
+function mcpOk(data: unknown) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+  };
+}
+
+function mcpError(message: string, details?: unknown) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error: message, ...(details ? { details } : {}) }, null, 2) }],
+    isError: true as const,
+  };
+}
+
+server.registerTool(createAgentHandoffTool, async (args) => {
+  try {
+    const issueId = args.issueId as string;
+    if (!issueId) return mcpError('issueId is required');
+
+    // Resolve usage-site source hints for the issue
+    let sourceHints: Array<{
+      displayName: string;
+      confidence?: number;
+      kind?: string;
+      score?: number;
+      reasons?: string[];
+      warnings?: string[];
+    }> | undefined;
+    let sourceHintStatus: 'ranked' | 'ambiguous' | 'low_confidence' | 'missing' | undefined;
+
+    try {
+      const issueResult = await issueService.getIssue(issueId);
+      if (issueResult.ok) {
+        const issue = issueResult.value;
+        const scanResult = await projectScanner.scan();
+        const scan = scanResult.ok ? scanResult.value : null;
+
+        const snapshot = issue.source.selectionSnapshot as Record<string, unknown> | undefined;
+        const target = snapshot?.targets as Array<Record<string, unknown>> | undefined;
+        const firstTarget = target?.[0] as Record<string, unknown> | undefined;
+        const semantics = firstTarget?.semantics as Record<string, unknown> | undefined;
+        const fingerprints = firstTarget?.fingerprints as Record<string, unknown> | undefined;
+        const stableAttrs = fingerprints?.stableAttributes as Record<string, string> | undefined;
+
+        const hintInput = {
+          domContext: {
+            tagName: (semantics?.tagName as string) ?? 'div',
+            className: stableAttrs?.class ?? '',
+            id: stableAttrs?.id ?? '',
+            role: (semantics?.role as string) ?? undefined,
+            testId: stableAttrs?.['data-testid'] ?? undefined,
+            text: (semantics?.textPreview as string) ?? undefined,
+            parentTagName: undefined as string | undefined,
+          },
+          route: { url: issue.page.url, pathname: new URL(issue.page.url).pathname },
+          project: {
+            metadata: {
+              projectId: scan?.metadata.projectId ?? 'unknown',
+              name: scan?.metadata.name ?? 'unknown',
+              rootPath: scan?.metadata.rootPath ?? '',
+              packageManager: scan?.metadata.packageManager ?? 'unknown',
+              language: scan?.metadata.language ?? 'typescript',
+            },
+            componentIndex: scan?.components ? { directories: scan.components.directories } : undefined,
+            framework: scan?.framework
+              ? {
+                  primary: scan.framework.primary,
+                  detected: scan.framework.detected,
+                  confidence: scan.framework.confidence,
+                }
+              : undefined,
+          },
+          captureId: crypto.randomUUID(),
+        };
+
+        const hintResult = await sourceHintEngine.resolveUsageSiteHints(hintInput, 5);
+        if (hintResult.ok) {
+          sourceHintStatus = hintResult.value.status;
+          sourceHints = hintResult.value.topHints.map((h) => ({
+            displayName: h.file.displayPath,
+            confidence: h.ranking.confidence,
+            kind: h.kind,
+            score: h.ranking.score,
+            reasons: h.ranking.reasons,
+            warnings: hintResult.value.warnings,
+          }));
+        }
+      }
+    } catch {
+      // Source hints are best-effort
+    }
+
+    const result = await handoffService.createHandoff(
+      {
+        issueId,
+        userInstruction: args.userInstruction as string | undefined,
+        sourceHints,
+        sourceHintStatus,
+      },
+      'mcp-session',
+      'mcp-page',
+    );
+
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, ...result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(getAgentHandoffTool, async (args) => {
+  try {
+    const handoffId = args.handoffId as string;
+    if (!handoffId) return mcpError('handoffId is required');
+
+    const result = await handoffService.getHandoff(handoffId);
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, ...result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(listAgentHandoffsTool, async () => {
+  try {
+    const result = await handoffService.listHandoffs();
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, handoffs: result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(updateAgentHandoffStatusTool, async (args) => {
+  try {
+    const handoffId = args.handoffId as string;
+    const status = args.status as string;
+    if (!handoffId) return mcpError('handoffId is required');
+    if (!status) return mcpError('status is required');
+
+    const result = await handoffService.updateHandoffStatus(handoffId, status as any);
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, handoffId: result.value.handoffId, status: result.value.status });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(cancelAgentHandoffTool, async (args) => {
+  try {
+    const handoffId = args.handoffId as string;
+    if (!handoffId) return mcpError('handoffId is required');
+
+    const result = await handoffService.cancelHandoff(handoffId);
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, handoffId: result.value.handoffId, status: result.value.status });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+// =========================================================================
+// Phase 24: Visual Review Tools
+// =========================================================================
+
+const createVisualReviewTool: MCPToolDefinition = {
+  name: 'create_visual_review',
+  description:
+    'Create a before/after visual review from an existing VisualIssue. Returns an opaque review ID.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      issueId: { type: 'string', description: 'The issue ID to create a review for' },
+      handoffId: { type: 'string', description: 'Optional handoff ID associated with this review' },
+    },
+    required: ['issueId'],
+  },
+};
+
+const getVisualReviewTool: MCPToolDefinition = {
+  name: 'get_visual_review',
+  description:
+    'Retrieve a visual review with before/after snapshots, comparison, and decision status.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      reviewId: { type: 'string', description: 'The review ID to retrieve' },
+    },
+    required: ['reviewId'],
+  },
+};
+
+const listVisualReviewsTool: MCPToolDefinition = {
+  name: 'list_visual_reviews',
+  description: 'List all local visual reviews with IDs, statuses, and timestamps.',
+  inputSchema: { type: 'object', properties: {} },
+};
+
+const recaptureVisualReviewTool: MCPToolDefinition = {
+  name: 'recapture_visual_review',
+  description:
+    'Recapture the current browser state for a visual review. The target is automatically derived from the persisted VisualSelection snapshot — no selector needed.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      reviewId: { type: 'string', description: 'The review ID to recapture' },
+      reload: {
+        type: 'boolean',
+        description: 'Reload the page before recapturing (default: false)',
+      },
+      cacheBust: {
+        type: 'boolean',
+        description: 'Append cache-busting query param before reloading (default: false)',
+      },
+    },
+    required: ['reviewId'],
+  },
+};
+
+const recordVisualReviewDecisionTool: MCPToolDefinition = {
+  name: 'record_visual_review_decision',
+  description:
+    'Record a human review decision: accept, reject, or needs_follow_up.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      reviewId: { type: 'string', description: 'The review ID to decide on' },
+      decision: {
+        type: 'string',
+        description: 'The review decision',
+        enum: ['accepted', 'rejected', 'needs_follow_up'],
+      },
+      note: { type: 'string', description: 'Optional note explaining the decision' },
+    },
+    required: ['reviewId', 'decision'],
+  },
+};
+
+server.registerTool(createVisualReviewTool, async (args) => {
+  try {
+    const issueId = args.issueId as string;
+    if (!issueId) return mcpError('issueId is required');
+
+    const result = await reviewService.createReview(
+      { issueId, handoffId: args.handoffId as string | undefined },
+      'mcp-session',
+      'mcp-page',
+    );
+
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, ...result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(getVisualReviewTool, async (args) => {
+  try {
+    const reviewId = args.reviewId as string;
+    if (!reviewId) return mcpError('reviewId is required');
+
+    const result = await reviewService.getReview(reviewId);
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, ...result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(listVisualReviewsTool, async () => {
+  try {
+    const result = await reviewService.listReviews();
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, reviews: result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(recaptureVisualReviewTool, async (args) => {
+  try {
+    const reviewId = args.reviewId as string;
+    if (!reviewId) return mcpError('reviewId is required');
+
+    const result = await reviewService.recaptureReview({
+      reviewId,
+      reload: args.reload as boolean | undefined,
+      cacheBust: args.cacheBust as boolean | undefined,
+    });
+
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({
+      ok: true,
+      reviewId: result.value.reviewId,
+      status: result.value.status,
+      comparisonStatus: result.value.comparison?.status,
+      summary: result.value.comparison?.summary,
+      beforeSnapshotId: result.value.before.snapshotId,
+      afterSnapshotId: result.value.after?.snapshotId,
+      warningCount: result.value.comparison?.warnings.length ?? 0,
+    });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+// =========================================================================
+// Phase 25: Usage-Site Source Hints
+// =========================================================================
+
+const resolveUsageSiteHintsTool: MCPToolDefinition = {
+  name: 'resolve_usage_site_hints',
+  description:
+    'Resolve ranked usage-site source hints for a selected UI element. Identifies likely usage files, route owners, and supporting definitions with confidence scores.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      issueId: { type: 'string', description: 'Resolve hints for an existing VisualIssue' },
+      handoffId: { type: 'string', description: 'Resolve hints for an existing AgentHandoff' },
+      reviewId: { type: 'string', description: 'Resolve hints for an existing VisualReview' },
+      selectionId: { type: 'string', description: 'Resolve hints for a specific selection' },
+      maxHints: { type: 'number', description: 'Maximum number of hints to return (default: 5)' },
+    },
+  },
+};
+
+server.registerTool(resolveUsageSiteHintsTool, async (args) => {
+  try {
+    const issueId = args.issueId as string | undefined;
+    const handoffId = args.handoffId as string | undefined;
+    const reviewId = args.reviewId as string | undefined;
+    const selectionId = args.selectionId as string | undefined;
+    const maxHints = (args.maxHints as number) ?? 5;
+
+    // Resolve context from provided IDs
+    let contextData: {
+      domContext?: Record<string, unknown>;
+      route?: { url: string; pathname: string };
+      selectionSnapshot?: Record<string, unknown>;
+      pageUrl?: string;
+      pageTitle?: string;
+    } = {};
+
+    if (issueId) {
+      const issueResult = await issueService.getIssue(issueId);
+      if (!issueResult.ok) return mcpError(`Issue not found: ${issueResult.error.message}`);
+      const issue = issueResult.value;
+      contextData = {
+        route: { url: issue.page.url, pathname: new URL(issue.page.url).pathname },
+        selectionSnapshot: issue.source.selectionSnapshot as Record<string, unknown>,
+        pageUrl: issue.page.url,
+        pageTitle: issue.page.title,
+      };
+    } else if (handoffId) {
+      const handoffResult = await handoffService.getHandoff(handoffId);
+      if (!handoffResult.ok) return mcpError(`Handoff not found: ${handoffResult.error.message}`);
+      const handoff = handoffResult.value;
+      contextData = {
+        route: handoff.brief.page.url
+          ? { url: handoff.brief.page.url, pathname: new URL(handoff.brief.page.url).pathname }
+          : undefined,
+        pageUrl: handoff.brief.page.url,
+        pageTitle: handoff.brief.page.title,
+      };
+    } else if (reviewId) {
+      const reviewResult = await reviewService.getReview(reviewId);
+      if (!reviewResult.ok) return mcpError(`Review not found: ${reviewResult.error.message}`);
+      const review = reviewResult.value;
+      contextData = {
+        route: review.before.page.url
+          ? { url: review.before.page.url, pathname: new URL(review.before.page.url).pathname }
+          : undefined,
+        pageUrl: review.before.page.url,
+        pageTitle: review.before.page.title,
+      };
+    }
+
+    // Build HintInput from context
+    const snapshot = contextData.selectionSnapshot as Record<string, unknown> | undefined;
+    const target = snapshot?.targets as Array<Record<string, unknown>> | undefined;
+    const firstTarget = target?.[0] as Record<string, unknown> | undefined;
+    const semantics = firstTarget?.semantics as Record<string, unknown> | undefined;
+    const fingerprints = firstTarget?.fingerprints as Record<string, unknown> | undefined;
+    const stableAttrs = fingerprints?.stableAttributes as Record<string, string> | undefined;
+
+    const domContext = {
+      tagName: (semantics?.tagName as string) ?? 'div',
+      className: stableAttrs?.class ?? '',
+      id: stableAttrs?.id ?? '',
+      role: (semantics?.role as string) ?? undefined,
+      testId: stableAttrs?.['data-testid'] ?? undefined,
+      text: (semantics?.textPreview as string) ?? undefined,
+      parentTagName: undefined as string | undefined,
+    };
+
+    const route = contextData.route ?? { url: 'http://localhost', pathname: '/' };
+
+    // Run project scan if needed
+    const scanResult = await projectScanner.scan();
+    const scan = scanResult.ok ? scanResult.value : null;
+
+    const hintInput = {
+      domContext,
+      route,
+      project: {
+        metadata: {
+          projectId: scan?.metadata.projectId ?? 'unknown',
+          name: scan?.metadata.name ?? 'unknown',
+          rootPath: scan?.metadata.rootPath ?? '',
+          packageManager: scan?.metadata.packageManager ?? 'unknown',
+          language: scan?.metadata.language ?? 'typescript',
+        },
+        componentIndex: scan?.components ? { directories: scan.components.directories } : undefined,
+        framework: scan?.framework
+          ? {
+              primary: scan.framework.primary,
+              detected: scan.framework.detected,
+              confidence: scan.framework.confidence,
+            }
+          : undefined,
+      },
+      captureId: crypto.randomUUID(),
+    };
+
+    const result = await sourceHintEngine.resolveUsageSiteHints(hintInput, maxHints);
+
+    if (!result.ok) {
+      return mcpError(result.error.message);
+    }
+
+    const ranking = result.value;
+
+    return mcpOk({
+      ok: true,
+      status: ranking.status,
+      hints: ranking.topHints.map((h) => ({
+        hintId: h.hintId,
+        kind: h.kind,
+        displayPath: h.file.displayPath,
+        location: h.location,
+        symbol: h.symbol,
+        confidence: h.ranking.confidence,
+        score: h.ranking.score,
+        reasons: h.ranking.reasons,
+        warnings: ranking.warnings,
+      })),
+    });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(recordVisualReviewDecisionTool, async (args) => {
+  try {
+    const reviewId = args.reviewId as string;
+    const decision = args.decision as string;
+    if (!reviewId) return mcpError('reviewId is required');
+    if (!decision) return mcpError('decision is required');
+
+    const result = await reviewService.recordDecision(reviewId, {
+      decision: decision as 'accepted' | 'rejected' | 'needs_follow_up',
+      note: args.note as string | undefined,
+    });
+
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({
+      ok: true,
+      reviewId: result.value.reviewId,
+      status: result.value.status,
+      decision: result.value.decision,
+    });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+// =========================================================================
+// Phase 26: First-Run Setup Tools
+// =========================================================================
+
+const getSetupStateTool: MCPToolDefinition = {
+  name: 'get_setup_state',
+  description: 'Get the current first-run setup state. Returns null if setup has not been completed.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectRoot: { type: 'string', description: 'Project root path (defaults to cwd)' },
+    },
+  },
+};
+
+const detectProjectTool: MCPToolDefinition = {
+  name: 'detect_project',
+  description: 'Detect the current project root, package manager, framework, and workspace type.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectRoot: { type: 'string', description: 'Explicit project root path (auto-detected if omitted)' },
+    },
+  },
+};
+
+const initializeWorkspaceTool: MCPToolDefinition = {
+  name: 'initialize_workspace',
+  description: 'Initialize the local .viskod workspace directories. Idempotent — safe to re-run.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectRoot: { type: 'string', description: 'Project root path' },
+    },
+    required: ['projectRoot'],
+  },
+};
+
+const runSetupChecksTool: MCPToolDefinition = {
+  name: 'run_setup_checks',
+  description: 'Run environment and readiness checks for Viskod setup.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectRoot: { type: 'string', description: 'Project root path' },
+      includeOptional: { type: 'boolean', description: 'Include optional checks (default: false)' },
+      appUrl: { type: 'string', description: 'Local app URL to verify reachability (e.g., http://localhost:3000)' },
+    },
+    required: ['projectRoot'],
+  },
+};
+
+const runSetupSmokeTool: MCPToolDefinition = {
+  name: 'run_setup_smoke',
+  description: 'Run a lightweight smoke test to verify basic Viskod functionality.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectRoot: { type: 'string', description: 'Project root path' },
+      limitedMode: { type: 'boolean', description: 'Run in limited mode (skip browser checks)' },
+    },
+    required: ['projectRoot'],
+  },
+};
+
+const completeSetupTool: MCPToolDefinition = {
+  name: 'complete_setup',
+  description: 'Mark setup as complete and persist the setup state.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectRoot: { type: 'string', description: 'Project root path' },
+    },
+    required: ['projectRoot'],
+  },
+};
+
+const repairSetupTool: MCPToolDefinition = {
+  name: 'repair_setup',
+  description: 'Repair a failed setup check (e.g., re-initialize workspace).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectRoot: { type: 'string', description: 'Project root path' },
+      actionId: { type: 'string', description: 'The remediation action ID to execute' },
+    },
+    required: ['projectRoot', 'actionId'],
+  },
+};
+
+server.registerTool(getSetupStateTool, async (args) => {
+  try {
+    const { getSetupState } = await import('@viskod/setup');
+    const projectRoot = (args.projectRoot as string) ?? process.cwd();
+    const result = getSetupState(projectRoot);
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, state: result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(detectProjectTool, async (args) => {
+  try {
+    const { detectAndConfigureProject } = await import('@viskod/setup');
+    const projectRoot = args.projectRoot as string | undefined;
+    const result = detectAndConfigureProject(projectRoot ? { projectRoot } : undefined);
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, project: result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(initializeWorkspaceTool, async (args) => {
+  try {
+    const { initializeProjectWorkspace } = await import('@viskod/setup');
+    const projectRoot = args.projectRoot as string;
+    if (!projectRoot) return mcpError('projectRoot is required');
+    const result = initializeProjectWorkspace({ projectRoot });
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, workspace: result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(runSetupChecksTool, async (args) => {
+  try {
+    const { runAllChecks } = await import('@viskod/setup');
+    const projectRoot = args.projectRoot as string;
+    if (!projectRoot) return mcpError('projectRoot is required');
+    const includeOptional = args.includeOptional as boolean | undefined;
+    const appUrl = args.appUrl as string | undefined;
+    const checks = await runAllChecks({ projectRoot, includeOptional, appUrl });
+    return mcpOk({ ok: true, checks });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(runSetupSmokeTool, async (args) => {
+  try {
+    const { runSmoke } = await import('@viskod/setup');
+    const projectRoot = args.projectRoot as string;
+    if (!projectRoot) return mcpError('projectRoot is required');
+    const limitedMode = args.limitedMode as boolean | undefined;
+    const result = await runSmoke({ projectRoot, limitedMode });
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, smoke: result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(completeSetupTool, async (args) => {
+  try {
+    const { detectAndConfigureProject, runAllChecks, completeSetup } = await import('@viskod/setup');
+    const projectRoot = args.projectRoot as string;
+    if (!projectRoot) return mcpError('projectRoot is required');
+
+    const projectResult = detectAndConfigureProject({ projectRoot });
+    if (!projectResult.ok) return mcpError(projectResult.error.message);
+
+    const checks = await runAllChecks({ projectRoot, includeOptional: true });
+
+    const result = completeSetup({
+      projectRoot,
+      project: projectResult.value,
+      checks,
+    });
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, state: result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+server.registerTool(repairSetupTool, async (args) => {
+  try {
+    const { repairSetup } = await import('@viskod/setup');
+    const projectRoot = args.projectRoot as string;
+    const actionId = args.actionId as string;
+    if (!projectRoot) return mcpError('projectRoot is required');
+    if (!actionId) return mcpError('actionId is required');
+
+    const result = await repairSetup({ projectRoot, actionId });
+    if (!result.ok) return mcpError(result.error.message);
+    return mcpOk({ ok: true, checks: result.value });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+const verifyMcpToolsTool: MCPToolDefinition = {
+  name: 'verify_mcp_tools',
+  description: 'Verify that all required Phase 21-25 MCP tools are available in the running server.',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
+server.registerTool(verifyMcpToolsTool, async () => {
+  try {
+    const { verifyMcpTools } = await import('@viskod/setup');
+    const verification = verifyMcpTools();
+    return mcpOk({
+      ok: true,
+      serverReachable: verification.serverReachable,
+      requiredToolsPresent: verification.requiredToolsPresent,
+      toolsFound: verification.toolsFound,
+      missingRequiredTools: verification.missingRequiredTools,
+    });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
+const validateAppUrlTool: MCPToolDefinition = {
+  name: 'validate_app_url',
+  description: 'Validate a local development app URL for use with Viskod setup.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      url: { type: 'string', description: 'The app URL to validate (e.g., http://localhost:3000)' },
+    },
+    required: ['url'],
+  },
+};
+
+server.registerTool(validateAppUrlTool, async (args) => {
+  try {
+    const { validateAppUrl } = await import('@viskod/setup');
+    const url = args.url as string;
+    if (!url) return mcpError('url is required');
+    const result = validateAppUrl(url);
+    return mcpOk({ ok: true, validation: result });
+  } catch (error) {
+    return mcpError(String(error));
+  }
+});
+
 server.registerResource(
-  {
-    uri: 'viskod://captures/latest',
     name: 'Latest Context Packet',
     description: 'The most recent context packet captured by Viskod',
     mimeType: 'application/json',

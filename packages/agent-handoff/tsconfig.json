@@ -1,0 +1,14 @@
+{
+  "include": ["src"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist"
+  },
+  "extends": "../../tsconfig.json",
+  "references": [
+    { "path": "../shared" },
+    { "path": "../event-bus" },
+    { "path": "../visual-selection" },
+    { "path": "../visual-issue" }
+  ]
+}

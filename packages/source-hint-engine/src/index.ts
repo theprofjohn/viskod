@@ -10,10 +10,19 @@ import type {
   HintEvidence,
   HintInput,
   SourceHint,
+  UsageSiteSourceHint,
+  RankingResult,
 } from './types';
+import { classifyHint, detectLanguage } from './classifier';
+import { rankHints } from './ranking';
+import { buildImportGraph, type ImportGraphEntry } from './import-graph';
 
-export type { HintEngineHealth, HintEvidence, HintInput, SourceHint };
+export type { HintEngineHealth, HintEvidence, HintInput, SourceHint, UsageSiteSourceHint, RankingResult };
 export * from './types';
+export { classifyHint, detectLanguage } from './classifier';
+export { rankHints } from './ranking';
+export { buildImportGraph, findImporters, findImports } from './import-graph';
+export type { ImportGraphEntry } from './classifier';
 
 const SCHEMA_VERSION = '1.0.0';
 const MIN_CONFIDENCE = 0.1;
@@ -569,6 +578,7 @@ function matchClassNameLegacy(input: HintInput): HintEvidence[] {
 
 export class SourceHintEngine {
   private cache = new Map<string, SourceHint[]>();
+  private importGraphCache = new Map<string, ImportGraphEntry[]>();
   private hintsGenerated = 0;
   private hintsFailed = 0;
   private processingTimes: number[] = [];
@@ -576,6 +586,74 @@ export class SourceHintEngine {
 
   constructor(eventBus: EventBus) {
     this.eventBus = eventBus;
+  }
+
+  async resolveUsageSiteHints(input: HintInput, maxHints?: number): Promise<Result<RankingResult>> {
+    const startTime = performance.now();
+
+    try {
+      // Generate base hints first
+      const hintResult = await this.generateHints(input);
+      if (!hintResult.ok) {
+        return ok({ status: 'missing', topHints: [], warnings: [hintResult.error.message] });
+      }
+
+      const hints = hintResult.value;
+
+      // Build or retrieve import graph
+      const rootPath = input.project.metadata.rootPath;
+      const dirs = input.project.componentIndex?.directories ?? [];
+      const graphKey = rootPath;
+      let importGraph = this.importGraphCache.get(graphKey);
+      if (!importGraph && rootPath && dirs.length > 0) {
+        importGraph = buildImportGraph(rootPath, dirs);
+        this.importGraphCache.set(graphKey, importGraph);
+      }
+
+      // Rank hints
+      const rankingResult = rankHints({
+        hints,
+        routePath: input.route.pathname,
+        routeFile: input.route.matchedRoute?.file,
+        matchedRoute: input.route.matchedRoute,
+        domText: input.domContext.text,
+        domTestId: input.domContext.testId,
+        domAriaLabel: input.domContext.role,
+        domClassName: input.domContext.className,
+        importGraph: importGraph ?? undefined,
+        projectRootPath: rootPath,
+      });
+
+      // Apply maxHints limit
+      if (maxHints && maxHints > 0 && rankingResult.topHints.length > maxHints) {
+        rankingResult.topHints = rankingResult.topHints.slice(0, maxHints);
+      }
+
+      this.eventBus.publish({
+        eventId: crypto.randomUUID(),
+        eventType: 'SH_EVENT:USAGE_SITE_HINTS_RESOLVED',
+        timestamp: new Date().toISOString(),
+        version: SCHEMA_VERSION,
+        source: 'source-hint-engine',
+        correlationId: input.captureId ?? crypto.randomUUID(),
+        payload: {
+          status: rankingResult.status,
+          hintCount: rankingResult.topHints.length,
+          processingTimeMs: Math.round(performance.now() - startTime),
+        },
+      });
+
+      return ok(rankingResult);
+    } catch (e) {
+      return err(
+        shError(
+          'SH_RANKING_FAILED',
+          'Failed to rank usage-site hints.',
+          e instanceof Error ? e.message : String(e),
+          'This is an internal error. Report it if it persists.',
+        ),
+      );
+    }
   }
 
   async generateHints(input: HintInput): Promise<Result<SourceHint[]>> {

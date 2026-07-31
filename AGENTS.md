@@ -72,6 +72,10 @@ Session history is persistent and searchable. On resume, search BEFORE asking th
 DO NOT ask "what were we working on?" — SEARCH FIRST.
 If search returns 0 results, proceed as a fresh session.
 
+## Branch Guard
+
+Never commit to main. Always create a branch first.
+
 ## ctx commands
 
 | Command | Action |

@@ -1,0 +1,22 @@
+{
+  "name": "@viskod/visual-issue",
+  "version": "0.2.0-alpha",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@viskod/shared": "workspace:*",
+    "@viskod/event-bus": "workspace:*",
+    "@viskod/visual-selection": "workspace:*",
+    "zod": "^3.23.0"
+  }
+}

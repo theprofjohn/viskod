@@ -14,12 +14,18 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      playwright:
+        specifier: ^1.46.0
+        version: 1.62.0
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@22.20.1)
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
 
   apps/studio:
     dependencies:
@@ -44,6 +50,24 @@ importers:
       '@viskod/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+
+  packages/agent-handoff:
+    dependencies:
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@viskod/visual-issue':
+        specifier: workspace:*
+        version: link:../visual-issue
+      '@viskod/visual-selection':
+        specifier: workspace:*
+        version: link:../visual-selection
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
 
   packages/audit:
     dependencies:
@@ -149,6 +173,9 @@ importers:
 
   packages/mcp-server:
     dependencies:
+      '@viskod/agent-handoff':
+        specifier: workspace:*
+        version: link:../agent-handoff
       '@viskod/browser-runtime':
         specifier: workspace:*
         version: link:../browser-runtime
@@ -176,6 +203,12 @@ importers:
       '@viskod/source-hint-engine':
         specifier: workspace:*
         version: link:../source-hint-engine
+      '@viskod/visual-issue':
+        specifier: workspace:*
+        version: link:../visual-issue
+      '@viskod/visual-review':
+        specifier: workspace:*
+        version: link:../visual-review
 
   packages/overlay-system:
     dependencies:
@@ -284,6 +317,61 @@ importers:
       '@viskod/shared':
         specifier: workspace:*
         version: link:../shared
+
+  packages/visual-issue:
+    dependencies:
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@viskod/visual-selection':
+        specifier: workspace:*
+        version: link:../visual-selection
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
+
+  packages/visual-review:
+    dependencies:
+      '@viskod/agent-handoff':
+        specifier: workspace:*
+        version: link:../agent-handoff
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@viskod/visual-issue':
+        specifier: workspace:*
+        version: link:../visual-issue
+      '@viskod/visual-selection':
+        specifier: workspace:*
+        version: link:../visual-selection
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@22.20.1)
+
+  packages/visual-selection:
+    dependencies:
+      '@viskod/event-bus':
+        specifier: workspace:*
+        version: link:../event-bus
+      '@viskod/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
 
   packages/workspace:
     dependencies:

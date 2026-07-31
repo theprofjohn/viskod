@@ -116,16 +116,37 @@ function toAgentBriefMarkdown(packet: ContextPacket): string {
   if (packet.sourceHints && packet.sourceHints.length > 0) {
     lines.push('## Source Hints (ranked)');
     lines.push('');
-    lines.push('| # | File | Confidence | Exists | Match Type | Primary |');
-    lines.push('|---|------|-----------|--------|------------|---------|');
+    lines.push('| # | File | Kind | Confidence | Exists | Match Type | Primary |');
+    lines.push('|---|------|------|-----------|--------|------------|---------|');
     packet.sourceHints.forEach((h, i) => {
       const filePath = h.filePath.length > 50 ? `…${h.filePath.slice(-47)}` : h.filePath;
+      const kind = h.kind ?? '—';
       lines.push(
-        `| ${i + 1} | \`${filePath}\` | ${(h.confidence * 100).toFixed(0)}% | ${h.exists ? '✅' : '❌'} | ${h.matchType ?? '—'} | ${h.isPrimary ? '⭐' : ''} |`,
+        `| ${i + 1} | \`${filePath}\` | ${kind} | ${(h.confidence * 100).toFixed(0)}% | ${h.exists ? '✅' : '❌'} | ${h.matchType ?? '—'} | ${h.isPrimary ? '⭐' : ''} |`,
       );
     });
     lines.push('');
-    lines.push('**Suggested:** Inspect the top existing hint first.');
+
+    // Separate usage-site and definition-site hints
+    const usageHints = packet.sourceHints.filter((h) => h.kind === 'usage-site' || h.kind === 'route-owner');
+    const defHints = packet.sourceHints.filter((h) => h.kind === 'definition-site');
+
+    if (usageHints.length > 0) {
+      lines.push('**Likely usage sites:**');
+      usageHints.slice(0, 3).forEach((h, i) => {
+        lines.push(`${i + 1}. \`${h.filePath}\` — ${h.reason ?? 'high confidence'}`);
+      });
+      lines.push('');
+    }
+    if (defHints.length > 0) {
+      lines.push('**Supporting definitions:**');
+      defHints.slice(0, 3).forEach((h, i) => {
+        lines.push(`${i + 1}. \`${h.filePath}\` — ${h.reason ?? 'component definition'}`);
+      });
+      lines.push('');
+    }
+
+    lines.push('**Suggested:** Inspect the top existing usage-site hint first.');
     lines.push('');
   } else {
     lines.push('## Source Hints');
@@ -241,6 +262,8 @@ function toCompactJson(packet: ContextPacket): CompactPacket {
       matchType: h.matchType ?? 'generated',
       reason: h.reason ?? '',
       isPrimary: h.isPrimary ?? false,
+      kind: h.kind,
+      status: h.status,
     })),
     consoleSummary: groupConsoleByLevel(packet.runtimeEvidence?.console),
     networkSummary: extractNetworkSummary(packet.runtimeEvidence?.network).slice(0, 50),

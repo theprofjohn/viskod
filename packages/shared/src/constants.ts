@@ -5,3 +5,5 @@ export const LOG_DIR = 'logs';
 export const CACHE_DIR = 'cache';
 export const SETTINGS_FILE = 'settings.json';
 export const OVERLAY_CSS_PREFIX = '__viskod_';
+export const HANDOFFS_DIR = 'handoffs';
+export const REVIEWS_DIR = 'reviews';

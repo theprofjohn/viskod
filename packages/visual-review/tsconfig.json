@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../shared" },
+    { "path": "../event-bus" },
+    { "path": "../visual-selection" },
+    { "path": "../visual-issue" },
+    { "path": "../agent-handoff" }
+  ]
+}

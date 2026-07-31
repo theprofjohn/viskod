@@ -21,6 +21,11 @@ const resolveAlias = {
   '@viskod/audit': resolve(__dirname, 'packages/audit/src/index.ts'),
   '@viskod/workspace': resolve(__dirname, 'packages/workspace/src/index.ts'),
   '@viskod/runtime-session': resolve(__dirname, 'packages/runtime-session/src/index.ts'),
+  '@viskod/visual-selection': resolve(__dirname, 'packages/visual-selection/src/index.ts'),
+  '@viskod/visual-issue': resolve(__dirname, 'packages/visual-issue/src/index.ts'),
+  '@viskod/agent-handoff': resolve(__dirname, 'packages/agent-handoff/src/index.ts'),
+  '@viskod/visual-review': resolve(__dirname, 'packages/visual-review/src/index.ts'),
+  '@viskod/setup': resolve(__dirname, 'packages/setup/src/index.ts'),
 };
 
 export default defineConfig({

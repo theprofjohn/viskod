@@ -9,7 +9,7 @@ import {
   err,
   ok,
 } from '@viskod/shared';
-import { type Browser, type Page, chromium } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import type { ConsoleEntry, NetworkEntry, SelectedElementInfo } from './evidence';
 import { collectConsoleEntries } from './evidence';
 export type {
@@ -130,6 +130,8 @@ export class BrowserRuntime {
     const contextId = crypto.randomUUID();
 
     try {
+      // Lazy-load Playwright to avoid heavy import at module load time
+      const { chromium } = await import('playwright');
       const browser = await chromium.launch({
         headless: this.config.headless,
         timeout: this.config.timeout.launch,
@@ -525,6 +527,119 @@ export class BrowserRuntime {
       return ok(undefined);
     } catch {
       return ok(undefined);
+    }
+  }
+
+  async showOverlaySelectionMode(handle: BrowserHandle, overlayScript: string): Promise<Result<void>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
+
+    try {
+      await entry.page.evaluate(overlayScript);
+      await entry.page.evaluate(`
+        window.postMessage({ source: '__viskod_browser', command: 'overlay:show', mode: 'selection' }, '*');
+      `);
+      return ok(undefined);
+    } catch (error) {
+      return err(
+        this.brError('BR_OVERLAY_SELECTION_FAILED', `Selection mode overlay failed: ${String(error)}`),
+      );
+    }
+  }
+
+  async hideOverlaySelectionMode(handle: BrowserHandle): Promise<Result<void>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
+
+    try {
+      await entry.page.evaluate(`
+        window.postMessage({ source: '__viskod_browser', command: 'overlay:hide' }, '*');
+      `);
+      return ok(undefined);
+    } catch {
+      return ok(undefined);
+    }
+  }
+
+  async setupOverlayMessageListener(
+    handle: BrowserHandle,
+    eventBus: EventBus,
+  ): Promise<Result<void>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
+
+    try {
+      await entry.page.evaluate(`
+        if (!window.__viskod_listenerInstalled) {
+          window.__viskod_listenerInstalled = true;
+          window.addEventListener('message', function(event) {
+            if (event.data && event.data.source === '__viskod_overlay') {
+              window.__viskod_lastOverlayEvent = event.data;
+            }
+          });
+        }
+      `);
+      return ok(undefined);
+    } catch {
+      return ok(undefined);
+    }
+  }
+
+  async pollOverlayEvent(handle: BrowserHandle): Promise<Result<unknown>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
+
+    try {
+      const result = await entry.page.evaluate(`
+        (function() {
+          var evt = window.__viskod_lastOverlayEvent || null;
+          window.__viskod_lastOverlayEvent = null;
+          return evt;
+        })()
+      `);
+      return ok(result);
+    } catch {
+      return ok(null);
+    }
+  }
+
+  async getElementInfoAtPoint(handle: BrowserHandle, x: number, y: number): Promise<Result<Record<string, unknown>>> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
+
+    try {
+      const result = await entry.page.evaluate(
+        ({ px, py }) => {
+          const el = document.elementFromPoint(px, py);
+          if (!el) return null;
+          const rect = el.getBoundingClientRect();
+          const tagName = el.tagName.toLowerCase();
+          const role = el.getAttribute('role') || undefined;
+          const accessibleName = el.getAttribute('aria-label') || undefined;
+          const textPreview = (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 120) || undefined;
+          const isInteractive = tagName === 'button' || tagName === 'a' || tagName === 'input' ||
+            tagName === 'select' || tagName === 'textarea' || el.tabIndex >= 0;
+          const stableKeys = ['data-testid', 'data-test-id', 'data-id', 'data-cy', 'data-test', 'id', 'name', 'aria-label'];
+          const attrs = {};
+          for (const key of stableKeys) {
+            const v = el.getAttribute(key);
+            if (v) attrs[key] = v;
+          }
+          return {
+            tagName,
+            boundingBox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            role,
+            accessibleName,
+            textPreview,
+            isInteractive,
+            stableAttributes: Object.keys(attrs).length > 0 ? attrs : undefined,
+          };
+        },
+        { px: x, py: y },
+      );
+      return ok(result as Record<string, unknown> ?? {});
+    } catch (error) {
+      return err(this.brError('BR_ELEMENT_INFO_FAILED', `Element info failed: ${String(error)}`));
     }
   }
 

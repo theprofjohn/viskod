@@ -103,6 +103,14 @@ interface SourceHintEntry {
   matchType?: string;
   reason?: string;
   relatedSelector?: string;
+  kind?: string;
+  status?: string;
+  displayPath?: string;
+  location?: { line?: number; column?: number };
+  symbol?: { componentName?: string; jsxTag?: string };
+  route?: { routePath?: string; routeFile?: string; isCurrentRoute?: boolean };
+  ranking?: { score: number; confidence: number; rank: number; reasons: string[]; penalties: string[] };
+  safety?: { redactionApplied: boolean; userVisible: boolean; containsAbsolutePath: boolean };
 }
 
 export interface VCEHealth {
@@ -425,6 +433,14 @@ export class VisualContextEngine {
                 matchType: hint.matchType,
                 reason: hint.reason,
                 relatedSelector: hint.relatedSelector,
+                kind: hint.kind,
+                status: hint.status,
+                displayPath: hint.filePath,
+                location: hint.location,
+                symbol: hint.symbol,
+                route: hint.route,
+                ranking: hint.ranking,
+                safety: hint.safety,
               });
             }
           }
