@@ -8,6 +8,8 @@
 .opencode/
 opencode.json
 .viskod/
+.viskod-test-mcp-review/
+.viskod-mcp-e2e/
 
 # Dependencies
 node_modules/
