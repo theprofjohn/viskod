@@ -212,15 +212,15 @@ export class Studio {
       } else if (url === '/settings' && req.method === 'POST') {
         void this.handleSettingsUpdate(req, res);
       } else if (url === '/overlay/script') {
-        // ponytail: serve overlay script to extension for re-injection after reload
+        // serve overlay script to extension for re-injection after reload
         const script = getOverlayScript();
         res.setHeader('Content-Type', 'application/javascript');
         res.end(script);
       } else if (url === '/overlay/reload' && req.method === 'POST') {
-        // ponytail: reload page via Playwright and re-inject overlay
+        // reload page via Playwright and re-inject overlay
         void this.handleOverlayReload(res);
       } else if (url.startsWith('/setup/mcp-config')) {
-        // ponytail: return MCP config JSON for the user's IDE onboarding
+        // return MCP config JSON for the user's IDE onboarding
         const query = req.url?.split('?')[1] ?? '';
         const ide =
           query
@@ -239,7 +239,7 @@ export class Studio {
       console.log('Viskod Studio running on http://localhost:3001');
     });
 
-    // ponytail: WebSocket server for Chrome extension chat — same port as HTTP
+    // WebSocket server for Chrome extension chat — same port as HTTP
     this.wss = new WebSocketServer({ server: this.server });
     this.wss.on('connection', (ws) => {
       this.wsClients.add(ws);
@@ -252,7 +252,7 @@ export class Studio {
             const chatMsg = this.addChatMessage('user', msg.text.trim());
             this.broadcastToWs({ type: 'chat:message', ...chatMsg });
           } else if (msg.type === 'overlay:event' && msg.data) {
-            // ponytail: forward overlay events to event bus for capture pipeline
+            // forward overlay events to event bus for capture pipeline
             const data = msg.data as Record<string, unknown>;
             this.eventBus.publish({
               eventId: crypto.randomUUID(),
@@ -264,7 +264,7 @@ export class Studio {
               payload: data.data ?? {},
             });
           } else if (msg.type === 'settings:update' && msg.settings) {
-            // ponytail: update user toggle settings
+            // update user toggle settings
             const updates = { ...(msg.settings as Record<string, unknown>) };
             updates.multiSelect = undefined;
             this.state.settings = {
@@ -399,7 +399,7 @@ export class Studio {
     return { ok: true };
   }
 
-  // ponytail: chat — agent ↔ extension message passing via HTTP + WebSocket
+  // chat — agent ↔ extension message passing via HTTP + WebSocket
   private addChatMessage(role: 'user' | 'agent', text: string): ChatMessage {
     const msg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -534,7 +534,7 @@ export class Studio {
     });
   }
 
-  // ponytail: reload page via Playwright and re-inject overlay
+  // reload page via Playwright and re-inject overlay
   private async handleOverlayReload(res: http.ServerResponse): Promise<void> {
     try {
       const reloadResult = await this.vce.reloadPage();

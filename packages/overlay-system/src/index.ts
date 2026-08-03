@@ -30,7 +30,7 @@ const OVERLAY_SCRIPT = `
   var prefersReducedMotion = false;
   try { prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e) {}
 
-  // ponytail: motion-design layers — primary (highlight), secondary (badge), ambient (indicator)
+  // motion-design layers — primary (highlight), secondary (badge), ambient (indicator)
   // timing from motion-principles: hover 100ms, selection 200ms, confirmation 300ms
   // only transform/opacity animated — never layout properties
   var tHighlight = prefersReducedMotion ? 'none' : 'transform 0.1s ease-out, opacity 0.1s ease-out, border-color 0.15s ease-out, background 0.15s ease-out';
@@ -443,7 +443,7 @@ const OVERLAY_SCRIPT = `
     selectionIndicator.classList.remove(PREFIX + 'visible');
   }
 
-  // ponytail: diagnostics overlay — bounding boxes + spacing visualization
+  // diagnostics overlay — bounding boxes + spacing visualization
   // spec: overlay:diagnostics { show, showBoundingBoxes, showSpacing }
   function clearDiagnostics() {
     diagLayer.innerHTML = '';

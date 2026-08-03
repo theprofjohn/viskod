@@ -646,7 +646,7 @@ export class VisualContextEngine {
     return this.browserRuntime;
   }
 
-  // ponytail: overlay event poller — connects overlay clicks to capture pipeline
+  // overlay event poller — connects overlay clicks to capture pipeline
   startOverlayPolling(): void {
     if (this.overlayPollInterval) return;
     this.overlayPollInterval = setInterval(async () => {

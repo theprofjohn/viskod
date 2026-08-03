@@ -1494,7 +1494,7 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
     }
   });
 
-  // ponytail: chat tools — agent ↔ extension message passing via Studio HTTP API
+  // chat tools — agent ↔ extension message passing via Studio HTTP API
 
   const getChatMessagesTool: MCPToolDefinition = {
     name: 'viskod_get_chat_messages',
@@ -1577,7 +1577,7 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
       const action = args.action as string;
       if (!action) return mcpError('action is required');
 
-      // ponytail: 'refresh' uses Playwright reload + overlay re-injection
+      // 'refresh' uses Playwright reload + overlay re-injection
       // instead of extension location.reload() which destroys the overlay
       if (action === 'refresh') {
         const resp = await fetch(`${STUDIO_URL}/overlay/reload`, { method: 'POST' });
@@ -1597,7 +1597,7 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
     }
   });
 
-  // ponytail: settings tools — agent reads/updates user toggle state
+  // settings tools — agent reads/updates user toggle state
   const getSettingsTool: MCPToolDefinition = {
     name: 'viskod_get_settings',
     description:

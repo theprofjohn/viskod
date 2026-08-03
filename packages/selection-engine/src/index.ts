@@ -262,7 +262,7 @@ export class SelectionEngine {
 
   // ---- Private helpers ----
 
-  // ponytail: real implementations using BrowserRuntime when available, fallback to stubs
+  // real implementations using BrowserRuntime when available, fallback to stubs
   private async computeGeometry(
     target: SelectionTarget,
     handle?: BrowserHandle,

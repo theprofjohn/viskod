@@ -270,7 +270,7 @@ export class SelectionOverlayController {
     };
   }
 
-  // ponytail: real DOM query — finds all elements whose bounding rects intersect the drag rectangle
+  // real DOM query — finds all elements whose bounding rects intersect the drag rectangle
   private async collectBoxTargets(
     dragRect: Rect,
   ): Promise<import('./box-selection').BoxCandidate[]> {

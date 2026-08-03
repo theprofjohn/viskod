@@ -814,7 +814,7 @@ export class ProjectScanner {
       evidence.push('shadcn/ui detected via components.json or src/components/ui directory');
     }
 
-    // ponytail: animation library detection — from motion-design/framer-motion/genjutsu-gsap skills
+    // animation library detection — from motion-design/framer-motion/genjutsu-gsap skills
     let animationLibrary: DesignSystemDetection['animationLibrary'] = null;
 
     if (allDeps['framer-motion'] || allDeps.motion) {
