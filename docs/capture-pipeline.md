@@ -9,13 +9,13 @@
 
 # Purpose
 
-The Capture Pipeline transforms a live browser state into an immutable Context Packet.
+The Capture Pipeline persists and manages capture data (screenshots and metadata) produced by the Visual Context Engine.
 
-It coordinates every stage required to collect, validate and assemble visual context.
-
-The pipeline is orchestration.
+The pipeline is storage and retrieval.
 
 Individual analysis belongs to specialised engines.
+
+Orchestration of the capture stages (browser snapshot → evidence collection → validation → analysis → packet assembly) is performed by the Visual Context Engine; the Capture Pipeline stores the assembled result.
 
 ---
 
@@ -35,12 +35,11 @@ No stage should discard information before validation.
 
 The Capture Pipeline is responsible for:
 
-* coordinating capture stages
-* sequencing execution
-* validating intermediate results
-* retrying recoverable failures
-* assembling Context Packets
-* publishing completed captures
+* persisting capture data
+* retrieving captures
+* listing captures
+* deleting captures
+* reporting storage stats
 
 It is not responsible for:
 
@@ -48,6 +47,8 @@ It is not responsible for:
 * semantic analysis
 * MCP communication
 * source code inspection
+
+Pipeline orchestration (browser snapshot → evidence collection → validation → analysis → packet assembly) is performed by the Visual Context Engine, which hands the assembled packet to the Capture Pipeline for storage.
 
 ---
 
@@ -429,24 +430,12 @@ New stages should integrate without modifying existing stage contracts.
 
 # Observability
 
-Every stage should emit structured events.
-
-Examples:
+The Capture Pipeline (persistence layer) does not emit events. Packet generation events are published by the Visual Context Engine:
 
 ```text id="af6i54"
-CaptureStarted
+VCE_EVENT:CONTEXT_PACKET_GENERATED
 
-EvidenceCollected
-
-ValidationCompleted
-
-AnalysisCompleted
-
-PacketPersisted
-
-CaptureCompleted
-
-CaptureFailed
+VCE_EVENT:PROCESSING_FAILED
 ```
 
 Observability should aid debugging rather than alter execution.

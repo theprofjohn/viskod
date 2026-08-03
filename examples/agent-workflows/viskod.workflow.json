@@ -1,25 +1,23 @@
 {
   "workflow": "viskod-capture-fix-verify",
   "version": "1.0.0",
-  "description": "Capture UI context, fix a visual issue, and verify via comparison recapture",
-  "requiredTools": ["capture_context", "recapture_context"],
+  "description": "Capture UI context, fix a visual issue, and verify via a visual review recapture",
+  "requiredTools": ["viskod_capture_context", "create_visual_review", "recapture_visual_review"],
   "recommendedCallSequence": [
     {
       "step": 1,
-      "tool": "capture_context",
+      "tool": "viskod_capture_context",
       "purpose": "Capture the current visual state of the target element",
       "inputExample": {
-        "selector": ".target-card",
-        "url": "http://localhost:3000",
-        "profile": "debug",
-        "projectPath": "./my-app"
+        "selector": ".target-card"
       },
       "outputFieldsToInspect": [
-        "packetPath",
-        "captureDir",
-        "brief",
-        "sourceHintCount",
-        "runtimeEvidenceSummary"
+        "packetId",
+        "selection",
+        "styles",
+        "screenshots",
+        "confidence",
+        "evidenceSources"
       ]
     },
     {
@@ -29,47 +27,61 @@
     },
     {
       "step": 3,
-      "tool": "recapture_context",
-      "purpose": "Re-capture the same element after the fix and compare against the previous capture",
+      "tool": "create_visual_review",
+      "purpose": "Create a before/after visual review from the captured issue",
       "inputExample": {
-        "selector": ".target-card",
-        "url": "http://localhost:3000",
-        "profile": "default",
-        "projectPath": "./my-app",
-        "previousPacketPath": "<packetPath from step 1>",
+        "issueId": "<issue_id>"
+      },
+      "outputFieldsToInspect": ["reviewId"]
+    },
+    {
+      "step": 4,
+      "tool": "recapture_visual_review",
+      "purpose": "Re-capture the same element after the fix and compare against the before snapshot",
+      "inputExample": {
+        "reviewId": "<review_id from step 3>",
         "reload": true,
         "cacheBust": true
       },
       "outputFieldsToInspect": [
-        "packetPath",
-        "captureDir",
-        "brief",
-        "comparisonSummary.boundingBoxDelta",
-        "comparisonSummary.areaDelta",
-        "comparisonSummary.evidenceDelta",
-        "comparisonSummary.changedFields",
-        "comparisonSummary.verdict",
-        "comparisonSummary.notes"
+        "comparisonStatus",
+        "summary",
+        "afterSnapshotId",
+        "warningCount"
+      ]
+    },
+    {
+      "step": 5,
+      "tool": "get_visual_review",
+      "purpose": "Retrieve the full comparison (pixel ratio, bounding box delta, evidence deltas) to verify the fix",
+      "inputExample": {
+        "reviewId": "<review_id from step 3>"
+      },
+      "outputFieldsToInspect": [
+        "comparison.status",
+        "comparison.summary",
+        "comparison.visual.changedPixelRatio",
+        "comparison.visual.boundingBoxDelta",
+        "comparison.evidence.consoleDelta",
+        "comparison.evidence.networkDelta"
       ]
     }
   ],
   "safetyNotes": [
     "Never output redacted values. If a value appears as [REDACTED] or [TOKEN_REDACTED], treat it as sensitive.",
     "Do not modify files outside the project scope (node_modules, .git, system files).",
-    "Always pass reload:true and cacheBust:true to recapture_context after local file edits.",
-    "The packetPath from capture_context must be saved and passed as previousPacketPath to recapture_context.",
-    "Use profile:'debug' for initial capture (max info) and profile:'default' for recapture (comparison focus)."
+    "Pass reload:true and cacheBust:true to recapture_visual_review after local file edits.",
+    "The reviewId from create_visual_review must be reused for recapture_visual_review and get_visual_review.",
+    "Before capturing, navigate the browser to the target URL with viskod_navigate if the session was not already started there."
   ],
   "validationChecklist": [
-    "capture_context returned packetPath (non-empty string)",
-    "capture_context returned captureDir (non-empty string)",
-    "capture_context returned brief (non-empty string)",
-    "capture_context returned sourceHintCount >= 0",
-    "recapture_context returned comparisonSummary (non-null object)",
-    "comparisonSummary.boundingBoxDelta has before/after/delta for x, y, width, height",
-    "comparisonSummary.areaDelta has percentChange (number)",
-    "comparisonSummary.changedFields is a non-empty array if layout changed",
-    "comparisonSummary.verdict is one of: improved, changed, unchanged, regressed, unknown",
+    "viskod_capture_context returned packetId (non-empty string)",
+    "viskod_capture_context returned confidence with source hint data",
+    "create_visual_review returned reviewId (non-empty string)",
+    "recapture_visual_review returned comparisonStatus (non-null value)",
+    "get_visual_review returned comparison (non-null object)",
+    "comparison.visual.boundingBoxDelta reports the expected layout change",
+    "comparison.evidence.consoleDelta and networkDelta reflect reduced errors after the fix",
     "No daemon-token or sessionToken appears in any output"
   ]
 }

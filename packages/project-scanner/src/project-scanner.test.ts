@@ -60,9 +60,19 @@ describe('ProjectScanner', () => {
     }
   });
 
-  it('detects workspace type from pnpm-workspace.yaml', () => {
-    // Workspace detection is tested via scan() in other tests
-    expect(true).toBe(true);
+  it('detects workspace type from pnpm-workspace.yaml', async () => {
+    const tmpDir = join(tmpdir(), `viskod-ws-test-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-ws' }));
+    writeFileSync(join(tmpDir, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n');
+
+    const bus = new EventBus();
+    const scanner = new ProjectScanner(bus);
+    const result = await scanner.scan(tmpDir);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.metadata.workspaceType).toBe('pnpm-workspace');
+    }
   });
 
   it('health returns before any scan', () => {

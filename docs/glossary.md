@@ -330,12 +330,6 @@ A user-defined region, element or scope identified for further analysis.
 
 ## Selection Engine
 
-The subsystem responsible for processing and managing user selections.
-
----
-
-## Selection Engine
-
 The subsystem responsible for converting user pointer interactions into structured selection targets.
 
 The Selection Engine validates DOM node candidates, manages selection state, and coordinates with Browser Runtime and Studio through the Event Bus.

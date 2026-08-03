@@ -6,9 +6,12 @@
 
 ## Summary
 
+> **Note:** 12 of the 35 specifications below have written spec files in `specs/` (repository-layout, shared-types, error-model, configuration, event-schema, context-packet-schema, event-bus, browser-runtime, visual-context-engine, capture-pipeline, overlay-system, studio). The remaining rows are planned specifications with no `specs/*.md` file yet; their architecture sources live in `docs/`.
+
 | Metric | Count |
 |--------|-------|
-| Total specifications | 35 |
+| Total specifications (planned) | 35 |
+| Written specification files | 12 |
 | P0 (blocking vertical slice) | 9 |
 | P1 (Phase 1 completion) | 22 |
 | P2 (Phase 2 hardening) | 2 |

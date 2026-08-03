@@ -7,10 +7,8 @@
 
 ---
 
-> **NOTE:** This specification defines the planned MCP interface for Viskod Phase 1.
-> Tool names, resource URIs and prompt templates are provisional and may change
-> before the first release. The architectural principles (deterministic, versioned,
-> transport-independent) are committed. Specific tool contracts are proposed.
+> **NOTE:** This specification documents the MCP interface implemented by Viskod (registered in `packages/mcp-server/src/entry.ts`).
+> The architectural principles (deterministic, versioned, transport-independent) are committed.
 
 # Purpose
 
@@ -143,27 +141,42 @@ Avoid tools that combine unrelated operations.
 
 # Core Tools
 
-Phase 1 tools:
+Implemented tools (30 total, registered by `packages/mcp-server/src/entry.ts`):
 
 ```text
-viskod.v1.capture_selection
-
-viskod.v1.capture_viewport
-
-viskod.v1.capture_full_page
-
-viskod.v1.set_viewport
-
-viskod.v1.clear_selection
-
-viskod.v1.get_status
-
-viskod.v1.get_page_diagnostics
-
-viskod.v1.refresh
+viskod_navigate
+viskod_select_element
+viskod_capture_context
+viskod_get_project_info
+viskod_get_diagnostics
+create_agent_handoff
+get_agent_handoff
+list_agent_handoffs
+update_agent_handoff_status
+cancel_agent_handoff
+create_visual_review
+get_visual_review
+list_visual_reviews
+recapture_visual_review
+record_visual_review_decision
+resolve_usage_site_hints
+get_setup_state
+detect_project
+initialize_workspace
+run_setup_checks
+run_setup_smoke
+complete_setup
+repair_setup
+verify_mcp_tools
+validate_app_url
+viskod_get_chat_messages
+viskod_send_chat_response
+viskod_notify_ui
+viskod_get_settings
+viskod_update_settings
 ```
 
-Future tools must preserve naming consistency.
+Core capture tools use the `viskod_` prefix; handoff, review, and setup tools use snake_case names.
 
 ---
 
@@ -171,20 +184,12 @@ Future tools must preserve naming consistency.
 
 Resources represent current platform state.
 
-Examples:
+Implemented resources:
 
 ```text
-viskod://v1/project
+viskod://captures/latest
 
-viskod://v1/selection/current
-
-viskod://v1/viewport/current
-
-viskod://v1/context/latest
-
-viskod://v1/captures/latest
-
-viskod://v1/diagnostics/current
+viskod://project/info
 ```
 
 Resources are read-only snapshots.

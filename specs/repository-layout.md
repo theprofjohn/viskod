@@ -128,11 +128,12 @@ packages/
 ├── selection-engine/            # Platform: User selection processing
 ├── source-hint-engine/          # Platform: Probabilistic source identification
 ├── mcp-server/                  # Platform: MCP protocol exposure
-├── framework-adapters/          # Platform: Framework-specific adapters
 ├── shared/                      # Core: Shared types, schemas, utilities, constants
 ├── config/                      # Core: Configuration management
 └── diagnostics/                 # Cross-cutting: Runtime health and error reporting
 ```
+
+> **Note:** `framework-adapters` (defined in `docs/framework-adapters.md`) is a planned package that does not exist in `packages/` yet.
 
 ### Public Entry Points
 
@@ -149,7 +150,6 @@ Every package must expose a single public entry point:
 | `packages/selection-engine` | `packages/selection-engine/src/index.ts` |
 | `packages/source-hint-engine` | `packages/source-hint-engine/src/index.ts` |
 | `packages/mcp-server` | `packages/mcp-server/src/index.ts` |
-| `packages/framework-adapters` | `packages/framework-adapters/src/index.ts` |
 | `packages/shared` | `packages/shared/src/index.ts` |
 | `packages/config` | `packages/config/src/index.ts` |
 | `packages/diagnostics` | `packages/diagnostics/src/index.ts` |
@@ -161,18 +161,24 @@ Consumers must import only from the public entry point. Imports of internal modu
 ```jsonc
 {
   "name": "viskod",
+  "version": "0.2.0-alpha",
   "private": true,
   "scripts": {
-    "build": "pnpm -r run build",
-    "test": "pnpm -r run test",
-    "lint": "pnpm -r run lint",
-    "typecheck": "pnpm -r run typecheck",
-    "check:deps": "pnpm run check:deps"
+    "viskod": "tsx packages/cli/src/index.ts",
+    "build": "pnpm -r build",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "check": "biome check . && tsc -b && vitest run",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "smoke:agent-workflow": "node scripts/smoke-phase18-agent-workflow.mjs",
+    "release:check": "biome check . && tsc -b && vitest run && node scripts/smoke-phase18-agent-workflow.mjs"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "pnpm": ">=8.0.0"
-  }
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0"
 }
 ```
 
@@ -226,7 +232,6 @@ Mappings:
 | `packages/selection-engine` | `@viskod/selection-engine` |
 | `packages/source-hint-engine` | `@viskod/source-hint-engine` |
 | `packages/mcp-server` | `@viskod/mcp-server` |
-| `packages/framework-adapters` | `@viskod/framework-adapters` |
 | `packages/shared` | `@viskod/shared` |
 | `packages/config` | `@viskod/config` |
 | `packages/diagnostics` | `@viskod/diagnostics` |
@@ -256,7 +261,6 @@ Each package belongs to exactly one category:
 | `selection-engine` (`@viskod/selection-engine`) | `platform` |
 | `source-hint-engine` (`@viskod/source-hint-engine`) | `platform` |
 | `mcp-server` (`@viskod/mcp-server`) | `platform` |
-| `framework-adapters` (`@viskod/framework-adapters`) | `platform` |
 | `shared` (`@viskod/shared`) | `core` |
 | `config` (`@viskod/config`) | `core` |
 | `diagnostics` (`@viskod/diagnostics`) | `cross-cutting` |
@@ -435,18 +439,20 @@ The check must be runnable as:
 pnpm run check:deps
 ```
 
+> **Status:** Not yet implemented — no `check:deps` script exists in the root `package.json`; the current quality gate is `pnpm check` (biome + `tsc -b` + vitest), which does not validate the dependency matrix in §Dependency Rules.
+
 ---
 
 ## Acceptance Criteria
 
 Before this specification can move to Approved:
 
-- [ ] All package directories exist at the paths defined in §Interfaces (`apps/studio/`, `packages/browser-runtime/`, `packages/cli/`, `packages/context-engine/`, `packages/capture-pipeline/`, `packages/project-scanner/`, `packages/selection-engine/`, `packages/source-hint-engine/`, `packages/mcp-server/`, `packages/framework-adapters/`, `packages/shared/`, `packages/config/`, `packages/diagnostics/`)
+- [ ] All package directories exist at the paths defined in §Interfaces (`apps/studio/`, `packages/browser-runtime/`, `packages/cli/`, `packages/context-engine/`, `packages/capture-pipeline/`, `packages/project-scanner/`, `packages/selection-engine/`, `packages/source-hint-engine/`, `packages/mcp-server/`, `packages/shared/`, `packages/config/`, `packages/diagnostics/`)
 - [ ] Every package has a `package.json` with the correct `@viskod/` scoped name as defined in the mapping table
 - [ ] `pnpm-workspace.yaml` exists at the repository root and correctly references `packages/*` and `apps/*`
-- [ ] Root `package.json` exists with `private: true` and `engines` specifying node >= 18 and pnpm >= 8
-- [ ] No circular dependency exists in the workspace (verified by `pnpm run check:deps`)
-- [ ] Automated dependency check (`check:deps`) rejects cross-category reverse imports with the defined error codes
+- [ ] Root `package.json` exists with `private: true` and `engines` specifying node >= 22 and pnpm >= 9
+- [ ] No circular dependency exists in the workspace (not currently verified by an automated script)
+- [ ] Automated dependency check rejects cross-category reverse imports with the defined error codes (not yet implemented)
 - [ ] Every package has a single public entry point at `src/index.ts`
 - [ ] The `.gitignore` at the repository root excludes `node_modules/`, `.env`, `.env.*`, `dist/`, `.cache/`, `.turbo/`, `coverage/`, `*.tsbuildinfo`, and `.viskod/`
 
@@ -456,19 +462,19 @@ Before this specification can move to Approved:
 
 The following decisions are deferred to implementation decision records under `decisions/`:
 
-| Decision | Deferred To | Rationale |
-|----------|-------------|-----------|
-| pnpm version floor (currently `>=8.0.0`) | `decisions/pnpm-version.md` | Must verify compatibility with all toolchain integrations before locking |
-| TypeScript version floor | `decisions/typescript-version.md` | Depends on target Node.js version and feature requirements |
-| Node.js version floor (currently `>=18.0.0`) | `decisions/node-version.md` | Must align with LTS schedule and downstream consumer requirements |
-| ESLint dependency rule plugin (exact package, configuration) | `decisions/eslint-dependency-plugin.md` | Multiple plugins exist for enforcing dependency boundaries; evaluation needed |
-| Whether `cli` should move from `packages/cli` to `apps/cli` | `decisions/cli-location.md` | `cli` is an application entry point housed under `packages/` for historical convenience; future relocation may be warranted |
+| Decision | Status | Rationale |
+|----------|--------|-----------|
+| pnpm version floor (currently `>=9.0.0`, `packageManager: pnpm@9.15.0`) | Open — no decision record filed | Must verify compatibility with all toolchain integrations before locking |
+| TypeScript version floor | Resolved in `decisions/DEC-001.md` (5.5+) | Depends on target Node.js version and feature requirements |
+| Node.js version floor (currently `>=22.0.0`) | Resolved in `decisions/DEC-001.md` (22 LTS) | Must align with LTS schedule and downstream consumer requirements |
+| ESLint dependency rule plugin (exact package, configuration) | Open — no decision record filed | Multiple plugins exist for enforcing dependency boundaries; evaluation needed |
+| Whether `cli` should move from `packages/cli` to `apps/cli` | Open — no decision record filed | `cli` is an application entry point housed under `packages/` for historical convenience; future relocation may be warranted |
 
 ---
 
 ## Risks
 
-- **Dependency drift**: Without automated enforcement, developers may inadvertently introduce reverse dependencies that degrade architecture over time. Mitigation: automated `check:deps` run in CI and as a pre-commit hook.
+- **Dependency drift**: Without automated enforcement, developers may inadvertently introduce reverse dependencies that degrade architecture over time. Mitigation: the `check:deps` script defined in §Testing Requirements, once implemented.
 - **Category ambiguity**: The `cross-cutting` category (diagnostics) has relaxed rules compared to other categories, which could be exploited to bypass dependency rules. Mitigation: `cross-cutting` may only depend on `shared`; this is explicitly constrained.
 - **Internal import leakage**: TypeScript path aliases or barrel re-exports could mask internal imports. Mitigation: the ESLint rule or build validation must trace actual file paths, not resolved module names.
 
@@ -481,10 +487,9 @@ The following decisions are deferred to implementation decision records under `d
 3. Create each package's `package.json` with correct `@viskod/` name and `main`/`exports` pointing to `src/index.ts`
 4. Create each package's `src/index.ts` (stub)
 5. Create root `.gitignore`
-6. Create `pnpm run check:deps` script (dependency validation)
-7. Run `pnpm install` to verify workspace resolution
-8. Run `check:deps` to verify zero violations
-9. Validate acceptance criteria checklist
+6. Run `pnpm install` to verify workspace resolution
+7. Run `pnpm check` to verify the current quality gate
+8. Validate acceptance criteria checklist
 
 ---
 

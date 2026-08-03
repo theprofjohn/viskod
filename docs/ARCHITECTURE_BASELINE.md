@@ -104,17 +104,30 @@ viskod/
   apps/
     └── studio/
   packages/
+    ├── agent-handoff/
+    ├── audit/
     ├── browser-runtime/
-    ├── cli/
-    ├── context-engine/
-    ├── mcp-server/
-    ├── project-scanner/
-    ├── selection-engine/
-    ├── source-hint-engine/
     ├── capture-pipeline/
-    ├── shared/
+    ├── cli/
+    ├── config/
+    ├── context-engine/
     ├── diagnostics/
-    └── config/
+    ├── event-bus/
+    ├── mcp-server/
+    ├── overlay-system/
+    ├── permissions/
+    ├── plugin-system/
+    ├── project-scanner/
+    ├── runtime-session/
+    ├── sdk/
+    ├── selection-engine/
+    ├── setup/
+    ├── shared/
+    ├── source-hint-engine/
+    ├── visual-issue/
+    ├── visual-review/
+    ├── visual-selection/
+    └── workspace/
 ```
 
 ---
@@ -164,8 +177,8 @@ When documents conflict, the higher-authority document governs until resolved th
 4. `docs/ARCHITECTURE_BASELINE.md` — this document; canonical snapshot
 5. Subsystem documents — internal responsibilities of each subsystem
 6. Public API and protocol documents — SDK, CLI, Plugin API, MCP, API Reference
-7. Implementation specifications — future, not yet created
-8. Source code — not yet implemented
+7. Implementation specifications — `specs/` directory
+8. Source code — the implementation in `packages/` and `apps/`
 
 ---
 

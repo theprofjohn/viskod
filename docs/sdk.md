@@ -276,11 +276,13 @@ SDK failures should remain isolated from platform execution.
 The SDK builds upon:
 
 * Public APIs
-* MCP Server
-* Plugin System
-* Context Packet
 * Browser Runtime
+* Capture Pipeline
+* Context Engine
+* Event Bus
 * Project Scanner
+* Selection Engine
+* Source Hint Engine
 
 The SDK should never communicate directly with internal platform components.
 

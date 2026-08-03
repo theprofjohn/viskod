@@ -52,7 +52,7 @@ Comprehensive relationship section added referencing all foundational, core subs
 ### M2 — 26 Documents Missing Relationship Sections
 **Status: RESOLVED**
 
-35+ documents now have relationship sections. Documents without them (contributing.md, release.md, troubleshooting.md) are process/operational documents where cross-references add limited architectural value.
+35+ documents now have relationship sections. Documents without them (testing.md, error-handling.md, deployment.md, contributing.md, release.md, visual-context-engine.md, logging.md, diagnostics.md, cache.md) are process/operational documents or subsystem specs where cross-references add limited architectural value.
 
 ### M3 — Context Builder Has No Specification
 **Status: RESOLVED**

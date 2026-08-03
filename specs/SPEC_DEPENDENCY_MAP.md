@@ -6,6 +6,8 @@
 > **Owner:** Architecture
 > **Last Updated:** 2026-07-28
 
+> **Note on numbering:** The dependency tables below use the pre-P0 numbering scheme (e.g. event-bus = SPEC-004, visual-context-engine = SPEC-012, mcp-server = SPEC-013, studio-state/studio-shell = SPEC-014/015). The canonical SPEC-### IDs are assigned in each spec file's header and inventoried in `SPEC_INDEX.md` (event-bus = SPEC-007, configuration = SPEC-004, context-packet-schema = SPEC-006, browser-runtime = SPEC-008, visual-context-engine = SPEC-009, capture-pipeline = SPEC-010, project-scanner = SPEC-012, mcp-server = SPEC-014, overlay-system = SPEC-022, studio = SPEC-023). `studio-state` and `studio-shell` were merged into `studio.md` (SPEC-023).
+
 ---
 
 ## Architecture Sources

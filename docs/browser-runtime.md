@@ -267,21 +267,17 @@ The runtime publishes events to the Event Bus. These events are consumed by subs
 Published events include:
 
 ```text id="h1srf5"
-BrowserStarted
+BR_EVENT:BROWSER_STARTED
 
-BrowserStopped
+BR_EVENT:BROWSER_STOPPED
 
-PageLoaded
+BR_EVENT:PAGE_LOADED
 
-NavigationCompleted
+BR_EVENT:VIEWPORT_CHANGED
 
-ViewportChanged
+BR_EVENT:SELECTION_CHANGED
 
-SelectionChanged
-
-CaptureCompleted
-
-BrowserDisconnected
+BR_EVENT:CAPTURE_COMPLETED
 ```
 
 Events are immutable and ordered.

@@ -185,17 +185,30 @@ apps/
 └── studio/
 
 packages/
+├── agent-handoff/
+├── audit/
 ├── browser-runtime/
-├── cli/
-├── context-engine/
-├── mcp-server/
-├── project-scanner/
-├── selection-engine/
-├── source-hint-engine/
 ├── capture-pipeline/
-├── shared/
+├── cli/
+├── config/
+├── context-engine/
 ├── diagnostics/
-└── config/
+├── event-bus/
+├── mcp-server/
+├── overlay-system/
+├── permissions/
+├── plugin-system/
+├── project-scanner/
+├── runtime-session/
+├── sdk/
+├── selection-engine/
+├── setup/
+├── shared/
+├── source-hint-engine/
+├── visual-issue/
+├── visual-review/
+├── visual-selection/
+└── workspace/
 
 examples/
 
@@ -630,15 +643,15 @@ Every package exposes one public API.
 Example
 
 ```ts
-createBrowserRuntime()
+BrowserRuntime
 
-createContextPacket()
+VisualContextEngine
 
-createProjectScanner()
+ProjectScanner
 
-createCaptureManager()
+CapturePipeline
 
-createMcpServer()
+MCPServer
 ```
 
 Avoid exposing implementation details.
@@ -652,19 +665,15 @@ Packages communicate through typed events.
 Examples
 
 ```text
-BrowserStarted
+BR_EVENT:BROWSER_STARTED
 
-ViewportChanged
+BR_EVENT:VIEWPORT_CHANGED
 
-SelectionChanged
+BR_EVENT:SELECTION_CHANGED
 
-CaptureCompleted
+BR_EVENT:CAPTURE_COMPLETED
 
-ContextGenerated
-
-BrowserDisconnected
-
-ProjectLoaded
+VCE_EVENT:CONTEXT_PACKET_GENERATED
 ```
 
 Events are immutable.
@@ -709,7 +718,7 @@ Logs should be machine-readable.
 
 # Schema Strategy
 
-Every cross-package payload must use Zod.
+Package boundaries use Zod validation where schemas exist (see `packages/*/src/schemas.ts`).
 
 Schemas are versioned.
 
@@ -730,13 +739,17 @@ Never silently modify shared schemas.
 
 captures/
 
-context/
+issues/
 
-logs/
+handoffs/
 
-cache/
+reviews/
 
-settings.json
+setup/
+
+logs/        (optional)
+
+session.json
 ```
 
 Everything remains inside one hidden directory.
@@ -1573,19 +1586,15 @@ Runtime communication uses events. The Event Bus is an integration boundary — 
 Examples
 
 ```text
-BrowserStarted
+BR_EVENT:BROWSER_STARTED
 
-SelectionChanged
+BR_EVENT:SELECTION_CHANGED
 
-ViewportChanged
+BR_EVENT:VIEWPORT_CHANGED
 
-CaptureStarted
+BR_EVENT:CAPTURE_COMPLETED
 
-CaptureCompleted
-
-BrowserDisconnected
-
-DiagnosticsUpdated
+VCE_EVENT:CONTEXT_PACKET_GENERATED
 ```
 
 Events are immutable.
@@ -1786,13 +1795,13 @@ Actions initiated by AI.
 Examples
 
 ```text
-viskod.v1.capture_selection
+viskod_navigate
 
-viskod.v1.capture_viewport
+viskod_select_element
 
-viskod.v1.clear_selection
+viskod_capture_context
 
-viskod.v1.set_viewport
+viskod_get_project_info
 ```
 
 ---
@@ -1804,15 +1813,9 @@ Persistent information.
 Examples
 
 ```text
-viskod://v1/selection/current
+viskod://captures/latest
 
-viskod://v1/project
-
-viskod://v1/diagnostics
-
-viskod://v1/captures/latest
-
-viskod://v1/viewport/current
+viskod://project/info
 ```
 
 Resources should always represent the latest known state.
@@ -1997,9 +2000,9 @@ Public APIs use semantic versioning.
 Examples
 
 ```text
-viskod.v1.capture_selection
+viskod_capture_context
 
-viskod.v2.capture_selection
+viskod_capture_context_v2
 ```
 
 Old clients should continue working where practical.

@@ -86,22 +86,18 @@ Overlay rendering should never degrade application performance.
 
 # Overlay Types
 
-Supported overlays include:
+Supported overlay modes:
 
 ```text id="q7j4fa"
-Selection
+hover
 
-Hover
+selection
 
-Spacing
+box-select
 
-Layout
+diagnostics
 
-Measurement
-
-Grid
-
-Capture Status
+hidden
 ```
 
 Additional overlay types should remain modular.

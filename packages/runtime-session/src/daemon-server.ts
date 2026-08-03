@@ -68,7 +68,7 @@ export class DaemonServer {
   private async handleRequest(request: DaemonRequest): Promise<DaemonResponse> {
     const info = this.session.getStatus();
 
-    // Validate token for all methods except no-op
+    // Validate token for all methods when a session exists
     if (info && request.token !== info.token) {
       return { id: request.id, error: { code: -32001, message: 'Invalid session token' } };
     }

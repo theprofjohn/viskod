@@ -16,8 +16,8 @@ The standard Viskod agent workflow has three phases:
 ### Phase 1: Capture
 
 ```
-agent → capture_context(selector, url, profile: "debug")
-      → receives brief + packetPath + captureDir
+agent → viskod_capture_context(selector)
+      → receives packetId + selection + styles + source hints
       → inspects source hints
 ```
 
@@ -31,15 +31,10 @@ agent → reads source file from hints
 ### Phase 3: Recapture
 
 ```
-agent → recapture_context(
-         selector,
-         url,
-         previousPacketPath,
-         reload: true,
-         cacheBust: true
-       )
-      → receives comparisonSummary
-      → verifies boundingBoxDelta, changedFields, verdict
+agent → create_visual_review(issueId)
+      → recapture_visual_review(reviewId, reload: true, cacheBust: true)
+      → get_visual_review(reviewId)
+      → verifies comparison (changedPixelRatio, boundingBoxDelta, evidence deltas)
 ```
 
 See `prompts/fix-visual-issue.md` for the full agent prompt template.

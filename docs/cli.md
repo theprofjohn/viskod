@@ -126,17 +126,23 @@ Each category should represent a stable platform capability.
 Illustrative commands include:
 
 ```text id="g2v7mn"
-viskod project scan
+viskod start
 
-viskod capture create
+viskod scan
 
-viskod packet export
+viskod capture <selector>
 
-viskod plugin list
+viskod serve --url <APP_URL>
 
-viskod diagnostics health
+viskod health
 
-viskod cache clear
+viskod status
+
+viskod stop
+
+viskod export
+
+viskod install <client>
 ```
 
 Examples demonstrate intent rather than implementation.

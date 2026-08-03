@@ -375,7 +375,7 @@ Navigation failures should remain isolated.
 * [Glossary](./glossary.md) — canonical terminology
 * [Studio](./studio.md) — the primary UI application
 * [UI Architecture](./ui-architecture.md) — UI component structure
-* [Command Palette] — referenced for command-based navigation
+* [Command Palette](#command-palette) — referenced for command-based navigation
 
 ---
 

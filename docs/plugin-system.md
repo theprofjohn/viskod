@@ -139,21 +139,25 @@ Each lifecycle stage should be explicit.
 Every plugin provides a manifest containing:
 
 ```text id="x3v9mk"
-Plugin Identifier
-
 Name
 
 Version
 
-Author
-
 Description
 
-Compatibility
+Author
+
+Main
 
 Permissions
 
-Entry Point
+Capabilities
+
+Icon
+
+Homepage
+
+License
 ```
 
 The manifest defines the public identity of the plugin.
@@ -231,7 +235,7 @@ Permissions should follow the principle of least privilege.
 
 # Plugin Isolation
 
-Plugins execute in isolated environments.
+Plugins execute in-process as registered hooks and tools; the current implementation does not sandbox plugin code.
 
 Isolation should prevent:
 
