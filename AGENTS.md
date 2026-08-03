@@ -2,7 +2,7 @@
 
 ## MCP Server
 
-The `gortex` MCP server is configured for this repo (`.omp/mcp.json`, `opencode.json`). It is a dev tool only — runtime must never depend on it.
+The `gortex` MCP server is configured for this repo (`.omp/mcp.json`). It is a dev tool only — runtime must never depend on it.
 
 ## Commands
 
