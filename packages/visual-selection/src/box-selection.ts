@@ -1,5 +1,12 @@
+import {
+  intersectionRatio,
+  isZeroArea,
+  normalizeRect,
+  rectArea,
+  rectContains,
+  rectsIntersect,
+} from './geometry';
 import type { Rect, VisualSelectionTarget } from './types';
-import { normalizeRect, rectsIntersect, rectArea, intersectionRatio, rectContains, isZeroArea } from './geometry';
 import type { VisualSelectionConfig } from './types';
 import { DEFAULT_VISUAL_SELECTION_CONFIG } from './types';
 
@@ -28,19 +35,6 @@ function documentOrderSort(a: { documentOrder: number }, b: { documentOrder: num
   return a.documentOrder - b.documentOrder;
 }
 
-function isDescendantOfAny(
-  candidate: BoxCandidate,
-  others: BoxCandidate[],
-): boolean {
-  for (const other of others) {
-    if (other === candidate) continue;
-    if (candidate.ancestorDepth > other.ancestorDepth && rectContains(other.boundingRect, candidate.boundingRect)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function isStructuralWrapper(candidate: BoxCandidate): boolean {
   const structuralTags = ['div', 'section', 'article', 'main', 'header', 'footer', 'aside', 'nav'];
   if (!structuralTags.includes(candidate.tagName)) return false;
@@ -61,8 +55,6 @@ export function collectBoxCandidates(
   config: VisualSelectionConfig = DEFAULT_VISUAL_SELECTION_CONFIG,
 ): BoxCandidate[] {
   const normalized = normalizeRect(dragRect);
-  const viewport: Rect = { x: 0, y: 0, width: 99999, height: 99999 };
-
   return elements.filter((el) => {
     if (el.isViskodOwned) return false;
     if (el.isTechnical) return false;
@@ -101,14 +93,20 @@ export function reduceBoxSelection(
     for (const wrapper of wrappers) {
       const containsNonWrapper = nonWrappers.some((nw) => {
         if (nw === wrapper) return false;
-        if (wrapper.ancestorDepth < nw.ancestorDepth && rectContains(wrapper.boundingRect, nw.boundingRect)) {
+        if (
+          wrapper.ancestorDepth < nw.ancestorDepth &&
+          rectContains(wrapper.boundingRect, nw.boundingRect)
+        ) {
           return true;
         }
         return false;
       });
       const containsNoNonWrapperPeer = nonWrappers.every((nw) => {
         if (nw === wrapper) return false;
-        return !(wrapper.ancestorDepth < nw.ancestorDepth && rectContains(wrapper.boundingRect, nw.boundingRect));
+        return !(
+          wrapper.ancestorDepth < nw.ancestorDepth &&
+          rectContains(wrapper.boundingRect, nw.boundingRect)
+        );
       });
       if (!containsNonWrapper || containsNoNonWrapperPeer) {
         structuralParentIds.add(wrapper.targetId);
@@ -135,11 +133,9 @@ export function reduceBoxSelection(
 
   filtered = filtered.filter((c) => !descendants.has(c.targetId));
 
-  let truncated = false;
   if (filtered.length > config.maxSelectedTargets) {
     filtered = filtered.slice(0, config.maxSelectedTargets);
-    truncated = true;
-    warnings.push(`This region contains too many elements. Select a smaller area.`);
+    warnings.push('This region contains too many elements. Select a smaller area.');
   }
 
   filtered.sort(documentOrderSort);
@@ -147,9 +143,7 @@ export function reduceBoxSelection(
   return { selected: filtered, warnings };
 }
 
-export function boxCandidateToTarget(
-  candidate: BoxCandidate,
-): VisualSelectionTarget {
+export function boxCandidateToTarget(candidate: BoxCandidate): VisualSelectionTarget {
   return {
     targetId: candidate.targetId,
     documentOrder: candidate.documentOrder,

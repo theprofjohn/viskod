@@ -1,4 +1,4 @@
-import type { VisualIssueStatus, VisualIssueEvent } from './types';
+import type { VisualIssueEvent, VisualIssueStatus } from './types';
 
 const VALID_TRANSITIONS: Record<VisualIssueStatus, VisualIssueStatus[]> = {
   draft: ['open'],

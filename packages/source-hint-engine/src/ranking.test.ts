@@ -33,7 +33,12 @@ describe('rankHints', () => {
     ];
     const result = rankHints({
       hints,
-      matchedRoute: { path: '/settings', file: 'app/settings/page.tsx', type: 'page', isDynamic: false },
+      matchedRoute: {
+        path: '/settings',
+        file: 'app/settings/page.tsx',
+        type: 'page',
+        isDynamic: false,
+      },
     });
     expect(result.status).toBe('ranked');
     expect(result.topHints.length).toBeGreaterThan(0);
@@ -51,7 +56,12 @@ describe('rankHints', () => {
 
   it('returns low_confidence when all hints have low confidence', () => {
     const hints = [
-      makeHint({ filePath: 'unknown-file.tsx', confidence: 0.2, matchType: 'generated-non-existing', exists: false }),
+      makeHint({
+        filePath: 'unknown-file.tsx',
+        confidence: 0.2,
+        matchType: 'generated-non-existing',
+        exists: false,
+      }),
     ];
     const result = rankHints({ hints });
     expect(result.status).toBe('low_confidence');
@@ -64,7 +74,9 @@ describe('rankHints', () => {
         filePath: 'lib/settings-form.tsx',
         matchType: 'usage-site',
         confidence: 0.85,
-        evidence: [{ type: 'text-content-match', weight: 0.7, detail: 'Found text', confidence: 0.8 }],
+        evidence: [
+          { type: 'text-content-match', weight: 0.7, detail: 'Found text', confidence: 0.8 },
+        ],
       }),
     ];
     const result = rankHints({ hints });
@@ -79,7 +91,12 @@ describe('rankHints', () => {
     ];
     const result = rankHints({
       hints,
-      matchedRoute: { path: '/dashboard', file: 'app/dashboard/page.tsx', type: 'page', isDynamic: false },
+      matchedRoute: {
+        path: '/dashboard',
+        file: 'app/dashboard/page.tsx',
+        type: 'page',
+        isDynamic: false,
+      },
     });
     expect(result.topHints[0]?.kind).toBe('route-owner');
   });
@@ -96,8 +113,18 @@ describe('rankHints', () => {
 
   it('non-existing files get penalty', () => {
     const hints = [
-      makeHint({ filePath: 'src/components/NonExistent.tsx', exists: false, matchType: 'generated-non-existing', confidence: 0.7 }),
-      makeHint({ filePath: 'src/components/Existing.tsx', exists: true, matchType: 'exact', confidence: 0.7 }),
+      makeHint({
+        filePath: 'src/components/NonExistent.tsx',
+        exists: false,
+        matchType: 'generated-non-existing',
+        confidence: 0.7,
+      }),
+      makeHint({
+        filePath: 'src/components/Existing.tsx',
+        exists: true,
+        matchType: 'exact',
+        confidence: 0.7,
+      }),
     ];
     const result = rankHints({ hints });
     expect(result.topHints[0]?.file.displayPath).toContain('Existing');
@@ -154,7 +181,9 @@ describe('rankHints', () => {
         filePath: 'app/page.tsx',
         matchType: 'usage-site',
         confidence: 0.9,
-        evidence: [{ type: 'text-content-match', weight: 0.7, detail: 'Found text', confidence: 0.8 }],
+        evidence: [
+          { type: 'text-content-match', weight: 0.7, detail: 'Found text', confidence: 0.8 },
+        ],
       }),
     ];
     const result = rankHints({ hints });

@@ -1,4 +1,4 @@
-import type { SetupCheckResult, FirstRunSetupState } from './types';
+import type { FirstRunSetupState, SetupCheckResult } from './types';
 
 const ABSOLUTE_PATH_PATTERNS = [
   /^[A-Z]:\\/,
@@ -10,11 +10,7 @@ const ABSOLUTE_PATH_PATTERNS = [
   /^\/root\//,
 ];
 
-const PACKET_PATH_PATTERNS = [
-  /\.viskod/,
-  /packets\//,
-  /captures\//,
-];
+const PACKET_PATH_PATTERNS = [/\.viskod/, /packets\//, /captures\//];
 
 const SECRET_PATTERNS = [
   /sk[_-]test[_-][A-Za-z0-9]{3,}/,

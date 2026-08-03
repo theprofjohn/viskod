@@ -1,4 +1,4 @@
-import type { VisualReviewStatus, VisualReviewEvent } from './types';
+import type { VisualReviewEvent, VisualReviewStatus } from './types';
 
 const VALID_TRANSITIONS: Record<VisualReviewStatus, VisualReviewStatus[]> = {
   draft: ['capturing_after', 'cancelled', 'failed'],
@@ -38,9 +38,10 @@ export function makeReviewCreatedEvent(): VisualReviewEvent {
 }
 
 export function makeBeforeLoadedEvent(warnings: string[]): VisualReviewEvent {
-  const summary = warnings.length > 0
-    ? `Before snapshot loaded with warnings: ${warnings.join(', ')}`
-    : 'Before snapshot loaded from issue';
+  const summary =
+    warnings.length > 0
+      ? `Before snapshot loaded with warnings: ${warnings.join(', ')}`
+      : 'Before snapshot loaded from issue';
   return createReviewEvent('before_loaded', summary, 'system');
 }
 
@@ -49,9 +50,10 @@ export function makeAfterCaptureStartedEvent(): VisualReviewEvent {
 }
 
 export function makeAfterCaptureCompletedEvent(warnings: string[]): VisualReviewEvent {
-  const summary = warnings.length > 0
-    ? `After capture completed with warnings: ${warnings.join(', ')}`
-    : 'After capture completed successfully';
+  const summary =
+    warnings.length > 0
+      ? `After capture completed with warnings: ${warnings.join(', ')}`
+      : 'After capture completed successfully';
   return createReviewEvent('after_capture_completed', summary, 'system');
 }
 

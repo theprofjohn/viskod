@@ -1,14 +1,14 @@
 // Phase 21 actual dogfood — runs the real overlay script via vitest + Playwright
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 // Increase default timeout for all tests in this file
 vi.setConfig({ testTimeout: 60000 });
-import { chromium, type Page, type Browser } from 'playwright';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getOverlayScript } from '@viskod/overlay-system';
-import { spawn, type ChildProcess } from 'child_process';
-import { writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { type Browser, type Page, chromium } from 'playwright';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..', '..');
@@ -19,29 +19,33 @@ const overlayScript = getOverlayScript();
 
 let devProc: ChildProcess | null = null;
 let browser: Browser | null = null;
-let page: Page | null = null;
 
 const results: Array<{
-  id: string; scenario: string; status: string; notes: string;
+  id: string;
+  scenario: string;
+  status: string;
+  notes: string;
 }> = [];
 
 function record(id: string, scenario: string, pass: boolean, notes = '') {
   results.push({ id, scenario, status: pass ? 'PASS' : 'FAIL', notes });
 }
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function startDevServer(): Promise<ChildProcess> {
   const proc = spawn('pnpm', ['dev'], { cwd: TARGET_DIR, stdio: 'pipe', shell: true });
-  await new Promise(r => setTimeout(r, 15000));
+  await new Promise((r) => setTimeout(r, 15000));
   return proc;
 }
 
 async function checkServerRunning(): Promise<boolean> {
   try {
-    const res = await fetch(TARGET_URL + '/', { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`${TARGET_URL}/`, { signal: AbortSignal.timeout(2000) });
     return res.ok;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 beforeAll(async () => {
@@ -57,8 +61,13 @@ afterAll(async () => {
   if (devProc) devProc.kill();
   // Write results
   const outDir = join(ROOT, 'phase21-dogfood-evidence');
-  try { mkdirSync(outDir, { recursive: true }); } catch {}
-  writeFileSync(join(outDir, 'dogfood-results.json'), JSON.stringify({ results, timestamp: new Date().toISOString() }, null, 2));
+  try {
+    mkdirSync(outDir, { recursive: true });
+  } catch {}
+  writeFileSync(
+    join(outDir, 'dogfood-results.json'),
+    JSON.stringify({ results, timestamp: new Date().toISOString() }, null, 2),
+  );
 });
 
 // Helper: create a page with overlay injected
@@ -76,7 +85,10 @@ async function activateOverlay(p: Page) {
   await p.evaluate(overlayScript);
   await sleep(200);
   await p.evaluate(() => {
-    window.postMessage({ source: '__viskod_browser', command: 'overlay:show', mode: 'selection' }, '*');
+    window.postMessage(
+      { source: '__viskod_browser', command: 'overlay:show', mode: 'selection' },
+      '*',
+    );
   });
   await sleep(300);
 }
@@ -84,27 +96,132 @@ async function activateOverlay(p: Page) {
 // Helper: set up event capture
 async function setupCapture(p: Page) {
   await p.evaluate(() => {
-    (window as any).__vs_events = [];
+    (
+      window as unknown as {
+        __vs_events: Array<{
+          type: string;
+          data?: {
+            source?: string;
+            viewportRect?: { x: number; y: number; width: number; height: number };
+            boundingBox?: { x: number; y: number; width: number; height: number };
+            tagName?: string;
+            textPreview?: string;
+            role?: string;
+            accessibleName?: string;
+            isInteractive?: boolean;
+            inputType?: string;
+            stableAttributes?: Record<string, string>;
+          };
+        }>;
+      }
+    ).__vs_events = [];
     window.addEventListener('message', (e) => {
       if (e.data && e.data.source === '__viskod_overlay') {
-        (window as any).__vs_events.push(e.data);
+        (
+          window as unknown as {
+            __vs_events: Array<{
+              type: string;
+              data?: {
+                source?: string;
+                viewportRect?: { x: number; y: number; width: number; height: number };
+                boundingBox?: { x: number; y: number; width: number; height: number };
+                tagName?: string;
+                textPreview?: string;
+                role?: string;
+                accessibleName?: string;
+                isInteractive?: boolean;
+                inputType?: string;
+                stableAttributes?: Record<string, string>;
+              };
+            }>;
+          }
+        ).__vs_events.push(e.data);
       }
     });
   });
 }
 
 // Helper: get last non-ready overlay event
-async function lastEvent(p: Page): Promise<any> {
+async function lastEvent(p: Page): Promise<{
+  type: string;
+  data?: {
+    source?: string;
+    viewportRect?: { x: number; y: number; width: number; height: number };
+    boundingBox?: { x: number; y: number; width: number; height: number };
+    tagName?: string;
+    textPreview?: string;
+    role?: string;
+    accessibleName?: string;
+    isInteractive?: boolean;
+    inputType?: string;
+    stableAttributes?: Record<string, string>;
+  };
+} | null> {
   const evts = await p.evaluate(() => {
-    const arr = (window as any).__vs_events || [];
-    (window as any).__vs_events = [];
-    return arr.filter((e: any) => e.type !== 'overlay:ready');
+    const arr =
+      (
+        window as unknown as {
+          __vs_events: Array<{
+            type: string;
+            data?: {
+              source?: string;
+              viewportRect?: { x: number; y: number; width: number; height: number };
+              boundingBox?: { x: number; y: number; width: number; height: number };
+              tagName?: string;
+              textPreview?: string;
+              role?: string;
+              accessibleName?: string;
+              isInteractive?: boolean;
+              inputType?: string;
+              stableAttributes?: Record<string, string>;
+            };
+          }>;
+        }
+      ).__vs_events || [];
+    (
+      window as unknown as {
+        __vs_events: Array<{
+          type: string;
+          data?: {
+            source?: string;
+            viewportRect?: { x: number; y: number; width: number; height: number };
+            boundingBox?: { x: number; y: number; width: number; height: number };
+            tagName?: string;
+            textPreview?: string;
+            role?: string;
+            accessibleName?: string;
+            isInteractive?: boolean;
+            inputType?: string;
+            stableAttributes?: Record<string, string>;
+          };
+        }>;
+      }
+    ).__vs_events = [];
+    return arr.filter((e) => e.type !== 'overlay:ready');
   });
-  return evts.length > 0 ? evts[evts.length - 1] : null;
+  return evts.length > 0 ? (evts[evts.length - 1] ?? null) : null;
 }
 
 // Helper: click at coordinates through overlay
-async function clickAt(p: Page, x: number, y: number): Promise<any> {
+async function clickAt(
+  p: Page,
+  x: number,
+  y: number,
+): Promise<{
+  type: string;
+  data?: {
+    source?: string;
+    viewportRect?: { x: number; y: number; width: number; height: number };
+    boundingBox?: { x: number; y: number; width: number; height: number };
+    tagName?: string;
+    textPreview?: string;
+    role?: string;
+    accessibleName?: string;
+    isInteractive?: boolean;
+    inputType?: string;
+    stableAttributes?: Record<string, string>;
+  };
+} | null> {
   await p.mouse.move(x, y);
   await sleep(50);
   await p.mouse.down();
@@ -115,7 +232,27 @@ async function clickAt(p: Page, x: number, y: number): Promise<any> {
 }
 
 // Helper: drag a box
-async function dragAt(p: Page, x1: number, y1: number, x2: number, y2: number): Promise<any> {
+async function dragAt(
+  p: Page,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): Promise<{
+  type: string;
+  data?: {
+    source?: string;
+    viewportRect?: { x: number; y: number; width: number; height: number };
+    boundingBox?: { x: number; y: number; width: number; height: number };
+    tagName?: string;
+    textPreview?: string;
+    role?: string;
+    accessibleName?: string;
+    isInteractive?: boolean;
+    inputType?: string;
+    stableAttributes?: Record<string, string>;
+  };
+} | null> {
   await p.mouse.move(x1, y1);
   await sleep(30);
   await p.mouse.down();
@@ -183,8 +320,29 @@ describe('Phase 21 Dogfood — Overlay Lifecycle', () => {
     // Press Escape — should send exit-requested
     await p.keyboard.press('Escape');
     await sleep(300);
-    const evts = await p.evaluate(() => (window as any).__vs_events || []);
-    const exitReq = evts.find((e: any) => e.type === 'overlay:exit-requested');
+    const evts = await p.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __vs_events: Array<{
+              type: string;
+              data?: {
+                source?: string;
+                viewportRect?: { x: number; y: number; width: number; height: number };
+                boundingBox?: { x: number; y: number; width: number; height: number };
+                tagName?: string;
+                textPreview?: string;
+                role?: string;
+                accessibleName?: string;
+                isInteractive?: boolean;
+                inputType?: string;
+                stableAttributes?: Record<string, string>;
+              };
+            }>;
+          }
+        ).__vs_events || [],
+    );
+    const exitReq = evts.find((e) => e.type === 'overlay:exit-requested');
     expect(exitReq).toBeTruthy();
     await cleanup(p);
     record('DF-01c', 'Exit via Escape', true);
@@ -213,10 +371,17 @@ describe('Phase 21 Dogfood — Click Selection', () => {
 
     const links = await p.evaluate(() => {
       const as = document.querySelectorAll('a[href]:not([href="#"]):not([href^="http"])');
-      return Array.from(as).slice(0, 5).map(a => {
-        const r = a.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (a.textContent || '').trim().slice(0, 40) };
-      }).filter(a => a.x > 0 && a.y > 0);
+      return Array.from(as)
+        .slice(0, 5)
+        .map((a) => {
+          const r = a.getBoundingClientRect();
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: (a.textContent || '').trim().slice(0, 40),
+          };
+        })
+        .filter((a) => a.x > 0 && a.y > 0);
     });
 
     if (links.length === 0) {
@@ -226,11 +391,17 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     }
 
     // Click first nav link
-    const ev = await clickAt(p, links[0].x, links[0].y);
-    const clicked = ev && ev.type === 'overlay:element-clicked';
+    const ev = await clickAt(p, links[0]!.x, links[0]!.y);
+    const clicked = ev !== null && ev.type === 'overlay:element-clicked';
     expect(clicked).toBe(true);
-    record('DF-02', 'Sidebar nav item', clicked,
-      clicked ? `tag=${ev.data.tagName} text="${(ev.data.textPreview || '').slice(0, 30)}"` : 'No click event');
+    record(
+      'DF-02',
+      'Sidebar nav item',
+      clicked,
+      clicked
+        ? `tag=${ev?.data?.tagName} text="${(ev?.data?.textPreview || '').slice(0, 30)}"`
+        : 'No click event',
+    );
     await cleanup(p);
   });
 
@@ -244,7 +415,13 @@ describe('Phase 21 Dogfood — Click Selection', () => {
         const t = (b.textContent || '').trim();
         if (t.length <= 2) {
           const r = b.getBoundingClientRect();
-          if (r.width > 10) return { x: r.x + r.width / 2, y: r.y + r.height / 2, label: b.getAttribute('aria-label') || '', tag: b.tagName };
+          if (r.width > 10)
+            return {
+              x: r.x + r.width / 2,
+              y: r.y + r.height / 2,
+              label: b.getAttribute('aria-label') || '',
+              tag: b.tagName,
+            };
         }
       }
       return null;
@@ -257,10 +434,16 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     }
 
     const ev = await clickAt(p, iconInfo.x, iconInfo.y);
-    const clicked = ev && ev.type === 'overlay:element-clicked';
+    const clicked = ev !== null && ev.type === 'overlay:element-clicked';
     expect(clicked).toBe(true);
-    record('DF-03', 'Icon-only control', clicked,
-      clicked ? `tag=${ev.data.tagName} accessibleName=${ev.data.accessibleName || ''}` : 'No event');
+    record(
+      'DF-03',
+      'Icon-only control',
+      clicked,
+      clicked
+        ? `tag=${ev?.data?.tagName} accessibleName=${ev?.data?.accessibleName || ''}`
+        : 'No event',
+    );
     await cleanup(p);
   });
 
@@ -268,14 +451,16 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     const p = await makePage();
     // Try several routes to find an input
     const routes = ['/tasks', '/settings', '/invoices', '/users'];
-    let inputInfo: any = null;
+    let inputInfo: { x: number; y: number; type?: string } | null = null;
     for (const route of routes) {
       try {
         await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
         await sleep(800);
-      } catch { continue; }
+      } catch {
+        continue;
+      }
       inputInfo = await p.evaluate(() => {
-        const i = document.querySelector('input:not([type="hidden"])');
+        const i = document.querySelector<HTMLInputElement>('input:not([type="hidden"])');
         if (!i) return null;
         const r = i.getBoundingClientRect();
         if (r.width < 10) return null;
@@ -293,23 +478,31 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, inputInfo.x, inputInfo.y);
-    const clicked = ev && ev.type === 'overlay:element-clicked';
+    const clicked = ev !== null && ev.type === 'overlay:element-clicked';
     expect(clicked).toBe(true);
     const textPreview = ev?.data?.textPreview || '';
-    record('DF-04', 'Text input', clicked,
-      clicked ? `tag=${ev.data.tagName} inputType=${ev.data.inputType || ''} preview="${textPreview.slice(0, 20)}"` : 'No event');
+    record(
+      'DF-04',
+      'Text input',
+      clicked,
+      clicked
+        ? `tag=${ev?.data?.tagName} inputType=${ev?.data?.inputType || ''} preview="${textPreview.slice(0, 20)}"`
+        : 'No event',
+    );
     await cleanup(p);
   });
 
   it('DF-05: selects a select/dropdown trigger', async () => {
     const p = await makePage();
     const routes = ['/tasks', '/invoices', '/settings', '/users'];
-    let selInfo: any = null;
+    let selInfo: { x: number; y: number; type?: string } | null = null;
     for (const route of routes) {
       try {
         await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
         await sleep(800);
-      } catch { continue; }
+      } catch {
+        continue;
+      }
       selInfo = await p.evaluate(() => {
         for (const s of document.querySelectorAll('select, [role="combobox"]')) {
           const r = s.getBoundingClientRect();
@@ -329,34 +522,46 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, selInfo.x, selInfo.y);
-    const clicked = ev && ev.type === 'overlay:element-clicked';
+    const clicked = ev !== null && ev.type === 'overlay:element-clicked';
     expect(clicked).toBe(true);
 
     // Verify dropdown did not open
     const dropdownOpen = await p.evaluate(() => {
-      const menu = document.querySelector('[role="listbox"], [role="menu"], .dropdown-open, [class*="open"]');
+      const menu = document.querySelector(
+        '[role="listbox"], [role="menu"], .dropdown-open, [class*="open"]',
+      );
       return menu !== null;
     });
-    record('DF-05', 'Dropdown trigger', clicked && !dropdownOpen,
-      clicked ? `tag=${ev.data.tagName} dropdownOpen=${dropdownOpen}` : 'No event');
+    record(
+      'DF-05',
+      'Dropdown trigger',
+      clicked && !dropdownOpen,
+      clicked ? `tag=${ev?.data?.tagName} dropdownOpen=${dropdownOpen}` : 'No event',
+    );
     await cleanup(p);
   });
 
   it('DF-06: selects a table row', async () => {
     const p = await makePage();
     const routes = ['/tasks', '/invoices', '/users', '/orders'];
-    let rowInfo: any = null;
+    let rowInfo: { x: number; y: number; type?: string } | null = null;
     for (const route of routes) {
       try {
         await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
         await sleep(800);
-      } catch { continue; }
+      } catch {
+        continue;
+      }
       rowInfo = await p.evaluate(() => {
         const r = document.querySelector('tr');
         if (!r) return null;
         const rect = r.getBoundingClientRect();
         if (rect.width < 10 || rect.height < 5) return null;
-        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, text: (r.textContent || '').trim().slice(0, 40) };
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+          text: (r.textContent || '').trim().slice(0, 40),
+        };
       });
       if (rowInfo) break;
     }
@@ -370,28 +575,33 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, rowInfo.x, rowInfo.y);
-    const clicked = ev && ev.type === 'overlay:element-clicked';
+    const clicked = ev !== null && ev.type === 'overlay:element-clicked';
     expect(clicked).toBe(true);
-    record('DF-06', 'Table row', clicked,
-      clicked ? `tag=${ev.data.tagName}` : 'No event');
+    record('DF-06', 'Table row', clicked, clicked ? `tag=${ev?.data?.tagName}` : 'No event');
     await cleanup(p);
   });
 
   it('DF-07: selects a table cell', async () => {
     const p = await makePage();
     const routes = ['/tasks', '/invoices', '/users'];
-    let cellInfo: any = null;
+    let cellInfo: { x: number; y: number; type?: string } | null = null;
     for (const route of routes) {
       try {
         await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
         await sleep(800);
-      } catch { continue; }
+      } catch {
+        continue;
+      }
       cellInfo = await p.evaluate(() => {
         const c = document.querySelector('td');
         if (!c) return null;
         const r = c.getBoundingClientRect();
         if (r.width < 5 || r.height < 5) return null;
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: c.textContent.trim().slice(0, 40) };
+        return {
+          x: r.x + r.width / 2,
+          y: r.y + r.height / 2,
+          text: c.textContent.trim().slice(0, 40),
+        };
       });
       if (cellInfo) break;
     }
@@ -405,27 +615,34 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, cellInfo.x, cellInfo.y);
-    const clicked = ev && ev.type === 'overlay:element-clicked';
+    const clicked = ev !== null && ev.type === 'overlay:element-clicked';
     expect(clicked).toBe(true);
-    record('DF-07', 'Table cell', clicked,
-      clicked ? `tag=${ev.data.tagName}` : 'No event');
+    record('DF-07', 'Table cell', clicked, clicked ? `tag=${ev?.data?.tagName}` : 'No event');
     await cleanup(p);
   });
 
   it('DF-08: selects a row action button', async () => {
     const p = await makePage();
     const routes = ['/tasks', '/invoices', '/users'];
-    let actInfo: any = null;
+    let actInfo: { x: number; y: number; type?: string } | null = null;
     for (const route of routes) {
       try {
         await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
         await sleep(800);
-      } catch { continue; }
+      } catch {
+        continue;
+      }
       actInfo = await p.evaluate(() => {
-        for (const b of document.querySelectorAll('td button, td a[role="button"], td [class*="action"]')) {
+        for (const b of document.querySelectorAll(
+          'td button, td a[role="button"], td [class*="action"]',
+        )) {
           const r = b.getBoundingClientRect();
           if (r.width < 10) continue;
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, label: b.getAttribute('aria-label') || (b.textContent || '').trim().slice(0, 20) };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            label: b.getAttribute('aria-label') || (b.textContent || '').trim().slice(0, 20),
+          };
         }
         return null;
       });
@@ -441,10 +658,14 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, actInfo.x, actInfo.y);
-    const clicked = ev && ev.type === 'overlay:element-clicked';
+    const clicked = ev !== null && ev.type === 'overlay:element-clicked';
     expect(clicked).toBe(true);
-    record('DF-08', 'Row action button', clicked,
-      clicked ? `tag=${ev.data.tagName} name=${ev.data.accessibleName || ''}` : 'No event');
+    record(
+      'DF-08',
+      'Row action button',
+      clicked,
+      clicked ? `tag=${ev?.data?.tagName} name=${ev?.data?.accessibleName || ''}` : 'No event',
+    );
     await cleanup(p);
   });
 
@@ -454,7 +675,11 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     await activateOverlay(p);
 
     const cardInfo = await p.evaluate(() => {
-      for (const s of ['[class*="card"]:not([class*="inner"])', '[class*="Card"]:not([class*="inner"])', 'article']) {
+      for (const s of [
+        '[class*="card"]:not([class*="inner"])',
+        '[class*="Card"]:not([class*="inner"])',
+        'article',
+      ]) {
         const el = document.querySelector(s);
         if (!el) continue;
         const r = el.getBoundingClientRect();
@@ -470,10 +695,16 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     }
 
     const ev = await clickAt(p, cardInfo.x, cardInfo.y);
-    const clicked = ev && ev.type === 'overlay:element-clicked';
+    const clicked = ev !== null && ev.type === 'overlay:element-clicked';
     expect(clicked).toBe(true);
-    record('DF-12', 'Card container', clicked,
-      clicked ? `tag=${ev.data.tagName} text="${(ev.data.textPreview || '').slice(0, 30)}"` : 'No event');
+    record(
+      'DF-12',
+      'Card container',
+      clicked,
+      clicked
+        ? `tag=${ev?.data?.tagName} text="${(ev?.data?.textPreview || '').slice(0, 30)}"`
+        : 'No event',
+    );
     await cleanup(p);
   });
 });
@@ -485,15 +716,17 @@ describe('Phase 21 Dogfood — Box Selection', () => {
     await activateOverlay(p);
 
     const box = await p.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'))
-        .filter(b => { const r = b.getBoundingClientRect(); return r.width > 15 && r.height > 15 && r.top < 700 && r.top > 0; });
+      const btns = Array.from(document.querySelectorAll('button')).filter((b) => {
+        const r = b.getBoundingClientRect();
+        return r.width > 15 && r.height > 15 && r.top < 700 && r.top > 0;
+      });
       if (btns.length < 2) return null;
-      const rects = btns.slice(0, 4).map(b => b.getBoundingClientRect());
+      const rects = btns.slice(0, 4).map((b) => b.getBoundingClientRect());
       return {
-        x1: Math.min(...rects.map(r => r.x)) - 5,
-        y1: Math.min(...rects.map(r => r.y)) - 5,
-        x2: Math.max(...rects.map(r => r.x + r.width)) + 5,
-        y2: Math.max(...rects.map(r => r.y + r.height)) + 5,
+        x1: Math.min(...rects.map((r) => r.x)) - 5,
+        y1: Math.min(...rects.map((r) => r.y)) - 5,
+        x2: Math.max(...rects.map((r) => r.x + r.width)) + 5,
+        y2: Math.max(...rects.map((r) => r.y + r.height)) + 5,
         count: btns.length,
       };
     });
@@ -505,10 +738,14 @@ describe('Phase 21 Dogfood — Box Selection', () => {
     }
 
     const ev = await dragAt(p, box.x1, box.y1, box.x2, box.y2);
-    const completed = ev && ev.type === 'overlay:box-drag-completed';
+    const completed = ev !== null && ev.type === 'overlay:box-drag-completed';
     expect(completed).toBe(true);
-    record('DF-14', 'Box selection siblings', completed,
-      completed ? `type=${ev.type} rect=${JSON.stringify(ev.data.viewportRect)}` : 'No event');
+    record(
+      'DF-14',
+      'Box selection siblings',
+      completed,
+      completed ? `type=${ev.type} rect=${JSON.stringify(ev?.data?.viewportRect)}` : 'No event',
+    );
     await cleanup(p);
   });
 
@@ -522,7 +759,8 @@ describe('Phase 21 Dogfood — Box Selection', () => {
         const el = document.querySelector(s);
         if (!el) continue;
         const r = el.getBoundingClientRect();
-        if (r.width > 10 && r.height > 10) return { x1: r.x, y1: r.y, x2: r.x + r.width, y2: r.y + r.height };
+        if (r.width > 10 && r.height > 10)
+          return { x1: r.x, y1: r.y, x2: r.x + r.width, y2: r.y + r.height };
       }
       return null;
     });
@@ -534,10 +772,14 @@ describe('Phase 21 Dogfood — Box Selection', () => {
     }
 
     const ev = await dragAt(p, cardRect.x1, cardRect.y1, cardRect.x2, cardRect.y2);
-    const completed = ev && ev.type === 'overlay:box-drag-completed';
+    const completed = ev !== null && ev.type === 'overlay:box-drag-completed';
     expect(completed).toBe(true);
-    record('DF-15', 'Box selection card region', completed,
-      completed ? `rect=${JSON.stringify(ev.data.viewportRect)}` : 'No event');
+    record(
+      'DF-15',
+      'Box selection card region',
+      completed,
+      completed ? `rect=${JSON.stringify(ev?.data?.viewportRect)}` : 'No event',
+    );
     await cleanup(p);
   });
 });
@@ -573,19 +815,47 @@ describe('Phase 21 Dogfood — Click Suppression', () => {
 
     const urlAfter = p.url();
     const navHappened = urlAfter !== urlBefore;
-    const clickReceived = ev && ev.type === 'overlay:element-clicked';
+    const clickReceived = ev !== null && ev.type === 'overlay:element-clicked';
 
     // Navigation must have been suppressed
     expect(navHappened).toBe(false);
 
     // Overlay should have generated a click event (may be lost if nav occurred)
     if (!clickReceived) {
-      console.log('  [DEBUG] No click event captured — events in queue:',
-        JSON.stringify(await p.evaluate(() => (window as any).__vs_events?.map((e: any) => e.type))));
+      console.log(
+        '  [DEBUG] No click event captured — events in queue:',
+        JSON.stringify(
+          await p.evaluate(() =>
+            (
+              window as unknown as {
+                __vs_events: Array<{
+                  type: string;
+                  data?: {
+                    source?: string;
+                    viewportRect?: { x: number; y: number; width: number; height: number };
+                    boundingBox?: { x: number; y: number; width: number; height: number };
+                    tagName?: string;
+                    textPreview?: string;
+                    role?: string;
+                    accessibleName?: string;
+                    isInteractive?: boolean;
+                    inputType?: string;
+                    stableAttributes?: Record<string, string>;
+                  };
+                }>;
+              }
+            ).__vs_events?.map((e) => e.type),
+          ),
+        ),
+      );
     }
 
-    record('DF-CLICK-SUPPRESS', 'Click suppression', !navHappened,
-      `nav=${navHappened} overlayEvent=${clickReceived}`);
+    record(
+      'DF-CLICK-SUPPRESS',
+      'Click suppression',
+      !navHappened,
+      `nav=${navHappened} overlayEvent=${clickReceived}`,
+    );
     await cleanup(p);
   });
 });
@@ -632,7 +902,7 @@ describe('Phase 21 Dogfood — Scroll and Navigation', () => {
 
     if (btn2) {
       const ev2 = await clickAt(p, btn2.x, btn2.y);
-      const clicked = ev2 && ev2.type === 'overlay:element-clicked';
+      const clicked = ev2 !== null && ev2.type === 'overlay:element-clicked';
       expect(clicked).toBe(true);
       record('DF-17', 'Scroll behavior', clicked);
     } else {
@@ -652,8 +922,16 @@ describe('Phase 21 Dogfood — Scroll and Navigation', () => {
 
     // Navigate to different route
     const navHref = await p.evaluate(() => {
-      const as = Array.from(document.querySelectorAll('a[href]'))
-        .filter((a: any) => { const h = a.getAttribute('href'); return h && h !== '/' && !h.startsWith('http') && !h.startsWith('#') && !h.startsWith('javascript'); });
+      const as = Array.from(document.querySelectorAll('a[href]')).filter((a) => {
+        const h = a.getAttribute('href');
+        return (
+          h &&
+          h !== '/' &&
+          !h.startsWith('http') &&
+          !h.startsWith('#') &&
+          !h.startsWith('javascript')
+        );
+      });
       return as.length > 0 ? (as[0] as HTMLAnchorElement).getAttribute('href') : null;
     });
 
@@ -667,7 +945,12 @@ describe('Phase 21 Dogfood — Scroll and Navigation', () => {
       await setupCapture(p);
       await activateOverlay(p);
       expect(await hasRoot(p)).toBe(true);
-      record('DF-21', 'Route navigation', true, `navigated to ${navHref}, re-injected successfully`);
+      record(
+        'DF-21',
+        'Route navigation',
+        true,
+        `navigated to ${navHref}, re-injected successfully`,
+      );
     } else {
       record('DF-21', 'Route navigation', false, 'No nav link found');
     }
@@ -733,8 +1016,12 @@ describe('Phase 21 Dogfood — Narrow Viewport', () => {
 
     if (el) {
       const ev = await clickAt(p, el.x, el.y);
-      record('DF-MOBILE', 'Narrow viewport selection', ev && ev.type === 'overlay:element-clicked',
-        ev ? `tag=${ev.data.tagName}` : 'No event');
+      record(
+        'DF-MOBILE',
+        'Narrow viewport selection',
+        ev !== null && ev.type === 'overlay:element-clicked',
+        ev ? `tag=${ev?.data?.tagName}` : 'No event',
+      );
     } else {
       record('DF-MOBILE', 'Narrow viewport selection', false, 'No clickable element found');
     }
@@ -770,7 +1057,28 @@ describe('Phase 21 Dogfood — Reset/Clear Behavior', () => {
       window.postMessage({ source: '__viskod_browser', command: 'overlay:clear-selection' }, '*');
     });
     await sleep(200);
-    const clearEvt = await p.evaluate(() => (window as any).__vs_events?.slice(-1)[0]);
+    const clearEvt = await p.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __vs_events: Array<{
+              type: string;
+              data?: {
+                source?: string;
+                viewportRect?: { x: number; y: number; width: number; height: number };
+                boundingBox?: { x: number; y: number; width: number; height: number };
+                tagName?: string;
+                textPreview?: string;
+                role?: string;
+                accessibleName?: string;
+                isInteractive?: boolean;
+                inputType?: string;
+                stableAttributes?: Record<string, string>;
+              };
+            }>;
+          }
+        ).__vs_events?.slice(-1)[0],
+    );
     // Expect a selection-cleared event
     const cleared = clearEvt && clearEvt.type === 'overlay:selection-cleared';
 

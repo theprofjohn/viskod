@@ -1,8 +1,8 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
 import type { Result } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity } from '@viskod/shared';
+import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 import { VISKOD_STORAGE_DIR } from '@viskod/shared';
 import type { ProjectDetectionResult } from './types';
 
@@ -44,7 +44,11 @@ function detectPackageManager(rootPath: string): string | undefined {
   if (fs.existsSync(path.join(rootPath, 'pnpm-lock.yaml'))) return 'pnpm';
   if (fs.existsSync(path.join(rootPath, 'package-lock.json'))) return 'npm';
   if (fs.existsSync(path.join(rootPath, 'yarn.lock'))) return 'yarn';
-  if (fs.existsSync(path.join(rootPath, 'bun.lock')) || fs.existsSync(path.join(rootPath, 'bun.lockb'))) return 'bun';
+  if (
+    fs.existsSync(path.join(rootPath, 'bun.lock')) ||
+    fs.existsSync(path.join(rootPath, 'bun.lockb'))
+  )
+    return 'bun';
   return undefined;
 }
 
@@ -56,17 +60,17 @@ function detectFramework(rootPath: string): string | undefined {
     const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-    if (deps['next']) return 'next.js';
-    if (deps['nuxt']) return 'nuxt';
-    if (deps['@sveltejs/kit'] || deps['svelte']) return 'sveltekit';
+    if (deps.next) return 'next.js';
+    if (deps.nuxt) return 'nuxt';
+    if (deps['@sveltejs/kit'] || deps.svelte) return 'sveltekit';
     if (deps['@angular/core']) return 'angular';
-    if (deps['vue'] && deps['vue-router']) return 'vue';
+    if (deps.vue && deps['vue-router']) return 'vue';
     if (deps['react-router'] || deps['react-router-dom']) return 'react-router';
-    if (deps['react']) return 'react';
+    if (deps.react) return 'react';
     if (deps['solid-js']) return 'solid';
-    if (deps['astro']) return 'astro';
-    if (deps['qwik']) return 'qwik';
-    if (deps['remix'] || deps['@remix-run/react']) return 'remix';
+    if (deps.astro) return 'astro';
+    if (deps.qwik) return 'qwik';
+    if (deps.remix || deps['@remix-run/react']) return 'remix';
   } catch {
     // ignore parse errors
   }
@@ -86,18 +90,22 @@ export function detectProject(input?: { projectRoot?: string }): Result<ProjectD
   const rootPath = input?.projectRoot ?? discoverProjectRoot();
 
   if (!rootPath || !fs.existsSync(rootPath)) {
-    return err(setupError(
-      'SETUP_PROJECT_NOT_FOUND',
-      'Could not detect a project root. Ensure you are inside a project directory with a package.json.',
-    ));
+    return err(
+      setupError(
+        'SETUP_PROJECT_NOT_FOUND',
+        'Could not detect a project root. Ensure you are inside a project directory with a package.json.',
+      ),
+    );
   }
 
   const pkgJsonPath = path.join(rootPath, 'package.json');
   if (!fs.existsSync(pkgJsonPath)) {
-    return err(setupError(
-      'SETUP_PROJECT_NOT_FOUND',
-      `No package.json found in ${rootPath}. Select a valid project folder.`,
-    ));
+    return err(
+      setupError(
+        'SETUP_PROJECT_NOT_FOUND',
+        `No package.json found in ${rootPath}. Select a valid project folder.`,
+      ),
+    );
   }
 
   let name = 'unknown';

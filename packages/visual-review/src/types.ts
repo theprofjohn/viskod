@@ -174,7 +174,7 @@ export interface RecaptureOptions {
   cacheBust?: boolean;
   url?: string;
   boundingBox?: { x: number; y: number; width: number; height: number };
-  /** Internal/debug: override selector. Not part of normal production flow. */
+  /** CSS selector the adapter should use to locate the target in the page. */
   selector?: string;
 }
 
@@ -199,6 +199,7 @@ export interface VisualReviewRecaptureInput {
   reviewId: string;
   reload?: boolean;
   cacheBust?: boolean;
+  url?: string;
 }
 
 export interface ResolvedRecaptureTarget {

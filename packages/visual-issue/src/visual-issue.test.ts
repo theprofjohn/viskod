@@ -1,15 +1,15 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { EventBus } from '@viskod/event-bus';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { VISKOD_STORAGE_DIR } from '@viskod/shared';
+import { EventBus } from '@viskod/event-bus';
+import type { VisualSelection } from '@viskod/visual-selection';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createLifecycleEvent, isValidTransition } from './lifecycle';
+import { IssuePersistence } from './persistence';
+import { generateDefaultTitle, redactIssueText } from './redaction';
+import { VisualIssueSchema } from './schemas';
 import { IssueServiceImpl } from './service';
 import type { IssueService } from './service';
-import { IssuePersistence } from './persistence';
-import { VisualIssueSchema } from './schemas';
-import type { VisualIssue } from './types';
-import { redactIssue, redactIssueText, generateDefaultTitle } from './redaction';
-import { isValidTransition, createLifecycleEvent } from './lifecycle';
+import type { VisualIssue, VisualIssueStatus } from './types';
 
 const TEST_DIR = path.join(process.cwd(), '.viskod-test-issues');
 const TEST_SESSION_ID = 'test-session-1';
@@ -23,7 +23,9 @@ function makeService(persistence?: IssuePersistence): IssueService {
   return new IssueServiceImpl(new EventBus(), persistence ?? makePersistence());
 }
 
-function makeSelection(overrides: Partial<VisualIssue['source']['selectionSnapshot']> = {}): any {
+function makeSelection(
+  overrides: Partial<VisualIssue['source']['selectionSnapshot']> = {},
+): VisualSelection {
   return {
     schemaVersion: 1,
     selectionId: crypto.randomUUID(),
@@ -38,30 +40,52 @@ function makeSelection(overrides: Partial<VisualIssue['source']['selectionSnapsh
       viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
     },
     region: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-    targets: [{
-      targetId: crypto.randomUUID(),
-      documentOrder: 0,
-      geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-      semantics: { tagName: 'button', role: 'button', accessibleName: 'Save', textPreview: 'Save changes', isInteractive: true },
-      fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
-      resolutionCandidates: [{ strategy: 'stable-attribute' as const, value: 'save-btn', confidence: 0.9 }],
-    }],
+    targets: [
+      {
+        targetId: crypto.randomUUID(),
+        documentOrder: 0,
+        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+        semantics: {
+          tagName: 'button',
+          role: 'button',
+          accessibleName: 'Save',
+          textPreview: 'Save changes',
+          isInteractive: true,
+        },
+        fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
+        resolutionCandidates: [
+          { strategy: 'stable-attribute' as const, value: 'save-btn', confidence: 0.9 },
+        ],
+      },
+    ],
     summary: { label: 'Save changes', role: 'button', textPreview: 'Save changes', targetCount: 1 },
-    resolution: { status: 'resolved' as const, confidence: 0.9, resolvedAt: new Date().toISOString() },
+    resolution: {
+      status: 'resolved' as const,
+      confidence: 0.9,
+      resolvedAt: new Date().toISOString(),
+    },
     ...overrides,
   };
 }
 
-function makeBoxSelection(): any {
+function makeBoxSelection(): VisualSelection {
   return makeSelection({ mode: 'box', summary: { label: '5 elements selected', targetCount: 5 } });
 }
 
 beforeEach(() => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 afterEach(() => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 // =============================================================================
@@ -116,7 +140,12 @@ describe('Schema Validation', () => {
       title: 'Test',
       source: { createdFrom: 'visual-selection', selectionId: 's1', selectionSnapshot: {} },
       page: { url: 'https://example.com', viewport: { width: 1280, height: 720 } },
-      targetSummary: { mode: 'single', targetCount: 1, confidence: 0.5, resolutionStatus: 'resolved' },
+      targetSummary: {
+        mode: 'single',
+        targetCount: 1,
+        confidence: 0.5,
+        resolutionStatus: 'resolved',
+      },
       tags: [],
       lifecycle: [],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
@@ -138,7 +167,12 @@ describe('Schema Validation', () => {
       title: 'x'.repeat(81),
       source: { createdFrom: 'visual-selection', selectionId: 's1', selectionSnapshot: {} },
       page: { url: 'https://example.com', viewport: { width: 1280, height: 720 } },
-      targetSummary: { mode: 'single', targetCount: 1, confidence: 0.5, resolutionStatus: 'resolved' },
+      targetSummary: {
+        mode: 'single',
+        targetCount: 1,
+        confidence: 0.5,
+        resolutionStatus: 'resolved',
+      },
       tags: [],
       lifecycle: [],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
@@ -177,7 +211,7 @@ describe('Create Issue', () => {
       expect(result.value.severity).toBe('medium');
       expect(result.value.title).toContain('Save');
       expect(result.value.lifecycle.length).toBe(1);
-      expect(result.value.lifecycle[0]!.type).toBe('created');
+      expect(result.value.lifecycle[0]?.type).toBe('created');
     }
   });
 
@@ -200,21 +234,27 @@ describe('Create Issue', () => {
 
   it('blocks creation with stale selection', async () => {
     const svc = makeService();
-    const sel = makeSelection({ resolution: { status: 'stale', confidence: 0.3, resolvedAt: new Date().toISOString() } });
+    const sel = makeSelection({
+      resolution: { status: 'stale', confidence: 0.3, resolvedAt: new Date().toISOString() },
+    });
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID);
     expect(result.ok).toBe(false);
   });
 
   it('blocks creation with missing selection', async () => {
     const svc = makeService();
-    const sel = makeSelection({ resolution: { status: 'missing', confidence: 0, resolvedAt: new Date().toISOString() } });
+    const sel = makeSelection({
+      resolution: { status: 'missing', confidence: 0, resolvedAt: new Date().toISOString() },
+    });
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID);
     expect(result.ok).toBe(false);
   });
 
   it('allows creation with ambiguous selection', async () => {
     const svc = makeService();
-    const sel = makeSelection({ resolution: { status: 'ambiguous', confidence: 0.5, resolvedAt: new Date().toISOString() } });
+    const sel = makeSelection({
+      resolution: { status: 'ambiguous', confidence: 0.5, resolvedAt: new Date().toISOString() },
+    });
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID);
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -224,7 +264,12 @@ describe('Create Issue', () => {
 
   it('accepts custom title', async () => {
     const svc = makeService();
-    const result = await svc.createIssue(makeSelection(), TEST_SESSION_ID, TEST_PAGE_ID, 'My custom title');
+    const result = await svc.createIssue(
+      makeSelection(),
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+      'My custom title',
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.title).toBe('My custom title');
@@ -233,7 +278,14 @@ describe('Create Issue', () => {
 
   it('accepts custom severity', async () => {
     const svc = makeService();
-    const result = await svc.createIssue(makeSelection(), TEST_SESSION_ID, TEST_PAGE_ID, undefined, undefined, 'high');
+    const result = await svc.createIssue(
+      makeSelection(),
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+      undefined,
+      undefined,
+      'high',
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.severity).toBe('high');
@@ -270,7 +322,7 @@ describe('Persistence', () => {
     expect(listResult.ok).toBe(true);
     if (listResult.ok) {
       expect(listResult.value.length).toBe(1);
-      expect(listResult.value[0]!.issueId).toBe(issueId);
+      expect(listResult.value[0]?.issueId).toBe(issueId);
     }
   });
 
@@ -297,7 +349,7 @@ describe('Persistence', () => {
     const p = makePersistence();
     const svc = makeService(p);
     await svc.createIssue(makeSelection(), TEST_SESSION_ID, TEST_PAGE_ID);
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
     await svc.createIssue(makeSelection(), TEST_SESSION_ID, TEST_PAGE_ID);
 
     const listResult = await svc.listIssues();
@@ -322,7 +374,7 @@ describe('Issue Lifecycle', () => {
     expect(isValidTransition('draft', 'open')).toBe(true);
     expect(isValidTransition('open', 'draft')).toBe(false);
     expect(isValidTransition('archived', 'resolved')).toBe(false);
-    expect(isValidTransition('deleted' as any, 'open')).toBe(false);
+    expect(isValidTransition('deleted' as unknown as VisualIssueStatus, 'open')).toBe(false);
   });
 
   it('updates status', async () => {
@@ -344,7 +396,9 @@ describe('Issue Lifecycle', () => {
     const create = await svc.createIssue(makeSelection(), TEST_SESSION_ID, TEST_PAGE_ID);
     expect(create.ok).toBe(true);
     if (create.ok) {
-      const update = await svc.updateIssue(create.value.issueId, { status: 'draft' as any });
+      const update = await svc.updateIssue(create.value.issueId, {
+        status: 'draft' as unknown as VisualIssueStatus,
+      });
       expect(update.ok).toBe(false);
     }
   });
@@ -359,7 +413,7 @@ describe('Issue Lifecycle', () => {
       if (archive.ok) {
         expect(archive.value.status).toBe('archived');
         expect(archive.value.archivedAt).toBeTruthy();
-        const evt = archive.value.lifecycle.find(e => e.type === 'archived');
+        const evt = archive.value.lifecycle.find((e) => e.type === 'archived');
         expect(evt).toBeTruthy();
       }
     }
@@ -376,7 +430,7 @@ describe('Issue Lifecycle', () => {
       if (reopen.ok) {
         expect(reopen.value.status).toBe('open');
         expect(reopen.value.archivedAt).toBeUndefined();
-        const evt = reopen.value.lifecycle.find(e => e.type === 'reopened');
+        const evt = reopen.value.lifecycle.find((e) => e.type === 'reopened');
         expect(evt).toBeTruthy();
       }
     }
@@ -416,7 +470,7 @@ describe('Issue Lifecycle', () => {
       expect(del.ok).toBe(true);
       if (del.ok) {
         expect(del.value.deletedAt).toBeTruthy();
-        const evt = del.value.lifecycle.find(e => e.type === 'deleted');
+        const evt = del.value.lifecycle.find((e) => e.type === 'deleted');
         expect(evt).toBeTruthy();
       }
     }
@@ -534,15 +588,22 @@ describe('Redaction', () => {
 
   it('synthetic secret does not appear in output', async () => {
     const sel = makeSelection({
-      summary: { label: 'test-user-secret-123', role: 'button', textPreview: 'test-user-secret-123', targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'div', textPreview: 'test-user-secret-123', isInteractive: false },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      summary: {
+        label: 'test-user-secret-123',
+        role: 'button',
+        textPreview: 'test-user-secret-123',
+        targetCount: 1,
+      },
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'div', textPreview: 'test-user-secret-123', isInteractive: false },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const svc = makeService();
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID, 'Test issue');
@@ -555,15 +616,27 @@ describe('Redaction', () => {
   it('deep-redacts selectionSnapshot — API key sk_test_* absent from persisted JSON', async () => {
     const secret = 'sk_test_abc123def456ghi';
     const sel = makeSelection({
-      summary: { label: 'Auth settings', role: 'button', textPreview: `API key: ${secret}`, targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'div', textPreview: `Key: ${secret}`, accessibleName: 'save', isInteractive: false },
-        fingerprints: { stableAttributes: { 'data-api-key': secret } },
-        resolutionCandidates: [],
-      }],
+      summary: {
+        label: 'Auth settings',
+        role: 'button',
+        textPreview: `API key: ${secret}`,
+        targetCount: 1,
+      },
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: {
+            tagName: 'div',
+            textPreview: `Key: ${secret}`,
+            accessibleName: 'save',
+            isInteractive: false,
+          },
+          fingerprints: { stableAttributes: { 'data-api-key': secret } },
+          resolutionCandidates: [],
+        },
+      ],
     });
     const p = makePersistence();
     const svc = makeService(p);
@@ -583,22 +656,32 @@ describe('Redaction', () => {
   it('deep-redacts selectionSnapshot — email absent from persisted JSON', async () => {
     const secret = 'admin@example.com';
     const sel = makeSelection({
-      summary: { label: 'User profile', role: 'button', textPreview: `Contact: ${secret}`, targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'span', textPreview: `Email: ${secret}`, isInteractive: false },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      summary: {
+        label: 'User profile',
+        role: 'button',
+        textPreview: `Contact: ${secret}`,
+        targetCount: 1,
+      },
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'span', textPreview: `Email: ${secret}`, isInteractive: false },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const p = makePersistence();
     const svc = makeService(p);
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID, 'Email issue');
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const raw = fs.readFileSync(path.join(p.getBaseDir(), result.value.issueId, 'issue.json'), 'utf-8');
+      const raw = fs.readFileSync(
+        path.join(p.getBaseDir(), result.value.issueId, 'issue.json'),
+        'utf-8',
+      );
       expect(raw).not.toContain(secret);
       expect(raw).toContain('[EMAIL_REDACTED]');
     }
@@ -607,22 +690,37 @@ describe('Redaction', () => {
   it('deep-redacts selectionSnapshot — credit card absent from persisted JSON', async () => {
     const secret = '4111111111111111';
     const sel = makeSelection({
-      summary: { label: 'Payment form', role: 'button', textPreview: `Card: ${secret}`, targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'input', textPreview: secret, inputType: 'text', isInteractive: true },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      summary: {
+        label: 'Payment form',
+        role: 'button',
+        textPreview: `Card: ${secret}`,
+        targetCount: 1,
+      },
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: {
+            tagName: 'input',
+            textPreview: secret,
+            inputType: 'text',
+            isInteractive: true,
+          },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const p = makePersistence();
     const svc = makeService(p);
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID, 'Card issue');
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const raw = fs.readFileSync(path.join(p.getBaseDir(), result.value.issueId, 'issue.json'), 'utf-8');
+      const raw = fs.readFileSync(
+        path.join(p.getBaseDir(), result.value.issueId, 'issue.json'),
+        'utf-8',
+      );
       expect(raw).not.toContain(secret);
       expect(raw).toContain('[CARD_REDACTED]');
     }
@@ -631,22 +729,32 @@ describe('Redaction', () => {
   it('deep-redacts selectionSnapshot — bearer token absent from persisted JSON', async () => {
     const secret = 'mysecrettoken12345678';
     const sel = makeSelection({
-      summary: { label: 'Auth header', role: 'button', textPreview: `Bearer: ${secret}`, targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'div', textPreview: `token=${secret}`, isInteractive: false },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      summary: {
+        label: 'Auth header',
+        role: 'button',
+        textPreview: `Bearer: ${secret}`,
+        targetCount: 1,
+      },
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'div', textPreview: `token=${secret}`, isInteractive: false },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const p = makePersistence();
     const svc = makeService(p);
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID, 'Token issue');
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const raw = fs.readFileSync(path.join(p.getBaseDir(), result.value.issueId, 'issue.json'), 'utf-8');
+      const raw = fs.readFileSync(
+        path.join(p.getBaseDir(), result.value.issueId, 'issue.json'),
+        'utf-8',
+      );
       expect(raw).not.toContain(secret);
     }
   });
@@ -654,22 +762,32 @@ describe('Redaction', () => {
   it('deep-redacts selectionSnapshot — URL query token absent from persisted JSON', async () => {
     const secret = 'abcdef1234567890abcdef';
     const sel = makeSelection({
-      summary: { label: 'Link', role: 'link', textPreview: `URL: ?token=${secret}`, targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'a', textPreview: `?api_key=${secret}`, isInteractive: true },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      summary: {
+        label: 'Link',
+        role: 'link',
+        textPreview: `URL: ?token=${secret}`,
+        targetCount: 1,
+      },
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'a', textPreview: `?api_key=${secret}`, isInteractive: true },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const p = makePersistence();
     const svc = makeService(p);
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID, 'URL issue');
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const raw = fs.readFileSync(path.join(p.getBaseDir(), result.value.issueId, 'issue.json'), 'utf-8');
+      const raw = fs.readFileSync(
+        path.join(p.getBaseDir(), result.value.issueId, 'issue.json'),
+        'utf-8',
+      );
       expect(raw).not.toContain(secret);
     }
   });
@@ -677,22 +795,37 @@ describe('Redaction', () => {
   it('deep-redacts selectionSnapshot — password/input value absent from persisted JSON', async () => {
     const secret = 'supersecretpassword123';
     const sel = makeSelection({
-      summary: { label: 'Login form', role: 'button', textPreview: 'Password input', targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'input', textPreview: `password=${secret}`, inputType: 'password', isInteractive: true },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      summary: {
+        label: 'Login form',
+        role: 'button',
+        textPreview: 'Password input',
+        targetCount: 1,
+      },
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: {
+            tagName: 'input',
+            textPreview: `password=${secret}`,
+            inputType: 'password',
+            isInteractive: true,
+          },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const p = makePersistence();
     const svc = makeService(p);
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID, 'Password issue');
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const raw = fs.readFileSync(path.join(p.getBaseDir(), result.value.issueId, 'issue.json'), 'utf-8');
+      const raw = fs.readFileSync(
+        path.join(p.getBaseDir(), result.value.issueId, 'issue.json'),
+        'utf-8',
+      );
       expect(raw).not.toContain(secret);
     }
   });
@@ -701,22 +834,41 @@ describe('Redaction', () => {
     const apiSecret = 'sk_live_xyz789abc123';
     const emailSecret = 'leak@secret.com';
     const sel = makeSelection({
-      summary: { label: `Key: ${apiSecret}`, textPreview: `Contact: ${emailSecret}`, targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'div', textPreview: `api=${apiSecret}`, accessibleName: emailSecret, isInteractive: false },
-        fingerprints: { stableAttributes: { 'data-val': apiSecret }, ancestorFingerprint: [emailSecret] },
-        resolutionCandidates: [{ strategy: 'stable-attribute' as const, value: apiSecret, confidence: 0.8 }],
-      }],
+      summary: {
+        label: `Key: ${apiSecret}`,
+        textPreview: `Contact: ${emailSecret}`,
+        targetCount: 1,
+      },
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: {
+            tagName: 'div',
+            textPreview: `api=${apiSecret}`,
+            accessibleName: emailSecret,
+            isInteractive: false,
+          },
+          fingerprints: {
+            stableAttributes: { 'data-val': apiSecret },
+            ancestorFingerprint: [emailSecret],
+          },
+          resolutionCandidates: [
+            { strategy: 'stable-attribute' as const, value: apiSecret, confidence: 0.8 },
+          ],
+        },
+      ],
     });
     const p = makePersistence();
     const svc = makeService(p);
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID, 'Nested issue');
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const raw = fs.readFileSync(path.join(p.getBaseDir(), result.value.issueId, 'issue.json'), 'utf-8');
+      const raw = fs.readFileSync(
+        path.join(p.getBaseDir(), result.value.issueId, 'issue.json'),
+        'utf-8',
+      );
       expect(raw).not.toContain(apiSecret);
       expect(raw).not.toContain(emailSecret);
     }
@@ -726,14 +878,16 @@ describe('Redaction', () => {
     const secret = 'sk_test_abc123def456';
     const sel = makeSelection({
       summary: { label: 'Auth', textPreview: `key=${secret}`, targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'div', textPreview: secret, isInteractive: false },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'div', textPreview: secret, isInteractive: false },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const svc = makeService();
     const result = await svc.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID, 'Rule check');

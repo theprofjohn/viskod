@@ -2,7 +2,6 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventBus } from '@viskod/event-bus';
-import { ProjectScanner } from '@viskod/project-scanner';
 import { SourceHintEngine } from '@viskod/source-hint-engine';
 import { describe, expect, it } from 'vitest';
 
@@ -16,7 +15,11 @@ function makeHintInput(tmpDir: string, overrides: Record<string, unknown> = {}) 
       text: 'Save changes',
       ...((overrides.domContext as Record<string, unknown>) ?? {}),
     },
-    route: { url: 'http://localhost:3000/settings', pathname: '/settings', ...(overrides.route as Record<string, unknown> ?? {}) },
+    route: {
+      url: 'http://localhost:3000/settings',
+      pathname: '/settings',
+      ...((overrides.route as Record<string, unknown>) ?? {}),
+    },
     project: {
       metadata: {
         projectId: 'test-proj',
@@ -26,7 +29,7 @@ function makeHintInput(tmpDir: string, overrides: Record<string, unknown> = {}) 
         language: 'typescript',
       },
       componentIndex: { directories: ['src/components'] },
-      ...(overrides.project as Record<string, unknown> ?? {}),
+      ...((overrides.project as Record<string, unknown>) ?? {}),
     },
     captureId: 'test-capture',
   };
@@ -99,7 +102,7 @@ describe('resolveUsageSiteHints', () => {
     if (result.ok) {
       expect(result.value.topHints.length).toBeGreaterThan(0);
       // Top hint should be the usage site or route owner
-      const topKind = result.value.topHints[0]!.kind;
+      const topKind = result.value.topHints[0]?.kind;
       expect(['usage-site', 'route-owner', 'component-owner']).toContain(topKind);
     }
 
@@ -131,7 +134,16 @@ describe('resolveUsageSiteHints', () => {
 
     const engine = new SourceHintEngine(new EventBus());
     const input = makeHintInput(tmpDir, {
-      route: { url: 'http://localhost:3000/settings', pathname: '/settings', matchedRoute: { path: '/settings', file: 'app/settings/page.tsx', type: 'page', isDynamic: false } },
+      route: {
+        url: 'http://localhost:3000/settings',
+        pathname: '/settings',
+        matchedRoute: {
+          path: '/settings',
+          file: 'app/settings/page.tsx',
+          type: 'page',
+          isDynamic: false,
+        },
+      },
     });
     const result = await engine.resolveUsageSiteHints(input);
     expect(result.ok).toBe(true);

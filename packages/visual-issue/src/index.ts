@@ -13,7 +13,12 @@ export type {
   IssueErrorCode,
 } from './types';
 export { VisualIssueSchema, VisualIssueStatusSchema, VisualIssueSeveritySchema } from './schemas';
-export { redactIssue, redactIssueText, generateDefaultTitle, redactTargetSummary } from './redaction';
+export {
+  redactIssue,
+  redactIssueText,
+  generateDefaultTitle,
+  redactTargetSummary,
+} from './redaction';
 export {
   isValidTransition,
   createLifecycleEvent,

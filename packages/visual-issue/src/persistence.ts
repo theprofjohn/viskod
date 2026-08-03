@@ -1,9 +1,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { VISKOD_STORAGE_DIR } from '@viskod/shared';
-import { type Result, type ViskodError, ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
-import type { VisualIssue } from './types';
+import {
+  ErrorCategory,
+  ErrorSeverity,
+  type Result,
+  type ViskodError,
+  err,
+  ok,
+} from '@viskod/shared';
 import { VisualIssueSchema } from './schemas';
+import type { VisualIssue } from './types';
 
 const ISSUES_DIR = 'issues';
 const ISSUE_FILE = 'issue.json';
@@ -29,7 +36,11 @@ export class IssuePersistence {
 
   constructor(baseDir?: string) {
     this.baseDir = baseDir ?? path.join(process.cwd(), VISKOD_STORAGE_DIR, ISSUES_DIR);
-    try { fs.mkdirSync(this.baseDir, { recursive: true }); } catch { /* best effort */ }
+    try {
+      fs.mkdirSync(this.baseDir, { recursive: true });
+    } catch {
+      /* best effort */
+    }
   }
 
   getBaseDir(): string {
@@ -51,14 +62,21 @@ export class IssuePersistence {
   async saveIssue(issue: VisualIssue): Promise<Result<void>> {
     const parsed = VisualIssueSchema.safeParse(issue);
     if (!parsed.success) {
-      return err(this.peError('SCHEMA_VALIDATION_FAILED', `Schema validation failed: ${parsed.error.message}`));
+      return err(
+        this.peError(
+          'SCHEMA_VALIDATION_FAILED',
+          `Schema validation failed: ${parsed.error.message}`,
+        ),
+      );
     }
 
     const dir = this.issueDir(issue.issueId);
     try {
       fs.mkdirSync(dir, { recursive: true });
     } catch (error) {
-      return err(this.peError('PERSISTENCE_WRITE_FAILED', `Cannot create issue directory: ${String(error)}`));
+      return err(
+        this.peError('PERSISTENCE_WRITE_FAILED', `Cannot create issue directory: ${String(error)}`),
+      );
     }
 
     const filePath = this.issueFilePath(issue.issueId);
@@ -67,9 +85,15 @@ export class IssuePersistence {
       const content = JSON.stringify(issue, null, 2);
       fs.writeFileSync(tempPath, content, 'utf-8');
       fs.renameSync(tempPath, filePath);
-      try { if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true }); } catch { /* best effort */ }
+      try {
+        if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+      } catch {
+        /* best effort */
+      }
     } catch (error) {
-      return err(this.peError('PERSISTENCE_WRITE_FAILED', `Failed to write issue file: ${String(error)}`));
+      return err(
+        this.peError('PERSISTENCE_WRITE_FAILED', `Failed to write issue file: ${String(error)}`),
+      );
     }
 
     await this.updateIndex();
@@ -87,12 +111,22 @@ export class IssuePersistence {
       const parsed = JSON.parse(raw);
       const validated = VisualIssueSchema.safeParse(parsed);
       if (!validated.success) {
-        return err(this.peError('SCHEMA_VALIDATION_FAILED', `Corrupt issue file: ${validated.error.message}`));
+        return err(
+          this.peError(
+            'SCHEMA_VALIDATION_FAILED',
+            `Corrupt issue file: ${validated.error.message}`,
+          ),
+        );
       }
       return ok(validated.data as VisualIssue);
     } catch (error) {
       if (error instanceof SyntaxError) {
-        return err(this.peError('CORRUPT_ISSUE_FILE', `Issue file is corrupt for '${issueId}': ${String(error)}`));
+        return err(
+          this.peError(
+            'CORRUPT_ISSUE_FILE',
+            `Issue file is corrupt for '${issueId}': ${String(error)}`,
+          ),
+        );
       }
       return err(this.peError('PERSISTENCE_READ_FAILED', `Failed to read issue: ${String(error)}`));
     }
@@ -107,11 +141,16 @@ export class IssuePersistence {
       await this.updateIndex();
       return ok(undefined);
     } catch (error) {
-      return err(this.peError('PERSISTENCE_WRITE_FAILED', `Failed to delete issue: ${String(error)}`));
+      return err(
+        this.peError('PERSISTENCE_WRITE_FAILED', `Failed to delete issue: ${String(error)}`),
+      );
     }
   }
 
-  async listIssues(includeArchived: boolean = false, includeDeleted: boolean = false): Promise<Result<VisualIssue[]>> {
+  async listIssues(
+    includeArchived = false,
+    includeDeleted = false,
+  ): Promise<Result<VisualIssue[]>> {
     const issues: VisualIssue[] = [];
 
     if (!fs.existsSync(this.baseDir)) {
@@ -174,7 +213,9 @@ export class IssuePersistence {
   }
 
   private async updateIndex(): Promise<void> {
-    await this.rebuildIndex().catch(() => { /* index is optional */ });
+    await this.rebuildIndex().catch(() => {
+      /* index is optional */
+    });
   }
 
   issueExists(issueId: string): boolean {

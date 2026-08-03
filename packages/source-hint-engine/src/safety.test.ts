@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeHintPaths, containsSecrets, redactSecrets } from './safety';
+import { containsSecrets, redactSecrets, sanitizeHintPaths } from './safety';
 import type { UsageSiteSourceHint } from './types';
 
 function makeHint(displayPath: string): UsageSiteSourceHint {

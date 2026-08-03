@@ -1,26 +1,25 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
 import type { Result } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR } from '@viskod/shared';
+import { ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR, err, ok } from '@viskod/shared';
+import { runBrowserSmoke, runCaptureSmoke } from './browser-smoke';
+import { checkAgentConfigReadiness, runSetupChecks, verifyMcpToolsLive } from './checks';
+import { detectProject } from './detector';
+import { createInitialSetupState, loadSetupState, saveSetupState } from './persistence';
+import { redactSetupState } from './redaction';
 import type {
   FirstRunSetupState,
+  LiveMcpVerification,
   ProjectDetectionResult,
-  WorkspaceInitResult,
+  SetupCapabilities,
   SetupCheckResult,
   SetupSmokeResult,
-  SetupCapabilities,
   WizardState,
   WizardStep,
-  LiveMcpVerification,
-  AgentConfigInfo,
+  WorkspaceInitResult,
 } from './types';
-import { detectProject } from './detector';
-import { initializeWorkspace, repairWorkspace } from './workspace';
-import { runSetupChecks, verifyMcpToolsLive, validateAppUrl, checkAgentConfigReadiness } from './checks';
-import { loadSetupState, saveSetupState, createInitialSetupState } from './persistence';
-import { redactSetupState } from './redaction';
-import { runBrowserSmoke, runCaptureSmoke } from './browser-smoke';
+import { initializeWorkspace } from './workspace';
 export { verifyMcpToolsRuntime } from './mcp-runtime';
 export { validateAppUrl, checkAgentConfigReadiness } from './checks';
 
@@ -42,8 +41,8 @@ function deriveCapabilities(checks: SetupCheckResult[]): SetupCapabilities {
     statusMap.set(c.checkId, c.status);
   }
 
-  const isPass = (id: string) => statusMap.get(id) === 'pass';
-  const isAvailable = (id: string) => statusMap.get(id) === 'pass' || statusMap.get(id) === 'warning';
+  const isAvailable = (id: string) =>
+    statusMap.get(id) === 'pass' || statusMap.get(id) === 'warning';
 
   return {
     captureContext: isAvailable('mcp-tools'),
@@ -67,15 +66,24 @@ export function getSetupState(projectRoot: string): Result<FirstRunSetupState | 
   return loadSetupState(projectRoot);
 }
 
-export function detectAndConfigureProject(input?: { projectRoot?: string }): Result<ProjectDetectionResult> {
+export function detectAndConfigureProject(input?: {
+  projectRoot?: string;
+}): Result<ProjectDetectionResult> {
   return detectProject(input);
 }
 
-export function initializeProjectWorkspace(input: { projectRoot: string }): Result<WorkspaceInitResult> {
+export function initializeProjectWorkspace(input: {
+  projectRoot: string;
+}): Result<WorkspaceInitResult> {
   return initializeWorkspace(input);
 }
 
-export async function runAllChecks(input: { projectRoot: string; includeOptional?: boolean; appUrl?: string }): Promise<SetupCheckResult[]> {
+export async function runAllChecks(input: {
+  projectRoot: string;
+  includeOptional?: boolean;
+  appUrl?: string;
+  limitedMode?: boolean;
+}): Promise<SetupCheckResult[]> {
   return runSetupChecks(input);
 }
 
@@ -93,9 +101,10 @@ export function completeSetup(input: {
   appUrl?: string;
 }): Result<FirstRunSetupState> {
   const existing = loadSetupState(input.projectRoot);
-  const baseState = existing.ok && existing.value
-    ? existing.value
-    : createInitialSetupState(input.projectRoot, input.project.rootFingerprint);
+  const baseState =
+    existing.ok && existing.value
+      ? existing.value
+      : createInitialSetupState(input.projectRoot, input.project.rootFingerprint);
 
   const capabilities = deriveCapabilities(input.checks);
 
@@ -107,8 +116,11 @@ export function completeSetup(input: {
   //
   // Limited mode bypasses gates 2-4 for environments where full setup can't complete.
   const hasCriticalFailure = input.checks.some(
-    (c) => c.severity === 'required' && c.status === 'fail' &&
-      c.checkId !== 'mcp-tools-runtime' && c.checkId !== 'browser-runtime',
+    (c) =>
+      c.severity === 'required' &&
+      c.status === 'fail' &&
+      c.checkId !== 'mcp-tools-runtime' &&
+      c.checkId !== 'browser-runtime',
   );
 
   const mcpRuntimeCheck = input.checks.find((c) => c.checkId === 'mcp-tools-runtime');
@@ -119,12 +131,12 @@ export function completeSetup(input: {
 
   const captureSmokePassed = !!input.smoke?.packetId;
 
-  const isFullCompletion = !hasCriticalFailure && mcpRuntimePassed && browserVerified && captureSmokePassed;
-  const isLimitedCompletion = !hasCriticalFailure && (input.limitedMode || !mcpRuntimePassed || !captureSmokePassed);
+  const isFullCompletion =
+    !hasCriticalFailure && mcpRuntimePassed && browserVerified && captureSmokePassed;
+  const isLimitedCompletion =
+    !hasCriticalFailure && (input.limitedMode || !mcpRuntimePassed || !captureSmokePassed);
 
   const completed = isFullCompletion || isLimitedCompletion;
-  const limitedMode = input.limitedMode || !captureSmokePassed || !mcpRuntimePassed;
-
   // Check agent config readiness
   const agentConfig = checkAgentConfigReadiness(input.projectRoot);
 
@@ -226,13 +238,13 @@ export async function runSmoke(input: {
       warnings.push(...captureResult.value.warnings);
       return ok({
         lastRunAt: now,
-        status: captureResult.value.status === 'fail' ? 'fail' : warnings.length > 0 ? 'warning' : 'pass',
+        status:
+          captureResult.value.status === 'fail' ? 'fail' : warnings.length > 0 ? 'warning' : 'pass',
         packetId: captureResult.value.packetId,
         warnings,
       });
-    } else {
-      warnings.push(`Capture smoke: ${captureResult.error.message}`);
     }
+    warnings.push(`Capture smoke: ${captureResult.error.message}`);
   }
 
   return ok({
@@ -286,7 +298,10 @@ export async function advanceWizard(
   }
 }
 
-function advanceFromWelcome(state: WizardState, input?: { projectRoot?: string; appUrl?: string }): Result<WizardState> {
+function advanceFromWelcome(
+  state: WizardState,
+  input?: { projectRoot?: string; appUrl?: string },
+): Result<WizardState> {
   const projectResult = detectAndConfigureProject(input);
   if (!projectResult.ok) {
     return ok({
@@ -306,18 +321,18 @@ function advanceFromWelcome(state: WizardState, input?: { projectRoot?: string; 
 
 function advanceFromProjectConfirmation(state: WizardState): Result<WizardState> {
   if (!state.project) {
-    return err(setupError('SETUP_NO_PROJECT', 'No project detected. Please select a project folder.'));
+    return err(
+      setupError('SETUP_NO_PROJECT', 'No project detected. Please select a project folder.'),
+    );
   }
 
   // Initialize workspace
   const initResult = initializeProjectWorkspace({ projectRoot: state.project.rootPath });
-  const workspaceInit = initResult.ok ? initResult.value : undefined;
-
   if (!initResult.ok) {
     return ok({
       ...state,
       step: 'setup_checklist',
-      workspaceInit,
+      workspaceInit: undefined,
       errors: [...state.errors, initResult.error.message],
     });
   }
@@ -325,8 +340,8 @@ function advanceFromProjectConfirmation(state: WizardState): Result<WizardState>
   return ok({
     ...state,
     step: 'setup_checklist',
-    workspaceInit,
-    warnings: [...state.warnings, ...workspaceInit.warnings],
+    workspaceInit: initResult.value,
+    warnings: [...state.warnings, ...initResult.value.warnings],
   });
 }
 
@@ -340,8 +355,11 @@ async function advanceFromChecklist(state: WizardState): Promise<Result<WizardSt
   // For the wizard: only block on critical failures (node, package manager, workspace)
   // Runtime MCP and browser checks are required for full completion but not for wizard progression
   const criticalFailures = checks.filter(
-    (c) => c.severity === 'required' && c.status === 'fail' &&
-      c.checkId !== 'mcp-tools-runtime' && c.checkId !== 'browser-runtime',
+    (c) =>
+      c.severity === 'required' &&
+      c.status === 'fail' &&
+      c.checkId !== 'mcp-tools-runtime' &&
+      c.checkId !== 'browser-runtime',
   );
 
   if (criticalFailures.length > 0) {
@@ -402,7 +420,9 @@ function advanceFromSmoke(state: WizardState): Result<WizardState> {
   return ok({
     ...state,
     step: 'finish',
-    warnings: hasPacket ? state.warnings : [...state.warnings, 'Capture smoke did not produce a packetId — limited mode'],
+    warnings: hasPacket
+      ? state.warnings
+      : [...state.warnings, 'Capture smoke did not produce a packetId — limited mode'],
   });
 }
 
@@ -435,15 +455,24 @@ function advanceFromFinish(state: WizardState): Result<WizardState> {
 
 export function getWizardStepDescription(step: WizardStep): string {
   switch (step) {
-    case 'welcome': return 'Welcome to Viskod — detect your project';
-    case 'project_confirmation': return 'Confirm project and initialize workspace';
-    case 'setup_checklist': return 'Review setup checklist';
-    case 'check_remediation': return 'Fix failed checks';
-    case 'run_checks': return 'Run environment checks';
-    case 'run_smoke': return 'Run first capture smoke';
-    case 'finish': return 'Complete setup';
-    case 'ready': return 'Viskod is ready to use';
-    default: return 'Unknown step';
+    case 'welcome':
+      return 'Welcome to Viskod — detect your project';
+    case 'project_confirmation':
+      return 'Confirm project and initialize workspace';
+    case 'setup_checklist':
+      return 'Review setup checklist';
+    case 'check_remediation':
+      return 'Fix failed checks';
+    case 'run_checks':
+      return 'Run environment checks';
+    case 'run_smoke':
+      return 'Run first capture smoke';
+    case 'finish':
+      return 'Complete setup';
+    case 'ready':
+      return 'Viskod is ready to use';
+    default:
+      return 'Unknown step';
   }
 }
 

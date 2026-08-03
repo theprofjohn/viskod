@@ -1,4 +1,4 @@
-import type { VisualSelectionTarget, VisualSelectionResolution, Rect } from './types';
+import type { Rect, VisualSelectionResolution, VisualSelectionTarget } from './types';
 
 export interface ResolvedTarget {
   target: VisualSelectionTarget;
@@ -22,11 +22,7 @@ const SIMILARITY_THRESHOLD = 0.6;
 
 function tagRoleCompatible(original: VisualSelectionTarget, candidate: ResolvedElement): boolean {
   if (original.semantics.tagName !== candidate.tagName) return false;
-  if (
-    original.semantics.role &&
-    candidate.role &&
-    original.semantics.role !== candidate.role
-  ) {
+  if (original.semantics.role && candidate.role && original.semantics.role !== candidate.role) {
     return false;
   }
   return true;
@@ -62,16 +58,12 @@ function ancestorSimilarity(
   return matches / Math.max(originalFingerprints.length, 1);
 }
 
-function sizePositionSimilarity(
-  originalRect: Rect,
-  candidateRect: Rect,
-): number {
+function sizePositionSimilarity(originalRect: Rect, candidateRect: Rect): number {
   const areaDiff = Math.abs(rectArea(originalRect) - rectArea(candidateRect));
   const maxArea = Math.max(rectArea(originalRect), rectArea(candidateRect));
   const areaSim = maxArea > 0 ? 1 - Math.min(areaDiff / maxArea, 1) : 0.5;
   const posDiff = Math.sqrt(
-    (originalRect.x - candidateRect.x) ** 2 +
-    (originalRect.y - candidateRect.y) ** 2,
+    (originalRect.x - candidateRect.x) ** 2 + (originalRect.y - candidateRect.y) ** 2,
   );
   const posSim = Math.max(0, 1 - posDiff / 500);
   return (areaSim + posSim) / 2;
@@ -88,7 +80,17 @@ function stableAttributeMatch(
   if (!originalAttrs || Object.keys(originalAttrs).length === 0) return 0.5;
   let matches = 0;
   let total = 0;
-  const stableKeys = ['data-testid', 'data-test-id', 'data-id', 'id', 'name', 'aria-label', 'data-cy', 'data-test', 'role'];
+  const stableKeys = [
+    'data-testid',
+    'data-test-id',
+    'data-id',
+    'id',
+    'name',
+    'aria-label',
+    'data-cy',
+    'data-test',
+    'role',
+  ];
   for (const key of stableKeys) {
     const origVal = originalAttrs[key];
     const candVal = candidateAttrs[key];
@@ -120,24 +122,27 @@ export function resolveTarget(
     totalWeight += tagWeight;
 
     const textSim = textSimilarity(original.semantics.textPreview, candidate.textContent);
-    const textWeight = 0.20;
+    const textWeight = 0.2;
     score += textWeight * textSim;
     totalWeight += textWeight;
 
-    const attrScore = stableAttributeMatch(original.fingerprints.stableAttributes, candidate.stableAttributes);
+    const attrScore = stableAttributeMatch(
+      original.fingerprints.stableAttributes,
+      candidate.stableAttributes,
+    );
     const attrWeight = 0.25;
     score += attrWeight * attrScore;
     totalWeight += attrWeight;
 
-    const ancSim = ancestorSimilarity(original.fingerprints.ancestorFingerprint, candidate.ancestorTags);
+    const ancSim = ancestorSimilarity(
+      original.fingerprints.ancestorFingerprint,
+      candidate.ancestorTags,
+    );
     const ancWeight = 0.15;
     score += ancWeight * ancSim;
     totalWeight += ancWeight;
 
-    const geoSim = sizePositionSimilarity(
-      original.geometry.viewportRect,
-      candidate.boundingRect,
-    );
+    const geoSim = sizePositionSimilarity(original.geometry.viewportRect, candidate.boundingRect);
     const geoWeight = 0.15;
     score += geoWeight * geoSim;
     totalWeight += geoWeight;
@@ -210,9 +215,7 @@ export function resolveTarget(
       stableAttributes: {
         ...original.fingerprints.stableAttributes,
         ...Object.fromEntries(
-          Object.entries(bestCandidate.stableAttributes).filter(
-            ([_, v]) => typeof v === 'string',
-          ),
+          Object.entries(bestCandidate.stableAttributes).filter(([_, v]) => typeof v === 'string'),
         ),
       },
     },
@@ -229,10 +232,7 @@ export function resolveTarget(
   };
 }
 
-export function isWrongNode(
-  original: VisualSelectionTarget,
-  resolved: ResolvedElement,
-): boolean {
+export function isWrongNode(original: VisualSelectionTarget, resolved: ResolvedElement): boolean {
   const compatible = tagRoleCompatible(original, resolved);
   if (!compatible) return true;
   const textSim = textSimilarity(original.semantics.textPreview, resolved.textContent);

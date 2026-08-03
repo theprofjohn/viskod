@@ -1,9 +1,9 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
 import type { Result } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR } from '@viskod/shared';
-import type { WorkspaceInitResult, WorkspaceDirInfo } from './types';
+import { ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR, err, ok } from '@viskod/shared';
+import type { WorkspaceDirInfo, WorkspaceInitResult } from './types';
 
 const SETUP_DIR = 'setup';
 const ISSUES_DIR = 'issues';
@@ -20,9 +20,7 @@ const REQUIRED_DIRS = [
   { key: 'setup', dir: SETUP_DIR },
 ];
 
-const OPTIONAL_DIRS = [
-  { key: 'logs', dir: LOGS_DIR },
-];
+const OPTIONAL_DIRS = [{ key: 'logs', dir: LOGS_DIR }];
 
 function setupError(code: string, message: string) {
   return {
@@ -57,19 +55,20 @@ export function initializeWorkspace(input: { projectRoot: string }): Result<Work
   const warnings: string[] = [];
 
   if (!fs.existsSync(projectRoot)) {
-    return err(setupError(
-      'SETUP_PROJECT_ROOT_MISSING',
-      `Project root does not exist: ${projectRoot}`,
-    ));
+    return err(
+      setupError('SETUP_PROJECT_ROOT_MISSING', `Project root does not exist: ${projectRoot}`),
+    );
   }
 
   // Create .viskod root
   const rootStatus = ensureDir(viskodDir);
   if (!rootStatus.writable) {
-    return err(setupError(
-      'SETUP_WORKSPACE_NOT_WRITABLE',
-      `Cannot write to ${VISKOD_STORAGE_DIR} directory. Check folder permissions.`,
-    ));
+    return err(
+      setupError(
+        'SETUP_WORKSPACE_NOT_WRITABLE',
+        `Cannot write to ${VISKOD_STORAGE_DIR} directory. Check folder permissions.`,
+      ),
+    );
   }
 
   const directories: WorkspaceDirInfo[] = [];

@@ -1,40 +1,49 @@
-import { type Result, type ViskodError, ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
-import type { EventBus } from '@viskod/event-bus';
-import type { IssueService, VisualIssue } from '@viskod/visual-issue';
 import type { HandoffService } from '@viskod/agent-handoff';
-import type {
-  VisualReview,
-  VisualReviewStatus,
-  VisualReviewCreateInput,
-  VisualReviewCreateOutput,
-  VisualReviewGetOutput,
-  VisualReviewDecisionInput,
-  VisualReviewListItem,
-  VisualReviewRecaptureInput,
-  ReviewSnapshotRef,
-  ReviewErrorCode,
-  RecaptureAdapter,
-} from './types';
-import { ReviewPersistence } from './persistence';
-import { VisualReviewSchema } from './schemas';
-import { redactReview } from './redaction';
+import type { EventBus } from '@viskod/event-bus';
+import {
+  ErrorCategory,
+  ErrorSeverity,
+  type Result,
+  type ViskodError,
+  err,
+  ok,
+} from '@viskod/shared';
+import type { IssueService, VisualIssue } from '@viskod/visual-issue';
 import { computeComparison } from './comparison';
-import { resolveRecaptureTarget } from './targetResolver';
 import {
   isValidReviewTransition,
-  makeReviewCreatedEvent,
-  makeBeforeLoadedEvent,
-  makeAfterCaptureStartedEvent,
   makeAfterCaptureCompletedEvent,
+  makeAfterCaptureStartedEvent,
+  makeBeforeLoadedEvent,
+  makeCancelledEvent,
   makeComparisonCompletedEvent,
   makeDecisionRecordedEvent,
-  makeRecapturedEvent,
   makeFailedEvent,
-  makeCancelledEvent,
+  makeReviewCreatedEvent,
 } from './lifecycle';
+import { ReviewPersistence } from './persistence';
+import { redactReview } from './redaction';
+import { resolveRecaptureTarget } from './targetResolver';
+import type {
+  RecaptureAdapter,
+  ReviewErrorCode,
+  ReviewSnapshotRef,
+  VisualReview,
+  VisualReviewCreateInput,
+  VisualReviewCreateOutput,
+  VisualReviewDecisionInput,
+  VisualReviewGetOutput,
+  VisualReviewListItem,
+  VisualReviewRecaptureInput,
+  VisualReviewStatus,
+} from './types';
 
 export interface ReviewService {
-  createReview(input: VisualReviewCreateInput, sessionId: string, pageId: string): Promise<Result<VisualReviewCreateOutput>>;
+  createReview(
+    input: VisualReviewCreateInput,
+    sessionId: string,
+    pageId: string,
+  ): Promise<Result<VisualReviewCreateOutput>>;
   getReview(reviewId: string): Promise<Result<VisualReviewGetOutput>>;
   listReviews(): Promise<Result<VisualReviewListItem[]>>;
   recordDecision(reviewId: string, input: VisualReviewDecisionInput): Promise<Result<VisualReview>>;
@@ -47,7 +56,6 @@ export interface ReviewService {
 export class ReviewServiceImpl implements ReviewService {
   private persistence: ReviewPersistence;
   private issueService: IssueService;
-  private handoffService?: HandoffService;
   private eventBus: EventBus;
   private recaptureAdapter?: RecaptureAdapter;
 
@@ -60,7 +68,7 @@ export class ReviewServiceImpl implements ReviewService {
   ) {
     this.eventBus = eventBus;
     this.issueService = issueService;
-    this.handoffService = handoffService;
+    void handoffService;
     this.persistence = persistence ?? new ReviewPersistence();
     this.recaptureAdapter = recaptureAdapter;
   }
@@ -91,7 +99,9 @@ export class ReviewServiceImpl implements ReviewService {
 
     const warnings: string[] = [];
     if (issue.targetSummary.resolutionStatus === 'stale') {
-      warnings.push('The before snapshot may be stale — the page has changed since the issue was created.');
+      warnings.push(
+        'The before snapshot may be stale — the page has changed since the issue was created.',
+      );
     }
     if (issue.targetSummary.resolutionStatus === 'ambiguous') {
       warnings.push('The selected target is ambiguous — comparison may be unreliable.');
@@ -190,16 +200,28 @@ export class ReviewServiceImpl implements ReviewService {
 
     let review = result.value;
 
-    if (review.status === 'accepted' || review.status === 'rejected' || review.status === 'needs_follow_up') {
+    if (
+      review.status === 'accepted' ||
+      review.status === 'rejected' ||
+      review.status === 'needs_follow_up'
+    ) {
       return err(this.reError('ALREADY_DECIDED', 'This review has already been decided.'));
     }
 
-    const targetStatus: VisualReviewStatus = input.decision === 'accepted' ? 'accepted'
-      : input.decision === 'rejected' ? 'rejected'
-      : 'needs_follow_up';
+    const targetStatus: VisualReviewStatus =
+      input.decision === 'accepted'
+        ? 'accepted'
+        : input.decision === 'rejected'
+          ? 'rejected'
+          : 'needs_follow_up';
 
     if (!isValidReviewTransition(review.status, targetStatus)) {
-      return err(this.reError('INVALID_REVIEW_TRANSITION', `Cannot record decision from status '${review.status}'`));
+      return err(
+        this.reError(
+          'INVALID_REVIEW_TRANSITION',
+          `Cannot record decision from status '${review.status}'`,
+        ),
+      );
     }
 
     const now = new Date().toISOString();
@@ -247,7 +269,12 @@ export class ReviewServiceImpl implements ReviewService {
     let review = result.value;
 
     if (!isValidReviewTransition(review.status, 'cancelled')) {
-      return err(this.reError('INVALID_REVIEW_TRANSITION', `Cannot cancel review from status '${review.status}'`));
+      return err(
+        this.reError(
+          'INVALID_REVIEW_TRANSITION',
+          `Cannot cancel review from status '${review.status}'`,
+        ),
+      );
     }
 
     const now = new Date().toISOString();
@@ -265,7 +292,10 @@ export class ReviewServiceImpl implements ReviewService {
     return ok(redacted.review);
   }
 
-  async setAfterSnapshot(reviewId: string, after: ReviewSnapshotRef): Promise<Result<VisualReview>> {
+  async setAfterSnapshot(
+    reviewId: string,
+    after: ReviewSnapshotRef,
+  ): Promise<Result<VisualReview>> {
     if (!reviewId || typeof reviewId !== 'string') {
       return err(this.reError('REVIEW_NOT_FOUND', 'Invalid review ID'));
     }
@@ -287,7 +317,9 @@ export class ReviewServiceImpl implements ReviewService {
       updatedAt: now,
       lifecycle: [
         ...review.lifecycle,
-        makeAfterCaptureCompletedEvent(after.targetSummary.resolutionStatus === 'missing' ? ['Target not found'] : []),
+        makeAfterCaptureCompletedEvent(
+          after.targetSummary.resolutionStatus === 'missing' ? ['Target not found'] : [],
+        ),
         compEvent,
       ],
     };
@@ -309,15 +341,18 @@ export class ReviewServiceImpl implements ReviewService {
     return ok(redacted.review);
   }
 
-  async recaptureReview(
-    input: VisualReviewRecaptureInput,
-  ): Promise<Result<VisualReview>> {
+  async recaptureReview(input: VisualReviewRecaptureInput): Promise<Result<VisualReview>> {
     if (!input.reviewId || typeof input.reviewId !== 'string') {
       return err(this.reError('REVIEW_NOT_FOUND', 'Invalid review ID'));
     }
 
     if (!this.recaptureAdapter) {
-      return err(this.reError('RECAPTURE_ADAPTER_MISSING', 'No recapture adapter configured. Cannot perform live browser recapture.'));
+      return err(
+        this.reError(
+          'RECAPTURE_ADAPTER_MISSING',
+          'No recapture adapter configured. Cannot perform live browser recapture.',
+        ),
+      );
     }
 
     const result = await this.persistence.loadReview(input.reviewId);
@@ -325,7 +360,11 @@ export class ReviewServiceImpl implements ReviewService {
 
     let review = result.value;
 
-    if (review.status === 'accepted' || review.status === 'rejected' || review.status === 'needs_follow_up') {
+    if (
+      review.status === 'accepted' ||
+      review.status === 'rejected' ||
+      review.status === 'needs_follow_up'
+    ) {
       return err(this.reError('ALREADY_DECIDED', 'This review has already been decided.'));
     }
 
@@ -360,7 +399,9 @@ export class ReviewServiceImpl implements ReviewService {
         updatedAt: failTime,
         lifecycle: [
           ...review.lifecycle,
-          makeFailedEvent('Recapture returned null — element may not exist or browser session is unavailable'),
+          makeFailedEvent(
+            'Recapture returned null — element may not exist or browser session is unavailable',
+          ),
         ],
       };
 
@@ -368,7 +409,12 @@ export class ReviewServiceImpl implements ReviewService {
       const failSave = await this.persistence.saveReview(failRedacted.review);
       if (!failSave.ok) return err(failSave.error);
 
-      return err(this.reError('RECAPTURE_FAILED', 'Recapture returned null — element may not exist or browser session is unavailable'));
+      return err(
+        this.reError(
+          'RECAPTURE_FAILED',
+          'Recapture returned null — element may not exist or browser session is unavailable',
+        ),
+      );
     }
 
     const after = buildAfterSnapshot(recaptureResult, review, resolvedTarget);
@@ -385,7 +431,9 @@ export class ReviewServiceImpl implements ReviewService {
       updatedAt: completionTime,
       lifecycle: [
         ...review.lifecycle,
-        makeAfterCaptureCompletedEvent(after.targetSummary.resolutionStatus === 'missing' ? ['Target not found'] : []),
+        makeAfterCaptureCompletedEvent(
+          after.targetSummary.resolutionStatus === 'missing' ? ['Target not found'] : [],
+        ),
         compEvent,
       ],
     };
@@ -430,11 +478,14 @@ export class ReviewServiceImpl implements ReviewService {
   }
 }
 
-function buildBeforeSnapshot(issue: VisualIssue, issueId: string, handoffId?: string): ReviewSnapshotRef {
+function buildBeforeSnapshot(
+  issue: VisualIssue,
+  issueId: string,
+  handoffId?: string,
+): ReviewSnapshotRef {
   const snapshot = issue.source.selectionSnapshot as Record<string, unknown>;
   const targets = (snapshot.targets as Array<Record<string, unknown>>) ?? [];
   const firstTarget = targets[0] as Record<string, unknown> | undefined;
-  const semantics = (firstTarget?.semantics as Record<string, unknown>) ?? {};
   const geometry = (firstTarget?.geometry as Record<string, unknown>) ?? {};
   const viewportRect = (geometry.viewportRect as Record<string, number>) ?? {};
 
@@ -465,12 +516,14 @@ function buildBeforeSnapshot(issue: VisualIssue, issueId: string, handoffId?: st
     },
     visualEvidence: {
       overlayExcluded: false,
-      cropRect: viewportRect.width ? {
-        x: viewportRect.x ?? 0,
-        y: viewportRect.y ?? 0,
-        width: viewportRect.width ?? 0,
-        height: viewportRect.height ?? 0,
-      } : undefined,
+      cropRect: viewportRect.width
+        ? {
+            x: viewportRect.x ?? 0,
+            y: viewportRect.y ?? 0,
+            width: viewportRect.width ?? 0,
+            height: viewportRect.height ?? 0,
+          }
+        : undefined,
     },
     evidenceSummary: {
       hasSelection: true,
@@ -488,8 +541,6 @@ function buildAfterSnapshot(
   review: VisualReview,
   resolvedTarget: import('./types').ResolvedRecaptureTarget | null,
 ): ReviewSnapshotRef {
-  const beforeStatus = review.before.targetSummary.resolutionStatus;
-
   let resolutionStatus: 'resolved' | 'ambiguous' | 'stale' | 'missing' = 'resolved';
   if (!recaptureResult.selector) {
     resolutionStatus = 'missing';
@@ -526,9 +577,10 @@ function buildAfterSnapshot(
     },
     visualEvidence: {
       overlayExcluded: false,
-      cropRect: recaptureResult.boundingBox.width > 0
-        ? recaptureResult.boundingBox
-        : resolvedTarget?.boundingBox,
+      cropRect:
+        recaptureResult.boundingBox.width > 0
+          ? recaptureResult.boundingBox
+          : resolvedTarget?.boundingBox,
     },
     evidenceSummary: {
       hasSelection: !!recaptureResult.selector || !!resolvedTarget,

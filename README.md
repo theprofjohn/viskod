@@ -100,9 +100,9 @@ VS Code Extensions
 # Example Workflow
 
 ```bash
-cd my-project
+cd viskod
 
-npx viskod
+pnpm viskod
 ```
 
 Viskod will:
@@ -195,10 +195,9 @@ Every layer has a single responsibility.
 ```text
 viskod/
 
-├── CLAUDE.md
+├── AGENTS.md
 ├── MEMORY.md
 ├── README.md
-├── ROADMAP.md
 │
 ├── docs/
 │
@@ -206,12 +205,30 @@ viskod/
 │   └── studio/
 │
 ├── packages/
+│   ├── agent-handoff/
+│   ├── audit/
 │   ├── browser-runtime/
+│   ├── capture-pipeline/
 │   ├── cli/
+│   ├── config/
 │   ├── context-engine/
+│   ├── diagnostics/
+│   ├── event-bus/
 │   ├── mcp-server/
+│   ├── overlay-system/
+│   ├── permissions/
+│   ├── plugin-system/
+│   ├── project-scanner/
+│   ├── runtime-session/
+│   ├── sdk/
+│   ├── selection-engine/
+│   ├── setup/
 │   ├── shared/
-│   └── config/
+│   ├── source-hint-engine/
+│   ├── visual-issue/
+│   ├── visual-review/
+│   ├── visual-selection/
+│   └── workspace/
 │
 ├── examples/
 │
@@ -247,7 +264,7 @@ pnpm install
 # Development
 
 ```bash
-pnpm dev
+pnpm viskod start
 ```
 
 ---
@@ -266,12 +283,6 @@ pnpm build
 pnpm test
 ```
 
-End-to-end tests:
-
-```bash
-pnpm test:e2e
-```
-
 ---
 
 # Repository Validation
@@ -284,11 +295,9 @@ pnpm check
 
 This command should execute:
 
-* formatting
-* linting
-* type checking
-* unit tests
-* package builds
+* linting (biome)
+* type checking (tsc -b)
+* unit tests (vitest)
 
 Any failure should return a non-zero exit code.
 
@@ -305,7 +314,7 @@ Viskod follows a few simple principles:
 * Security by default
 * Evidence over assumption
 
-Read `CLAUDE.md` before contributing.
+Read `AGENTS.md` before contributing.
 
 Review `MEMORY.md` before introducing architectural changes.
 
@@ -313,14 +322,15 @@ Review `MEMORY.md` before introducing architectural changes.
 
 # MCP Agent Workflow
 
-Viskod exposes two MCP tools for AI coding agents: `capture_context` and `recapture_context`.
+Viskod exposes MCP tools for AI coding agents, including `viskod_select_element` and `viskod_capture_context`.
 
 The standard workflow:
 
 1. **Start** `pnpm viskod serve --url <APP_URL>`
-2. **Capture** `capture_context(selector, url, profile: "debug")` → receive a brief with source hints
-3. **Fix** the issue in the identified source file
-4. **Re-capture** `recapture_context(previousPacketPath, reload: true, cacheBust: true)` → verify with `comparisonSummary`
+2. **Select** `viskod_select_element(selector)` → pick the element to inspect
+3. **Capture** `viskod_capture_context(selector)` → receive a context packet with DOM snapshot, computed styles, screenshots, hierarchy, and confidence
+4. **Fix** the issue in the identified source file
+5. **Re-capture** `viskod_capture_context(selector)` after `viskod_navigate` to verify the change
 
 Detailed guides:
 - [Quickstart](QUICKSTART_MCP.md) — 8-step walkthrough from install to verified fix
@@ -419,15 +429,16 @@ Viskod itself uses the Playwright TypeScript library internally regardless of wh
 
 Current milestone:
 
-**Phase 1 — Foundation**
+**v0.2.0-alpha** — Phases 1-8 complete (Foundation through Enterprise/Advanced + Alpha Hardening)
 
-Focus:
+Focus areas delivered:
 
-* repository architecture
-* browser runtime
-* visual context engine
-* MCP integration
-* Studio
+* Visual context engine with structured context packets
+* Browser runtime, overlay, selection, and source-hint engines
+* MCP server (`viskod_select_element` / `viskod_capture_context`)
+* Plugin system, permissions, audit, and workspace packages
+* CLI (`start/scan/capture/serve/health/status/stop/export/install`)
+* Studio UI
 
 Commercial features are intentionally deferred.
 
@@ -463,7 +474,7 @@ Plugin ecosystem
 
 Before making changes:
 
-1. Read `CLAUDE.md`.
+1. Read `AGENTS.md`.
 2. Read `MEMORY.md`.
 3. Review the implementation documents under `docs/`.
 4. Run `pnpm check`.

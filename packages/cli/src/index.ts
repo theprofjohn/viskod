@@ -3,7 +3,7 @@ import { BrowserRuntime, resolveProfile } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
 import { VisualContextEngine, generateExport } from '@viskod/context-engine';
 import { EventBus } from '@viskod/event-bus';
-import { MCPServer } from '@viskod/mcp-server';
+import { buildViskodServer } from '@viskod/mcp-server';
 import { ProjectScanner } from '@viskod/project-scanner';
 import { DaemonClient, DaemonServer, RuntimeSession } from '@viskod/runtime-session';
 import { SelectionEngine } from '@viskod/selection-engine';
@@ -13,7 +13,7 @@ function createRuntime() {
   const eventBus = new EventBus({ enableHistory: true, historySize: 100 });
   const browserRuntime = new BrowserRuntime(eventBus);
   const capturePipeline = new CapturePipeline();
-  const selectionEngine = new SelectionEngine(eventBus);
+  const selectionEngine = new SelectionEngine(eventBus, browserRuntime);
   const projectScanner = new ProjectScanner(eventBus);
   const sourceHintEngine = new SourceHintEngine(eventBus);
   const vce = new VisualContextEngine({
@@ -63,6 +63,9 @@ async function main(): Promise<void> {
     case 'export':
       await cmdExport(args.slice(1));
       break;
+    case 'install':
+      await cmdInstall(args.slice(1));
+      break;
     default:
       printHelp();
   }
@@ -71,7 +74,7 @@ async function main(): Promise<void> {
 async function cmdStart(subArgs: string[]): Promise<void> {
   const targetUrl = subArgs[0] ?? 'http://localhost:3000';
 
-  console.log('Viskod v0.0.1');
+  console.log('Viskod v0.2.0-alpha');
   console.log('Starting persistent runtime session...');
 
   const session = new RuntimeSession();
@@ -307,573 +310,10 @@ async function cmdServe(): Promise<void> {
     console.log('Starting Viskod MCP server...');
   }
 
-  const session = new RuntimeSession();
-  // Warm up the browser session early so the SPA has time to render
-  // before the first tool call.  Otherwise React/SPA hydration may not
-  // complete in time for the first capture_context DOM query.
-  if (targetUrl) {
-    session.start(targetUrl).catch(() => {});
-  }
-  const server = new MCPServer();
-
-  server.registerTool(
-    {
-      name: 'capture',
-      description: 'Capture context for an element using a shared browser session',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          selector: { type: 'string', description: 'CSS selector for the element' },
-          url: { type: 'string', description: 'URL to navigate to' },
-          profile: {
-            type: 'string',
-            description: 'Capture profile: default, debug, or audit (default: default)',
-            enum: ['default', 'debug', 'audit'],
-          },
-        },
-        required: ['selector'],
-      },
-    },
-    async (args) => {
-      const selector = args.selector as string;
-      const url = args.url as string | undefined;
-      const profileName = (args.profile as string | undefined) ?? 'default';
-      const profile = resolveProfile(profileName);
-
-      // Start session if not running
-      if (!session.getStatus()) {
-        const startResult = await session.start(url ?? 'http://localhost:3000');
-        if (!startResult.ok) {
-          return {
-            content: [
-              { type: 'text', text: `Failed to start session: ${startResult.error.message}` },
-            ],
-            isError: true,
-          };
-        }
-      }
-
-      const result = await session.capture(selector, url, profile);
-      if (!result.ok) {
-        return {
-          content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }],
-          isError: true,
-        };
-      }
-
-      const packet = result.value;
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                packetId: packet.packetId,
-                timestamp: packet.timestamp,
-                selection: packet.selection,
-                dom: { tagName: packet.dom.tagName, childCount: packet.dom.childCount },
-                screenshots: packet.screenshots.length,
-                confidence: packet.confidence,
-                evidenceSources: packet.metadata.evidenceSources,
-                processingTimeMs: packet.metadata.processingTimeMs,
-                profile: profileName,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    {
-      name: 'status',
-      description: 'Show session status',
-      inputSchema: {
-        type: 'object',
-        properties: {},
-        required: [],
-      },
-    },
-    async () => {
-      const info = session.getStatus();
-      return {
-        content: [
-          { type: 'text', text: info ? JSON.stringify(info, null, 2) : 'No active session' },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    {
-      name: 'stop',
-      description: 'Stop the runtime session',
-      inputSchema: {
-        type: 'object',
-        properties: {},
-        required: [],
-      },
-    },
-    async () => {
-      await session.stop();
-      return { content: [{ type: 'text', text: 'Session stopped' }] };
-    },
-  );
-
-  server.registerTool(
-    {
-      name: 'export_context',
-      description: 'Export a Context Packet to an agent-friendly brief (markdown or compact JSON)',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          packetPath: { type: 'string', description: 'Path to packet.json file' },
-          format: {
-            type: 'string',
-            description: 'Output format: markdown or json (default: markdown)',
-            enum: ['markdown', 'json'],
-          },
-        },
-        required: ['packetPath'],
-      },
-    },
-    async (args) => {
-      const packetPath = args.packetPath as string;
-      const format = (args.format as string | undefined) ?? 'markdown';
-
-      if (format !== 'markdown' && format !== 'json') {
-        return {
-          content: [{ type: 'text', text: 'Format must be "markdown" or "json"' }],
-          isError: true,
-        };
-      }
-
-      let raw: string;
-      try {
-        const { readFileSync } = await import('node:fs');
-        raw = readFileSync(packetPath, 'utf-8');
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Failed to read packet: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      let packet: Record<string, unknown>;
-      try {
-        packet = JSON.parse(raw);
-      } catch {
-        return {
-          content: [{ type: 'text', text: 'Failed to parse packet: not valid JSON' }],
-          isError: true,
-        };
-      }
-
-      try {
-        const output = generateExport(packet as unknown as Parameters<typeof generateExport>[0], {
-          format: format as 'markdown' | 'json',
-        });
-        return { content: [{ type: 'text', text: output }] };
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Export failed: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  server.registerTool(
-    {
-      name: 'capture_context',
-      description: 'Capture an element and return an agent-ready context brief in one step',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          selector: { type: 'string', description: 'CSS selector for the element' },
-          url: { type: 'string', description: 'URL to navigate to' },
-          profile: {
-            type: 'string',
-            description: 'Capture profile: default, debug, or audit',
-            enum: ['default', 'debug', 'audit'],
-          },
-          projectPath: {
-            type: 'string',
-            description: 'Project root path for source scanning (default: auto-discover)',
-          },
-          format: {
-            type: 'string',
-            description: 'Brief format: markdown or json (default: markdown)',
-            enum: ['markdown', 'json'],
-          },
-          reload: {
-            type: 'boolean',
-            description: 'Reload the page before capturing (default: false)',
-          },
-          cacheBust: {
-            type: 'boolean',
-            description: 'Append cache-busting query param before capturing (default: false)',
-          },
-        },
-        required: ['selector'],
-      },
-    },
-    async (args) => {
-      const selector = args.selector as string;
-      const url = args.url as string | undefined;
-      const profileName = (args.profile as string | undefined) ?? 'default';
-      const projectPath = args.projectPath as string | undefined;
-      const format = (args.format as string | undefined) ?? 'markdown';
-      const reload = (args.reload as boolean | undefined) ?? false;
-      const cacheBust = (args.cacheBust as boolean | undefined) ?? false;
-
-      const profile = resolveProfile(profileName);
-
-      if (!session.getStatus()) {
-        const startResult = await session.start(url ?? 'http://localhost:3000');
-        if (!startResult.ok) {
-          return {
-            content: [
-              { type: 'text', text: `Failed to start session: ${startResult.error.message}` },
-            ],
-            isError: true,
-          };
-        }
-      }
-
-      // Set project context if specified
-      if (projectPath && session.getStatus()) {
-        const scanResult = await session.getProjectScanner().scan(projectPath);
-        if (scanResult.ok) {
-          const s = scanResult.value;
-          session.getVCE().setProjectContext({
-            rootPath: s.metadata.rootPath,
-            projectId: s.metadata.projectId,
-            name: s.metadata.name,
-            directories: s.components.directories,
-            primaryFramework: s.framework.primary,
-            detectedFrameworks: s.framework.detected,
-            frameworkConfidence: s.framework.confidence,
-          });
-        }
-      }
-
-      const result = await session.capture(selector, url, profile, { reload, cacheBust });
-      if (!result.ok) {
-        return {
-          content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }],
-          isError: true,
-        };
-      }
-
-      const packet = result.value;
-      const brief = generateExport(packet, { format: format as 'markdown' | 'json' });
-
-      const captureDir = packet.captureDir ?? '';
-      const packetPath = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
-      const screenshotPaths = (packet.screenshots ?? []).map((s) => s.path);
-      const sourceHintCount = (packet.sourceHints ?? []).length;
-      const consoleCount = (packet.runtimeEvidence?.console ?? []).length;
-      const networkCount = (packet.runtimeEvidence?.network ?? []).length;
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                packetId: packet.packetId,
-                packetPath,
-                captureDir,
-                profile: profileName,
-                briefFormat: format,
-                brief,
-                screenshotPaths,
-                sourceHintCount,
-                runtimeEvidenceSummary: { console: consoleCount, network: networkCount },
-                redactionSummary: packet.metadata?.redactions ?? [],
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    {
-      name: 'recapture_context',
-      description: 'Re-capture an element and optionally compare with a previous capture',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          selector: { type: 'string', description: 'CSS selector for the element' },
-          url: { type: 'string', description: 'URL to navigate to' },
-          profile: {
-            type: 'string',
-            description: 'Capture profile',
-            enum: ['default', 'debug', 'audit'],
-          },
-          projectPath: {
-            type: 'string',
-            description: 'Project root path for source scanning (default: auto-discover)',
-          },
-          previousPacketPath: {
-            type: 'string',
-            description: 'Path to previous packet.json for comparison',
-          },
-          format: { type: 'string', description: 'Brief format', enum: ['markdown', 'json'] },
-          reload: {
-            type: 'boolean',
-            description:
-              'Reload the page before re-capturing (default: true when previousPacketPath provided)',
-          },
-          cacheBust: {
-            type: 'boolean',
-            description: 'Append cache-busting query param before re-capturing (default: false)',
-          },
-        },
-        required: ['selector'],
-      },
-    },
-    async (args) => {
-      const selector = args.selector as string;
-      const url = args.url as string | undefined;
-      const profileName = (args.profile as string | undefined) ?? 'default';
-      const projectPath = args.projectPath as string | undefined;
-      const prevPath = args.previousPacketPath as string | undefined;
-      const format = (args.format as string | undefined) ?? 'markdown';
-      // Default reload to true when previousPacketPath is provided
-      const reload = (args.reload as boolean | undefined) ?? !!prevPath;
-      const cacheBust = (args.cacheBust as boolean | undefined) ?? false;
-
-      const profile = resolveProfile(profileName);
-
-      if (!session.getStatus()) {
-        const startResult = await session.start(url ?? 'http://localhost:3000');
-        if (!startResult.ok) {
-          return {
-            content: [
-              { type: 'text', text: `Failed to start session: ${startResult.error.message}` },
-            ],
-            isError: true,
-          };
-        }
-      }
-
-      // Set project context if specified
-      if (projectPath && session.getStatus()) {
-        const scanResult = await session.getProjectScanner().scan(projectPath);
-        if (scanResult.ok) {
-          const s = scanResult.value;
-          session.getVCE().setProjectContext({
-            rootPath: s.metadata.rootPath,
-            projectId: s.metadata.projectId,
-            name: s.metadata.name,
-            directories: s.components.directories,
-            primaryFramework: s.framework.primary,
-            detectedFrameworks: s.framework.detected,
-            frameworkConfidence: s.framework.confidence,
-          });
-        }
-      }
-
-      const result = await session.capture(selector, url, profile, { reload, cacheBust });
-      if (!result.ok) {
-        return {
-          content: [{ type: 'text', text: `Capture failed: ${result.error.message}` }],
-          isError: true,
-        };
-      }
-
-      const packet = result.value;
-      const brief = generateExport(packet, { format: format as 'markdown' | 'json' });
-
-      let comparisonSummary: Record<string, unknown> | undefined;
-      if (prevPath) {
-        try {
-          const { readFileSync } = await import('node:fs');
-          const raw = readFileSync(prevPath, 'utf-8');
-          const prev = JSON.parse(raw) as Record<string, unknown>;
-          const prevSelection = (prev.selection as Record<string, unknown>) ?? {};
-          const curSelection = packet.selection ?? {};
-          const prevBox = (prevSelection.boundingBox as Record<string, number>) ?? {};
-          const curBox = curSelection.boundingBox ?? {};
-
-          const dx =
-            curBox.x !== undefined && prevBox.x !== undefined
-              ? Math.round((curBox.x - prevBox.x) * 100) / 100
-              : undefined;
-          const dy =
-            curBox.y !== undefined && prevBox.y !== undefined
-              ? Math.round((curBox.y - prevBox.y) * 100) / 100
-              : undefined;
-          const dw =
-            curBox.width !== undefined && prevBox.width !== undefined
-              ? Math.round((curBox.width - prevBox.width) * 100) / 100
-              : undefined;
-          const dh =
-            curBox.height !== undefined && prevBox.height !== undefined
-              ? Math.round((curBox.height - prevBox.height) * 100) / 100
-              : undefined;
-
-          const beforeArea =
-            prevBox.width !== undefined && prevBox.height !== undefined
-              ? Math.round(prevBox.width * prevBox.height * 100) / 100
-              : undefined;
-          const afterArea =
-            curBox.width !== undefined && curBox.height !== undefined
-              ? Math.round(curBox.width * curBox.height * 100) / 100
-              : undefined;
-          const areaDelta =
-            beforeArea !== undefined && afterArea !== undefined
-              ? Math.round((afterArea - beforeArea) * 100) / 100
-              : undefined;
-          const percentChange =
-            beforeArea !== undefined && afterArea !== undefined && beforeArea > 0
-              ? Math.round(((afterArea - beforeArea) / beforeArea) * 10000) / 100
-              : undefined;
-
-          const prevEvidence = prev.runtimeEvidence as Record<string, unknown> | undefined;
-          const consoleBefore = (prevEvidence?.console as unknown[] | undefined)?.length ?? 0;
-          const consoleAfter = (packet.runtimeEvidence?.console ?? []).length;
-          const networkBefore = (prevEvidence?.network as unknown[] | undefined)?.length ?? 0;
-          const networkAfter = (packet.runtimeEvidence?.network ?? []).length;
-          const sourceHintsBefore = (prev.sourceHints as unknown[] | undefined)?.length ?? 0;
-          const sourceHintsAfter = (packet.sourceHints ?? []).length;
-          const screenshotsBefore = (prev.screenshots as unknown[] | undefined)?.length ?? 0;
-          const screenshotsAfter = (packet.screenshots ?? []).length;
-
-          // Determine changed fields
-          const changedFields: string[] = [];
-          if (dw !== undefined && dw !== 0) changedFields.push('boundingBox.width');
-          if (dh !== undefined && dh !== 0) changedFields.push('boundingBox.height');
-          if (dx !== undefined && dx !== 0) changedFields.push('boundingBox.x');
-          if (dy !== undefined && dy !== 0) changedFields.push('boundingBox.y');
-          if (consoleBefore !== consoleAfter) changedFields.push('evidence.console');
-          if (networkBefore !== networkAfter) changedFields.push('evidence.network');
-          if (sourceHintsBefore !== sourceHintsAfter) changedFields.push('sourceHints');
-          if (screenshotsBefore !== screenshotsAfter) changedFields.push('screenshots');
-
-          // Determine verdict
-          let verdict = 'unchanged';
-          if (changedFields.length > 0) {
-            // "improved" requires directional evidence: positive height delta + negative width delta (card layout fix)
-            if (dh !== undefined && dw !== undefined && dh > 0 && dw < 0) {
-              verdict = 'improved';
-            } else {
-              verdict = 'changed';
-            }
-          }
-
-          const notesParts: string[] = [];
-          if (changedFields.length > 0) {
-            notesParts.push(`Fields changed: ${changedFields.join(', ')}`);
-          } else {
-            notesParts.push('No meaningful field changes detected');
-          }
-          if (dh !== undefined) notesParts.push(`height delta: ${dh}`);
-          if (dw !== undefined) notesParts.push(`width delta: ${dw}`);
-
-          comparisonSummary = {
-            boundingBoxDelta: {
-              x: { before: prevBox.x, after: curBox.x, delta: dx },
-              y: { before: prevBox.y, after: curBox.y, delta: dy },
-              width: { before: prevBox.width, after: curBox.width, delta: dw },
-              height: { before: prevBox.height, after: curBox.height, delta: dh },
-            },
-            areaDelta: {
-              beforeArea,
-              afterArea,
-              delta: areaDelta,
-              percentChange,
-            },
-            evidenceDelta: {
-              console: {
-                before: consoleBefore,
-                after: consoleAfter,
-                delta: consoleAfter - consoleBefore,
-              },
-              network: {
-                before: networkBefore,
-                after: networkAfter,
-                delta: networkAfter - networkBefore,
-              },
-              sourceHints: {
-                before: sourceHintsBefore,
-                after: sourceHintsAfter,
-                delta: sourceHintsAfter - sourceHintsBefore,
-              },
-              screenshots: {
-                before: screenshotsBefore,
-                after: screenshotsAfter,
-                delta: screenshotsAfter - screenshotsBefore,
-              },
-            },
-            changedFields,
-            verdict,
-            notes: notesParts.join('; '),
-          };
-        } catch (e) {
-          comparisonSummary = {
-            error: `Failed to read previous packet for comparison: ${e instanceof Error ? e.message : String(e)}`,
-          };
-        }
-      }
-
-      const screenshotPaths = (packet.screenshots ?? []).map((s) => s.path);
-      const sourceHintCount = (packet.sourceHints ?? []).length;
-      const consoleCount = (packet.runtimeEvidence?.console ?? []).length;
-      const networkCount = (packet.runtimeEvidence?.network ?? []).length;
-
-      const captureDir = packet.captureDir ?? '';
-      const packetPathOut = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                packetId: packet.packetId,
-                packetPath: packetPathOut,
-                captureDir,
-                profile: profileName,
-                briefFormat: format,
-                brief,
-                screenshotPaths,
-                sourceHintCount,
-                runtimeEvidenceSummary: { console: consoleCount, network: networkCount },
-                redactionSummary: packet.metadata?.redactions ?? [],
-                comparisonSummary,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
-    },
-  );
-
+  // Use the full MCP tool set (30 tools) registered by @viskod/mcp-server
+  const server = buildViskodServer({ targetUrl });
   await server.start();
 }
-
 async function cmdStatus(): Promise<void> {
   const sessionInfo = RuntimeSession.readSessionFile();
   if (!sessionInfo) {
@@ -980,6 +420,111 @@ async function cmdHealth(): Promise<void> {
   );
 }
 
+async function cmdInstall(subArgs: string[]): Promise<void> {
+  const { existsSync, readFileSync, writeFileSync, mkdirSync } = await import('node:fs');
+  const { join, dirname, resolve } = await import('node:path');
+  const { homedir } = await import('node:os');
+  const { fileURLToPath } = await import('node:url');
+
+  const ide = (subArgs[0] ?? 'opencode').toLowerCase();
+  const cwd = process.cwd();
+  const home = homedir();
+
+  // Resolve the Viskod repo root from THIS file's location, not process.cwd().
+  // The CLI runs as <repo>/packages/cli/src/index.ts (or built dist), so walk up
+  // until we find a package.json with "packages/cli" present.
+  const thisFile = fileURLToPath(import.meta.url);
+  let repoRoot = resolve(dirname(thisFile)); // start at src/ or dist/
+  for (let i = 0; i < 6; i++) {
+    if (
+      existsSync(join(repoRoot, 'packages', 'cli')) &&
+      existsSync(join(repoRoot, 'package.json'))
+    ) {
+      break;
+    }
+    const parent = dirname(repoRoot);
+    if (parent === repoRoot) break;
+    repoRoot = parent;
+  }
+
+  // Path to Viskod CLI entry (this repo)
+  const viskodEntry = join(repoRoot, 'packages', 'cli', 'src', 'index.ts');
+  const entryExists = existsSync(viskodEntry);
+  if (!entryExists) {
+    console.error(`Could not locate the Viskod CLI entry. Repo root resolved to: ${repoRoot}`);
+    process.exit(1);
+  }
+
+  interface McpConfigFile {
+    path: string;
+    key: string; // top-level key holding mcp servers
+    serverKey: string;
+  }
+
+  const targets: Record<string, McpConfigFile> = {
+    opencode: {
+      path: join(home, '.config', 'opencode', 'opencode.json'),
+      key: 'mcp',
+      serverKey: 'viskod',
+    },
+    cursor: {
+      path: join(cwd, '.cursor', 'mcp.json'),
+      key: 'mcpServers',
+      serverKey: 'viskod',
+    },
+    claude: {
+      path: join(home, '.claude.json'),
+      key: 'mcpServers',
+      serverKey: 'viskod',
+    },
+  };
+
+  const target = targets[ide];
+  if (!target) {
+    console.error(`Unknown IDE "${ide}". Use one of: opencode, cursor, claude`);
+    process.exit(1);
+  }
+
+  try {
+    let config: Record<string, unknown> = {};
+    if (existsSync(target.path)) {
+      config = JSON.parse(readFileSync(target.path, 'utf-8'));
+    }
+
+    // Ensure nested structure exists
+    if (!config[target.key] || typeof config[target.key] !== 'object') {
+      config[target.key] = {};
+    }
+
+    if (ide === 'opencode') {
+      // opencode uses: mcp: { name: { type: "local", command: [..], enabled: true } }
+      (config[target.key] as Record<string, unknown>)[target.serverKey] = {
+        type: 'local',
+        command: ['npx', 'tsx', viskodEntry, 'serve', '--url', 'http://localhost:3000'],
+        enabled: true,
+      };
+    } else {
+      // cursor/claude use mcpServers: { name: { command, args, ... } }
+      (config[target.key] as Record<string, unknown>)[target.serverKey] = {
+        command: 'npx',
+        args: ['tsx', viskodEntry, 'serve', '--url', 'http://localhost:3000'],
+        env: {},
+        disabled: false,
+        autoApprove: [],
+      };
+    }
+
+    mkdirSync(target.path.split('/').slice(0, -1).join('/') || '.', { recursive: true });
+    writeFileSync(target.path, JSON.stringify(config, null, 2), 'utf-8');
+    console.log(`✓ Installed Viskod MCP config for ${ide}`);
+    console.log(`  → ${target.path}`);
+    console.log('  Restart your IDE to pick up the MCP server.');
+  } catch (error) {
+    console.error(`Failed to install: ${String(error)}`);
+    process.exit(1);
+  }
+}
+
 function printHelp(): void {
   console.log(`Viskod — Visual Context Engine for AI-assisted software development
 
@@ -987,6 +532,7 @@ Usage:
   viskod start [url]     Start persistent runtime session
   viskod capture <sel>   Capture context (reuses session if available)
   viskod serve [--url]   Start MCP server (with optional browser)
+  viskod install [ide]   Install Viskod MCP config into your IDE (opencode|cursor|claude)
   viskod status          Show session status
   viskod stop            Stop the runtime session
   viskod export <path>   Export Context Packet to agent brief (--format markdown|json, --out <file>)
@@ -998,7 +544,8 @@ Examples:
   viskod capture ".dashboard-header"
   viskod capture "#my-button" --url http://localhost:5173
   viskod capture ".card" --project-path ./my-app
-  viskod serve --url http://localhost:3000`);
+  viskod serve --url http://localhost:3000
+  viskod install opencode`);
 }
 
 main().catch((e) => {

@@ -1,27 +1,33 @@
-import { type Result, type ViskodError, ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 import type { EventBus } from '@viskod/event-bus';
-import type { VisualSelection } from '@viskod/visual-selection';
-import type {
-  VisualIssue,
-  VisualIssueStatus,
-  VisualIssueSeverity,
-  VisualIssueEvent,
-  RedactedTargetSummary,
-  IssueErrorCode,
-} from './types';
-import { IssuePersistence } from './persistence';
-import { VisualIssueSchema } from './schemas';
-import { redactIssue, generateDefaultTitle, redactTargetSummary } from './redaction';
 import {
-  isValidTransition,
+  ErrorCategory,
+  ErrorSeverity,
+  type Result,
+  type ViskodError,
+  err,
+  ok,
+} from '@viskod/shared';
+import type { VisualSelection } from '@viskod/visual-selection';
+import {
   createLifecycleEvent,
-  makeStatusChangeEvent,
-  makeSeverityChangeEvent,
+  isValidTransition,
   makeArchiveEvent,
-  makeReopenEvent,
-  makeDeleteEvent,
   makeCreatedEvent,
+  makeDeleteEvent,
+  makeReopenEvent,
+  makeSeverityChangeEvent,
+  makeStatusChangeEvent,
 } from './lifecycle';
+import { IssuePersistence } from './persistence';
+import { generateDefaultTitle, redactIssue } from './redaction';
+import type {
+  IssueErrorCode,
+  RedactedTargetSummary,
+  VisualIssue,
+  VisualIssueEvent,
+  VisualIssueSeverity,
+  VisualIssueStatus,
+} from './types';
 
 export interface IssueService {
   createIssue(
@@ -74,7 +80,12 @@ export class IssueServiceImpl implements IssueService {
     severity?: VisualIssueSeverity,
   ): Promise<Result<VisualIssue>> {
     if (selection.resolution.status === 'missing' || selection.resolution.status === 'stale') {
-      return err(this.ieError('STALE_SELECTION', 'The page changed. Reselect the element before creating an issue.'));
+      return err(
+        this.ieError(
+          'STALE_SELECTION',
+          'The page changed. Reselect the element before creating an issue.',
+        ),
+      );
     }
     if (!selection.targets || selection.targets.length === 0) {
       return err(this.ieError('NO_ACTIVE_SELECTION', 'Select an element or region first.'));
@@ -83,13 +94,15 @@ export class IssueServiceImpl implements IssueService {
     const now = new Date().toISOString();
     const issueId = crypto.randomUUID();
 
-    const effectiveTitle = title || generateDefaultTitle(
-      selection.mode,
-      selection.summary.label,
-      selection.summary.role,
-      selection.summary.textPreview,
-      selection.page.title,
-    );
+    const effectiveTitle =
+      title ||
+      generateDefaultTitle(
+        selection.mode,
+        selection.summary.label,
+        selection.summary.role,
+        selection.summary.textPreview,
+        selection.page.title,
+      );
 
     const targetSummary: RedactedTargetSummary = {
       mode: selection.mode,
@@ -100,8 +113,6 @@ export class IssueServiceImpl implements IssueService {
       confidence: selection.resolution.confidence,
       resolutionStatus: selection.resolution.status,
     };
-
-    const mode = selection.page.url.startsWith('http') ? 'visual-selection' : 'visual-selection';
 
     const issue: VisualIssue = {
       schemaVersion: 1 as const,
@@ -175,7 +186,11 @@ export class IssueServiceImpl implements IssueService {
     let changed = false;
 
     if (updates.title !== undefined && updates.title !== issue.title) {
-      events.push(createLifecycleEvent('updated', `Title updated to: ${updates.title}`, 'local-user', { title: { before: issue.title, after: updates.title } }));
+      events.push(
+        createLifecycleEvent('updated', `Title updated to: ${updates.title}`, 'local-user', {
+          title: { before: issue.title, after: updates.title },
+        }),
+      );
       issue.title = updates.title;
       changed = true;
     }
@@ -191,7 +206,12 @@ export class IssueServiceImpl implements IssueService {
     }
     if (updates.status !== undefined && updates.status !== issue.status) {
       if (!isValidTransition(issue.status, updates.status)) {
-        return err(this.ieError('INVALID_LIFECYCLE_TRANSITION', `Cannot transition from ${issue.status} to ${updates.status}`));
+        return err(
+          this.ieError(
+            'INVALID_LIFECYCLE_TRANSITION',
+            `Cannot transition from ${issue.status} to ${updates.status}`,
+          ),
+        );
       }
       events.push(makeStatusChangeEvent(issue.status, updates.status));
       issue.status = updates.status;
@@ -319,7 +339,12 @@ export class IssueServiceImpl implements IssueService {
     }
 
     if (!isValidTransition(issue.status, targetStatus)) {
-      return err(this.ieError('INVALID_LIFECYCLE_TRANSITION', `Cannot transition from ${issue.status} to ${targetStatus}`));
+      return err(
+        this.ieError(
+          'INVALID_LIFECYCLE_TRANSITION',
+          `Cannot transition from ${issue.status} to ${targetStatus}`,
+        ),
+      );
     }
 
     const events = [...issue.lifecycle, ...newEvents];

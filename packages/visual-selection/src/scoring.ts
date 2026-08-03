@@ -1,5 +1,5 @@
+import { intersectionRatio, isZeroArea, rectArea } from './geometry';
 import type { Rect } from './types';
-import { rectArea, intersectionRatio, rectContains, isZeroArea } from './geometry';
 
 export interface CandidateElement {
   tagName: string;
@@ -29,13 +29,13 @@ export interface CandidateScore {
 }
 
 const WEIGHTS = {
-  insideVisibleBounds: 0.20,
+  insideVisibleBounds: 0.2,
   isInteractive: 0.15,
-  semanticRole: 0.10,
-  accessibleName: 0.10,
+  semanticRole: 0.1,
+  accessibleName: 0.1,
   visibleText: 0.08,
   stableAttributes: 0.08,
-  preciseRegion: 0.10,
+  preciseRegion: 0.1,
   notExcessivelyLarge: 0.05,
   notTinyDecorative: 0.03,
   labelControl: 0.05,
@@ -46,7 +46,11 @@ function sigmoid(x: number, midpoint: number, steepness: number): number {
   return 1 / (1 + Math.exp(-steepness * (x - midpoint)));
 }
 
-export function scoreCandidate(el: CandidateElement, pointerX: number, pointerY: number): CandidateScore {
+export function scoreCandidate(
+  el: CandidateElement,
+  pointerX: number,
+  pointerY: number,
+): CandidateScore {
   const signals: Record<string, number> = {};
 
   const insideBounds =
@@ -102,7 +106,11 @@ export function filterCandidates(elements: CandidateElement[]): CandidateElement
   });
 }
 
-export function scoreAndRank(elements: CandidateElement[], pointerX: number, pointerY: number): CandidateScore[] {
+export function scoreAndRank(
+  elements: CandidateElement[],
+  pointerX: number,
+  pointerY: number,
+): CandidateScore[] {
   const filtered = filterCandidates(elements);
   const scored = filtered.map((el) => scoreCandidate(el, pointerX, pointerY));
   scored.sort((a, b) => b.score - a.score);

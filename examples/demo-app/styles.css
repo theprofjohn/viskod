@@ -1,0 +1,398 @@
+/* ============================================================
+   Viskod Demo — Task Manager
+   Design system using CSS custom properties (tokens)
+   ============================================================ */
+
+:root {
+  /* Tokens — primitive */
+  --color-blue-50: #eff6ff;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  --color-green-500: #22c55e;
+  --color-green-100: #dcfce7;
+  --color-red-500: #ef4444;
+  --color-red-100: #fee2e2;
+  --color-orange-500: #f97316;
+  --color-orange-100: #fff7ed;
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
+  --color-white: #ffffff;
+
+  /* Tokens — semantic */
+  --color-primary: var(--color-blue-600);
+  --color-primary-hover: var(--color-blue-700);
+  --color-success: var(--color-green-500);
+  --color-danger: var(--color-red-500);
+  --color-warning: var(--color-orange-500);
+  --color-bg: var(--color-gray-50);
+  --color-surface: var(--color-white);
+  --color-border: var(--color-gray-200);
+  --color-text: var(--color-gray-900);
+  --color-text-secondary: var(--color-gray-500);
+  --color-text-muted: var(--color-gray-400);
+
+  /* Spacing — 8px grid */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "SF Mono", "Fira Code", monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --line-height: 1.5;
+}
+
+/* Reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: var(--line-height);
+}
+
+/* Layout */
+.layout {
+  display: flex;
+  min-height: 100vh;
+}
+.sidebar {
+  width: 220px;
+  background: var(--color-gray-900);
+  color: var(--color-gray-300);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  flex-shrink: 0;
+}
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-white);
+  font-weight: 600;
+  font-size: var(--text-lg);
+}
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-gray-400);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  transition: color 0.15s ease-out, background 0.15s ease-out;
+}
+.nav-item:hover {
+  color: var(--color-white);
+  background: rgba(255, 255, 255, 0.08);
+}
+.nav-item.active {
+  color: var(--color-white);
+  background: rgba(255, 255, 255, 0.12);
+}
+.main {
+  flex: 1;
+  padding: var(--space-8);
+  max-width: 1100px;
+}
+
+/* Header */
+.main-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-8);
+}
+.main-header h1 {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+}
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  margin-top: var(--space-1);
+}
+
+/* Buttons */
+.btn-primary {
+  background: var(--color-primary);
+  color: var(--color-white);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+.btn-primary:hover {
+  background: var(--color-primary-hover);
+  box-shadow: var(--shadow-md);
+}
+.btn-primary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.btn-full {
+  width: 100%;
+}
+
+/* Stats grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-5);
+  margin-bottom: var(--space-8);
+}
+.stat-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.stat-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+}
+.stat-value {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+}
+.stat-change {
+  font-size: var(--text-xs);
+}
+.stat-change.positive {
+  color: var(--color-success);
+}
+.stat-change.negative {
+  color: var(--color-danger);
+}
+.stat-change.neutral {
+  color: var(--color-text-muted);
+}
+
+/* Content grid */
+.content-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+
+/* Cards */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-5);
+}
+.card-header h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.link-subtle {
+  font-size: var(--text-sm);
+  color: var(--color-primary);
+  text-decoration: none;
+}
+.link-subtle:hover {
+  text-decoration: underline;
+}
+
+/* Task list */
+.task-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.task-item:last-child {
+  border-bottom: none;
+}
+.task-status {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+.task-status.done {
+  background: var(--color-success);
+}
+.task-status.active {
+  background: var(--color-primary);
+}
+.task-status.pending {
+  background: var(--color-gray-300);
+}
+.task-status.overdue {
+  background: var(--color-danger);
+}
+.task-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.task-name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.task-meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* Forms */
+.task-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+.form-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-gray-700);
+}
+.form-input,
+.form-select {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+.form-input:focus,
+.form-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+.form-input::placeholder {
+  color: var(--color-gray-400);
+}
+
+/* Activity feed */
+.activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.activity-item {
+  display: flex;
+  gap: var(--space-3);
+}
+.activity-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-white);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.activity-content p {
+  font-size: var(--text-sm);
+}
+.activity-content time {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* ============================================================
+   INTENTIONAL DESIGN FLAWS (for Viskod to detect)
+   ============================================================ */
+
+/* FLAW 1: Missing reduced-motion — motion-principles says
+   every animated project needs prefers-reduced-motion handlers */
+
+/* FLAW 2: Low contrast — #9ca3af on #ffffff = 2.9:1 (fails WCAG AA 4.5:1)
+   The .task-meta uses --color-text-muted = #9ca3af */
+
+/* FLAW 3: Hover without focus equivalent on .task-item
+   (interactive-feeling element with no focus style) */
+
+/* FLAW 4: No skip-to-content link */
+
+/* FLAW 5: Missing alt text placeholder on decorative avatars
+   (activity-avatar has text content but no aria-label on container) */
+
+/* FLAW 6: form-input has no explicit aria-describedby for helper text */
+
+/* FLAW 7: Sidebar nav items lack visible focus indicator
+   (only :hover styled, no :focus-visible) */

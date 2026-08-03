@@ -3,7 +3,12 @@ export type { HandoffService } from './service';
 export { HandoffPersistence } from './persistence';
 export type { HandoffIndex } from './persistence';
 export { UserFacingHandoff } from './ux';
-export type { SendToAgentInput, SendToAgentResult, HandoffPreview, HandoffConfirmation } from './ux';
+export type {
+  SendToAgentInput,
+  SendToAgentResult,
+  HandoffPreview,
+  HandoffConfirmation,
+} from './ux';
 export type {
   AgentHandoff,
   AgentHandoffStatus,

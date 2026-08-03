@@ -15,5 +15,15 @@
   "private": true,
   "dependencies": {
     "@viskod/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@viskod/agent-handoff": "workspace:*",
+    "@viskod/event-bus": "workspace:*",
+    "@viskod/setup": "workspace:*",
+    "@viskod/project-scanner": "workspace:*",
+    "@viskod/source-hint-engine": "workspace:*",
+    "@viskod/visual-issue": "workspace:*",
+    "@viskod/visual-review": "workspace:*",
+    "@viskod/visual-selection": "workspace:*"
   }
 }

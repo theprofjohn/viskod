@@ -14,6 +14,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@viskod/browser-runtime": "workspace:*",
     "@viskod/event-bus": "workspace:*",
     "@viskod/shared": "workspace:*"
   }

@@ -27,9 +27,9 @@ pnpm smoke:agent-workflow  # MCP E2E smoke test
 
 - [ ] Fixture server running on `http://127.0.0.1:3000`
 - [ ] `pnpm smoke:agent-workflow` exits 0
-- [ ] `tools/list` returns `capture_context` and `recapture_context`
-- [ ] `capture_context` returns `packetPath`, `captureDir`, `brief`
-- [ ] `recapture_context` returns `comparisonSummary` with `boundingBoxDelta`, `areaDelta`, `verdict`
+- [ ] `tools/list` returns `viskod_capture_context` and `recapture_visual_review`
+- [ ] `viskod_capture_context` returns `ok`, `packetId`, `selection`, and `confidence`
+- [ ] `recapture_visual_review` returns `comparisonStatus` and `summary`
 
 ## Privacy / Token Checks
 
@@ -37,7 +37,7 @@ pnpm smoke:agent-workflow  # MCP E2E smoke test
 - [ ] No private absolute paths (e.g., `C:\Users\...`) in committed docs or configs
 - [ ] No `secret-token`, `test@example.com` or similar test secrets
 - [ ] Redaction defaults are enabled (profile `enableRedaction` is not `false`)
-- [ ] `.viskod/captures/`, `.viskod/session.json`, `.opencode/` are in `.gitignore`
+- [ ] `.viskod/captures/`, `.viskod/session.json`, and `.opencode/` are in `.gitignore`
 
 ## Artifact Cleanup
 
@@ -45,7 +45,6 @@ pnpm smoke:agent-workflow  # MCP E2E smoke test
 - [ ] No `.opencode/` files tracked in git
 - [ ] No `packet.json`, `metadata.json`, or `selection.png` tracked
 - [ ] No `.tmp` files tracked
-- [ ] `graphify-out/2026-*/` directories are gitignored
 
 ## Tag Command
 

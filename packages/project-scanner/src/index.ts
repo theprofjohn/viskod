@@ -814,9 +814,34 @@ export class ProjectScanner {
       evidence.push('shadcn/ui detected via components.json or src/components/ui directory');
     }
 
+    // ponytail: animation library detection — from motion-design/framer-motion/genjutsu-gsap skills
+    let animationLibrary: DesignSystemDetection['animationLibrary'] = null;
+
+    if (allDeps['framer-motion'] || allDeps.motion) {
+      animationLibrary = 'framer-motion';
+      evidence.push('Framer Motion detected via dependency');
+    }
+    if (allDeps.gsap) {
+      if (!animationLibrary) animationLibrary = 'gsap';
+      evidence.push('GSAP detected via dependency');
+    }
+    if (allDeps.three || allDeps['@types/three']) {
+      if (!animationLibrary) animationLibrary = 'three.js';
+      evidence.push('Three.js detected via dependency');
+    }
+    if (allDeps['@react-three/fiber'] || allDeps['@react-three/drei']) {
+      if (!animationLibrary) animationLibrary = 'react-three-fiber';
+      evidence.push('React Three Fiber detected via dependency');
+    }
+    if (allDeps['lottie-web'] || allDeps['@lottiefiles/lottie-player']) {
+      if (!animationLibrary) animationLibrary = 'lottie';
+      evidence.push('Lottie detected via dependency');
+    }
+
     return {
       cssFramework,
       uiLibrary,
+      animationLibrary,
       evidence,
     };
   }

@@ -14,7 +14,14 @@ export type WizardStep =
 export interface SetupRemediation {
   actionId: string;
   label: string;
-  kind: 'retry' | 'open_settings' | 'manual_command' | 'repair_workspace' | 'choose_project' | 'start_browser' | 'restart_mcp';
+  kind:
+    | 'retry'
+    | 'open_settings'
+    | 'manual_command'
+    | 'repair_workspace'
+    | 'choose_project'
+    | 'start_browser'
+    | 'restart_mcp';
   commandPreview?: string;
   safe: boolean;
 }

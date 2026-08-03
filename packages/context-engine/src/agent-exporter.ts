@@ -128,7 +128,9 @@ function toAgentBriefMarkdown(packet: ContextPacket): string {
     lines.push('');
 
     // Separate usage-site and definition-site hints
-    const usageHints = packet.sourceHints.filter((h) => h.kind === 'usage-site' || h.kind === 'route-owner');
+    const usageHints = packet.sourceHints.filter(
+      (h) => h.kind === 'usage-site' || h.kind === 'route-owner',
+    );
     const defHints = packet.sourceHints.filter((h) => h.kind === 'definition-site');
 
     if (usageHints.length > 0) {

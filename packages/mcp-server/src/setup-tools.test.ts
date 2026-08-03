@@ -1,26 +1,31 @@
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import * as path from 'node:path';
 import {
-  getSetupState,
-  detectAndConfigureProject,
-  initializeProjectWorkspace,
-  runAllChecks,
   completeSetup,
+  detectAndConfigureProject,
+  getSetupState,
+  initializeProjectWorkspace,
   repairSetup,
+  runAllChecks,
   runSmoke,
 } from '@viskod/setup';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = path.join(tmpdir(), `viskod-setup-mcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  tmpDir = path.join(
+    tmpdir(),
+    `viskod-setup-mcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   fs.mkdirSync(tmpDir, { recursive: true });
 });
 
 afterEach(() => {
-  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {}
 });
 
 describe('MCP Setup Tools', () => {
@@ -34,7 +39,11 @@ describe('MCP Setup Tools', () => {
     });
 
     it('returns state after setup completion', async () => {
-      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test' }), 'utf-8');
+      fs.writeFileSync(
+        path.join(tmpDir, 'package.json'),
+        JSON.stringify({ name: 'test' }),
+        'utf-8',
+      );
       initializeProjectWorkspace({ projectRoot: tmpDir });
       const project = detectAndConfigureProject({ projectRoot: tmpDir });
       if (project.ok) {
@@ -53,7 +62,11 @@ describe('MCP Setup Tools', () => {
 
   describe('detect_project', () => {
     it('detects project from valid directory', () => {
-      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'my-app' }), 'utf-8');
+      fs.writeFileSync(
+        path.join(tmpDir, 'package.json'),
+        JSON.stringify({ name: 'my-app' }),
+        'utf-8',
+      );
       const result = detectAndConfigureProject({ projectRoot: tmpDir });
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -73,7 +86,6 @@ describe('MCP Setup Tools', () => {
       const result = detectAndConfigureProject({ projectRoot: tmpDir });
       expect(result.ok).toBe(true);
       if (result.ok) {
-        const output = JSON.stringify(result.value);
         // rootPath may contain temp dir, but rootDisplayName should be safe
         expect(result.value.rootDisplayName).not.toContain('C:\\');
         expect(result.value.rootDisplayName).not.toContain('/home/');
@@ -160,7 +172,11 @@ describe('MCP Setup Tools', () => {
 
   describe('complete_setup', () => {
     it('persists setup state with completion', async () => {
-      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test' }), 'utf-8');
+      fs.writeFileSync(
+        path.join(tmpDir, 'package.json'),
+        JSON.stringify({ name: 'test' }),
+        'utf-8',
+      );
       initializeProjectWorkspace({ projectRoot: tmpDir });
 
       const project = detectAndConfigureProject({ projectRoot: tmpDir });
@@ -184,7 +200,11 @@ describe('MCP Setup Tools', () => {
     }, 60000);
 
     it('survives restart — state persists', async () => {
-      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test' }), 'utf-8');
+      fs.writeFileSync(
+        path.join(tmpDir, 'package.json'),
+        JSON.stringify({ name: 'test' }),
+        'utf-8',
+      );
       initializeProjectWorkspace({ projectRoot: tmpDir });
       const project = detectAndConfigureProject({ projectRoot: tmpDir });
       if (!project.ok) return;

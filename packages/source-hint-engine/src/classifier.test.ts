@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyHint, detectLanguage, type ImportGraphEntry } from './classifier';
+import { classifyHint, detectLanguage } from './classifier';
 
 describe('classifyHint', () => {
   it('classifies test files as test-owner', () => {
@@ -95,7 +95,14 @@ describe('classifyHint', () => {
       filePath: 'lib/settings-form.tsx',
       exists: true,
       matchType: 'usage-site',
-      evidence: [{ type: 'text-content-match', weight: 0.7, detail: 'Found "Save changes"', confidence: 0.8 }],
+      evidence: [
+        {
+          type: 'text-content-match',
+          weight: 0.7,
+          detail: 'Found "Save changes"',
+          confidence: 0.8,
+        },
+      ],
       discoveryMethod: 'usage-site',
     });
     expect(result.kind).toBe('usage-site');

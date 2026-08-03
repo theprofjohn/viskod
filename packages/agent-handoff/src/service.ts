@@ -1,31 +1,41 @@
-import { type Result, type ViskodError, ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 import type { EventBus } from '@viskod/event-bus';
-import type { IssueService, VisualIssue } from '@viskod/visual-issue';
-import type {
-  AgentHandoff,
-  AgentHandoffStatus,
-  AgentHandoffCreateInput,
-  AgentHandoffCreateOutput,
-  AgentHandoffGetOutput,
-  AgentHandoffListItem,
-  AgentHandoffErrorCode,
-} from './types';
-import { HandoffPersistence } from './persistence';
-import { AgentHandoffSchema } from './schemas';
+import {
+  ErrorCategory,
+  ErrorSeverity,
+  type Result,
+  type ViskodError,
+  err,
+  ok,
+} from '@viskod/shared';
+import type { IssueService } from '@viskod/visual-issue';
 import { generateAgentBrief, getDefaultConstraints } from './brief';
-import { redactAgentHandoff } from './redaction';
 import {
   isValidHandoffTransition,
+  makeHandoffCancelledEvent,
+  makeHandoffCompletedEvent,
   makeHandoffCreatedEvent,
+  makeHandoffFailedEvent,
   makeHandoffOpenedEvent,
   makeHandoffStatusChangeEvent,
-  makeHandoffCompletedEvent,
-  makeHandoffFailedEvent,
-  makeHandoffCancelledEvent,
 } from './lifecycle';
+import { HandoffPersistence } from './persistence';
+import { redactAgentHandoff } from './redaction';
+import type {
+  AgentHandoff,
+  AgentHandoffCreateInput,
+  AgentHandoffCreateOutput,
+  AgentHandoffErrorCode,
+  AgentHandoffGetOutput,
+  AgentHandoffListItem,
+  AgentHandoffStatus,
+} from './types';
 
 export interface HandoffService {
-  createHandoff(input: AgentHandoffCreateInput, sessionId: string, pageId: string): Promise<Result<AgentHandoffCreateOutput>>;
+  createHandoff(
+    input: AgentHandoffCreateInput,
+    sessionId: string,
+    pageId: string,
+  ): Promise<Result<AgentHandoffCreateOutput>>;
   getHandoff(handoffId: string): Promise<Result<AgentHandoffGetOutput>>;
   listHandoffs(): Promise<Result<AgentHandoffListItem[]>>;
   updateHandoffStatus(handoffId: string, status: AgentHandoffStatus): Promise<Result<AgentHandoff>>;
@@ -70,14 +80,27 @@ export class HandoffServiceImpl implements HandoffService {
     if (issue.targetSummary.resolutionStatus === 'ambiguous') {
       warnings.push('The selected target is ambiguous. The agent brief will include this warning.');
     }
-    if (issue.targetSummary.resolutionStatus === 'stale' || issue.targetSummary.resolutionStatus === 'missing') {
-      return err(this.heError('ISSUE_STALE', 'The page context is missing. Create a fresh capture before sending this issue.'));
+    if (
+      issue.targetSummary.resolutionStatus === 'stale' ||
+      issue.targetSummary.resolutionStatus === 'missing'
+    ) {
+      return err(
+        this.heError(
+          'ISSUE_STALE',
+          'The page context is missing. Create a fresh capture before sending this issue.',
+        ),
+      );
     }
 
     const now = new Date().toISOString();
     const handoffId = `handoff_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 
-    const brief = generateAgentBrief(issue, input.userInstruction, input.sourceHints, input.sourceHintStatus);
+    const brief = generateAgentBrief(
+      issue,
+      input.userInstruction,
+      input.sourceHints,
+      input.sourceHintStatus,
+    );
     const constraints = getDefaultConstraints();
 
     const handoff: AgentHandoff = {
@@ -188,7 +211,10 @@ export class HandoffServiceImpl implements HandoffService {
     return ok(items);
   }
 
-  async updateHandoffStatus(handoffId: string, status: AgentHandoffStatus): Promise<Result<AgentHandoff>> {
+  async updateHandoffStatus(
+    handoffId: string,
+    status: AgentHandoffStatus,
+  ): Promise<Result<AgentHandoff>> {
     if (!handoffId || typeof handoffId !== 'string') {
       return err(this.heError('INVALID_HANDOFF_ID', 'Invalid handoff ID'));
     }
@@ -199,7 +225,12 @@ export class HandoffServiceImpl implements HandoffService {
     const handoff = result.value;
 
     if (!isValidHandoffTransition(handoff.status, status)) {
-      return err(this.heError('INVALID_HANDOFF_TRANSITION', `Cannot transition from ${handoff.status} to ${status}`));
+      return err(
+        this.heError(
+          'INVALID_HANDOFF_TRANSITION',
+          `Cannot transition from ${handoff.status} to ${status}`,
+        ),
+      );
     }
 
     const now = new Date().toISOString();
@@ -209,10 +240,7 @@ export class HandoffServiceImpl implements HandoffService {
       updatedAt: now,
       completedAt: status === 'completed' ? now : handoff.completedAt,
       cancelledAt: status === 'cancelled' ? now : handoff.cancelledAt,
-      lifecycle: [
-        ...handoff.lifecycle,
-        makeHandoffStatusChangeEvent(handoff.status, status),
-      ],
+      lifecycle: [...handoff.lifecycle, makeHandoffStatusChangeEvent(handoff.status, status)],
     };
 
     if (status === 'completed') {

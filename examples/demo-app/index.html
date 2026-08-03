@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Viskod Demo — Task Manager</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" role="navigation" aria-label="Main navigation">
+      <div class="sidebar-brand">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/>
+        </svg>
+        <span>Taskflow</span>
+      </div>
+      <nav>
+        <a href="#" class="nav-item active" aria-current="page">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          Dashboard
+        </a>
+        <a href="#" class="nav-item">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          Projects
+        </a>
+        <a href="#" class="nav-item">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+          Team
+        </a>
+        <a href="#" class="nav-item">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          Settings
+        </a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="main-header">
+        <div>
+          <h1>Dashboard</h1>
+          <p class="subtitle">Welcome back, Alex</p>
+        </div>
+        <button class="btn-primary" id="new-task-btn">New Task</button>
+      </header>
+
+      <section class="stats-grid" aria-label="Statistics">
+        <div class="stat-card">
+          <span class="stat-label">Total Tasks</span>
+          <span class="stat-value">24</span>
+          <span class="stat-change positive">+3 this week</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">In Progress</span>
+          <span class="stat-value">8</span>
+          <span class="stat-change neutral">steady</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Completed</span>
+          <span class="stat-value">12</span>
+          <span class="stat-change positive">+5 this week</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Overdue</span>
+          <span class="stat-value">4</span>
+          <span class="stat-change negative">+2 this week</span>
+        </div>
+      </section>
+
+      <div class="content-grid">
+        <section class="card" aria-label="Recent tasks">
+          <div class="card-header">
+            <h2>Recent Tasks</h2>
+            <a href="#" class="link-subtle">View all</a>
+          </div>
+          <ul class="task-list" id="task-list">
+            <li class="task-item">
+              <span class="task-status done" aria-label="Completed"></span>
+              <div class="task-info">
+                <span class="task-name">Update landing page copy</span>
+                <span class="task-meta">Design · Completed 2h ago</span>
+              </div>
+            </li>
+            <li class="task-item">
+              <span class="task-status active" aria-label="In progress"></span>
+              <div class="task-info">
+                <span class="task-name">Fix navigation hover state</span>
+                <span class="task-meta">Frontend · In progress</span>
+              </div>
+            </li>
+            <li class="task-item">
+              <span class="task-status active" aria-label="In progress"></span>
+              <div class="task-info">
+                <span class="task-name">API rate limiting middleware</span>
+                <span class="task-meta">Backend · In progress</span>
+              </div>
+            </li>
+            <li class="task-item">
+              <span class="task-status pending" aria-label="Pending"></span>
+              <div class="task-info">
+                <span class="task-name">Database migration script</span>
+                <span class="task-meta">Backend · Due tomorrow</span>
+              </div>
+            </li>
+            <li class="task-item">
+              <span class="task-status overdue" aria-label="Overdue"></span>
+              <div class="task-info">
+                <span class="task-name">User auth flow redesign</span>
+                <span class="task-meta">UX · Overdue by 3 days</span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section class="card" aria-label="Quick add task">
+          <div class="card-header">
+            <h2>Quick Add</h2>
+          </div>
+          <form id="task-form" class="task-form">
+            <div class="form-group">
+              <label for="task-name" class="form-label">Task name</label>
+              <input type="text" id="task-name" class="form-input" placeholder="What needs to be done?" required>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="task-project" class="form-label">Project</label>
+                <select id="task-project" class="form-select">
+                  <option>Design</option>
+                  <option>Frontend</option>
+                  <option>Backend</option>
+                  <option>DevOps</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="task-priority" class="form-label">Priority</label>
+                <select id="task-priority" class="form-select">
+                  <option>Low</option>
+                  <option selected>Medium</option>
+                  <option>High</option>
+                  <option>Urgent</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="task-due" class="form-label">Due date</label>
+              <input type="date" id="task-due" class="form-input">
+            </div>
+            <button type="submit" class="btn-primary btn-full">Add Task</button>
+          </form>
+        </section>
+      </div>
+
+      <!-- Deliberate design issues for Viskod to detect -->
+      <section class="card" aria-label="Activity feed">
+        <div class="card-header">
+          <h2>Activity Feed</h2>
+        </div>
+        <div class="activity-feed" id="activity-feed">
+          <div class="activity-item">
+            <div class="activity-avatar" style="background: #ff6b6b;">A</div>
+            <div class="activity-content">
+              <p><strong>Alex</strong> completed "Update landing page copy"</p>
+              <time>2 hours ago</time>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-avatar" style="background: #4ecdc4;">S</div>
+            <div class="activity-content">
+              <p><strong>Sarah</strong> commented on "Fix navigation hover state"</p>
+              <time>4 hours ago</time>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="activity-avatar" style="background: #45b7d1;">M</div>
+            <div class="activity-content">
+              <p><strong>Mike</strong> started "API rate limiting middleware"</p>
+              <time>Yesterday</time>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

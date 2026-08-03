@@ -36,6 +36,15 @@ export type UILibrary =
   | 'radix-ui'
   | 'unknown';
 
+export type AnimationLibrary =
+  | 'framer-motion'
+  | 'gsap'
+  | 'three.js'
+  | 'react-three-fiber'
+  | 'lottie'
+  | 'css-animation'
+  | 'unknown';
+
 export interface ProjectMetadata {
   projectId: string;
   name: string;
@@ -87,6 +96,7 @@ export interface ComponentIndex {
 export interface DesignSystemDetection {
   cssFramework: CssFramework | null;
   uiLibrary: UILibrary | null;
+  animationLibrary: AnimationLibrary | null;
   evidence: string[];
 }
 

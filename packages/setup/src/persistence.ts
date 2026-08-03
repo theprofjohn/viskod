@@ -1,8 +1,8 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
 import type { Result } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR } from '@viskod/shared';
+import { ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR, err, ok } from '@viskod/shared';
 import type { FirstRunSetupState } from './types';
 
 const SETUP_DIR = 'setup';
@@ -54,10 +54,12 @@ export function loadSetupState(projectRoot: string): Result<FirstRunSetupState |
 
     return ok(parsed as FirstRunSetupState);
   } catch (e) {
-    return err(setupError(
-      'SETUP_STATE_CORRUPT',
-      `Failed to read setup state: ${e instanceof Error ? e.message : String(e)}`,
-    ));
+    return err(
+      setupError(
+        'SETUP_STATE_CORRUPT',
+        `Failed to read setup state: ${e instanceof Error ? e.message : String(e)}`,
+      ),
+    );
   }
 }
 
@@ -72,14 +74,19 @@ export function saveSetupState(projectRoot: string, state: FirstRunSetupState): 
     fs.renameSync(tmpPath, filePath);
     return ok(undefined);
   } catch (e) {
-    return err(setupError(
-      'SETUP_STATE_WRITE_FAILED',
-      `Failed to save setup state: ${e instanceof Error ? e.message : String(e)}`,
-    ));
+    return err(
+      setupError(
+        'SETUP_STATE_WRITE_FAILED',
+        `Failed to save setup state: ${e instanceof Error ? e.message : String(e)}`,
+      ),
+    );
   }
 }
 
-export function createInitialSetupState(projectRoot: string, fingerprint: string): FirstRunSetupState {
+export function createInitialSetupState(
+  projectRoot: string,
+  fingerprint: string,
+): FirstRunSetupState {
   return {
     schemaVersion: SCHEMA_VERSION,
     setupId: crypto.randomUUID(),
@@ -103,6 +110,8 @@ export function createInitialSetupState(projectRoot: string, fingerprint: string
       usageSiteSourceHints: false,
       mcpServer: false,
       browserRuntime: false,
+      appReachable: false,
+      agentConfigReady: false,
     },
     completed: false,
     updatedAt: new Date().toISOString(),

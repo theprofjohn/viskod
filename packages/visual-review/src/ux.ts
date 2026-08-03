@@ -1,10 +1,5 @@
 import type { ReviewService } from './service';
-import type {
-  VisualReviewStatus,
-  VisualReviewListItem,
-  VisualReviewGetOutput,
-  VisualReview,
-} from './types';
+import type { VisualReviewListItem, VisualReviewStatus } from './types';
 
 export interface ReviewPreview {
   reviewId: string;
@@ -69,12 +64,14 @@ export class UserFacingReview {
     sessionId: string,
     pageId: string,
     handoffId?: string,
-  ): Promise<{ ok: boolean; reviewId?: string; status?: string; warningCount?: number; error?: string }> {
-    const result = await this.reviewService.createReview(
-      { issueId, handoffId },
-      sessionId,
-      pageId,
-    );
+  ): Promise<{
+    ok: boolean;
+    reviewId?: string;
+    status?: string;
+    warningCount?: number;
+    error?: string;
+  }> {
+    const result = await this.reviewService.createReview({ issueId, handoffId }, sessionId, pageId);
 
     if (!result.ok) {
       return {
@@ -118,22 +115,28 @@ export class UserFacingReview {
         page: review.before.page,
         capturedAt: review.before.capturedAt,
       },
-      after: review.after ? {
-        targetSummary: review.after.targetSummary,
-        page: review.after.page,
-        capturedAt: review.after.capturedAt,
-      } : undefined,
-      comparison: review.comparison ? {
-        status: review.comparison.status,
-        confidence: review.comparison.confidence,
-        summary: review.comparison.summary,
-        warnings: review.comparison.warnings,
-      } : undefined,
-      decision: review.decision ? {
-        decision: review.decision.decision,
-        decidedAt: review.decision.decidedAt,
-        note: review.decision.note,
-      } : undefined,
+      after: review.after
+        ? {
+            targetSummary: review.after.targetSummary,
+            page: review.after.page,
+            capturedAt: review.after.capturedAt,
+          }
+        : undefined,
+      comparison: review.comparison
+        ? {
+            status: review.comparison.status,
+            confidence: review.comparison.confidence,
+            summary: review.comparison.summary,
+            warnings: review.comparison.warnings,
+          }
+        : undefined,
+      decision: review.decision
+        ? {
+            decision: review.decision.decision,
+            decidedAt: review.decision.decidedAt,
+            note: review.decision.note,
+          }
+        : undefined,
       warnings,
     };
   }
@@ -189,10 +192,7 @@ export class UserFacingReview {
   private getNextStepsForDecision(decision: string): string[] {
     switch (decision) {
       case 'accepted':
-        return [
-          'The issue can be closed.',
-          'Consider archiving the linked VisualIssue.',
-        ];
+        return ['The issue can be closed.', 'Consider archiving the linked VisualIssue.'];
       case 'rejected':
         return [
           'The issue persists. Consider sending to an agent again.',
@@ -210,13 +210,13 @@ export class UserFacingReview {
 
   private userFacingError(code: string): string {
     const errors: Record<string, string> = {
-      'ISSUE_NOT_FOUND': 'This issue was not found.',
-      'ISSUE_DELETED': 'This issue has been deleted.',
-      'ISSUE_STALE': 'The issue context is stale. Create a fresh capture first.',
-      'REVIEW_NOT_FOUND': 'Review not found.',
-      'INVALID_REVIEW_TRANSITION': 'Cannot perform that action on this review.',
-      'ALREADY_DECIDED': 'This review has already been decided.',
-      'BEFORE_SNAPSHOT_UNAVAILABLE': 'The before snapshot is not available.',
+      ISSUE_NOT_FOUND: 'This issue was not found.',
+      ISSUE_DELETED: 'This issue has been deleted.',
+      ISSUE_STALE: 'The issue context is stale. Create a fresh capture first.',
+      REVIEW_NOT_FOUND: 'Review not found.',
+      INVALID_REVIEW_TRANSITION: 'Cannot perform that action on this review.',
+      ALREADY_DECIDED: 'This review has already been decided.',
+      BEFORE_SNAPSHOT_UNAVAILABLE: 'The before snapshot is not available.',
     };
     return errors[code] ?? 'An unexpected error occurred.';
   }

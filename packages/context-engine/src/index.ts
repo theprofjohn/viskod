@@ -109,7 +109,13 @@ interface SourceHintEntry {
   location?: { line?: number; column?: number };
   symbol?: { componentName?: string; jsxTag?: string };
   route?: { routePath?: string; routeFile?: string; isCurrentRoute?: boolean };
-  ranking?: { score: number; confidence: number; rank: number; reasons: string[]; penalties: string[] };
+  ranking?: {
+    score: number;
+    confidence: number;
+    rank: number;
+    reasons: string[];
+    penalties: string[];
+  };
   safety?: { redactionApplied: boolean; userVisible: boolean; containsAbsolutePath: boolean };
 }
 
@@ -135,6 +141,7 @@ export class VisualContextEngine {
   private capturePipeline?: CapturePipeline;
   private selectionEngine?: SelectionEngine;
   private sourceHintEngine?: SourceHintEngine;
+  private captureProfile: ProfileConfig = resolveProfile('default');
   private currentHandle: BrowserHandle | null = null;
   private currentUrl = '';
   private packetsGenerated = 0;
@@ -142,6 +149,8 @@ export class VisualContextEngine {
   private processingTimes: number[] = [];
   private isProcessingFromEvent = false;
   private isGeneratingPacket = false;
+  private lastPacket: ContextPacket | null = null;
+  private overlayPollInterval: ReturnType<typeof setInterval> | null = null;
   private projectScan: {
     projectId: string;
     name: string;
@@ -158,10 +167,6 @@ export class VisualContextEngine {
     this.capturePipeline = options.capturePipeline;
     this.selectionEngine = options.selectionEngine;
     this.sourceHintEngine = options.sourceHintEngine;
-
-    this.eventBus.subscribe('BR_EVENT:CAPTURE_COMPLETED', async (_event: BaseEvent) => {
-      // Process capture when BR completes
-    });
 
     this.eventBus.subscribe('SE_EVENT:SELECTION_CHANGED', async (event: BaseEvent) => {
       if (this.isProcessingFromEvent || this.isGeneratingPacket) return;
@@ -189,6 +194,7 @@ export class VisualContextEngine {
     const result = await this.browserRuntime.launch();
     if (result.ok) {
       this.currentHandle = result.value;
+      this.startOverlayPolling();
     }
     return result;
   }
@@ -213,6 +219,7 @@ export class VisualContextEngine {
   }
 
   async stopBrowser(): Promise<Result<void>> {
+    this.stopOverlayPolling();
     if (!this.currentHandle) return ok(undefined);
     const result = await this.browserRuntime.shutdown(this.currentHandle);
     if (result.ok) this.currentHandle = null;
@@ -253,13 +260,14 @@ export class VisualContextEngine {
         | undefined;
       let browserHierarchy: ElementHierarchy | undefined;
 
+      const p = profile ?? this.captureProfile;
       if (selection) {
-        // Resolve profile before collecting data
-        const p = profile ?? resolveProfile('default');
-
         // Use Selection Engine for hierarchy when available
         if (this.selectionEngine) {
-          const selResult = await this.selectionEngine.validateSelection(selection);
+          const selResult = await this.selectionEngine.validateSelection(
+            selection,
+            this.currentHandle ?? undefined,
+          );
           if (selResult.ok) {
             const snapshot = selResult.value;
             hierarchyFromSelection = {
@@ -385,7 +393,7 @@ export class VisualContextEngine {
       const sourceHints: SourceHintEntry[] = [];
 
       // Populate source hints via SourceHintEngine when available
-      if (this.sourceHintEngine && selection && domSnapshot) {
+      if (this.sourceHintEngine && selection && domSnapshot && p.collectSourceHints) {
         try {
           const hintInput = {
             domContext: {
@@ -580,6 +588,7 @@ export class VisualContextEngine {
         payload: { packetId, processingTimeMs: procTime },
       });
 
+      this.lastPacket = packet;
       return ok(packet);
     } catch (error) {
       this.failedCount++;
@@ -609,8 +618,12 @@ export class VisualContextEngine {
     return this.generatePacket(selection);
   }
 
+  setCaptureProfile(profile: Partial<ProfileConfig>): void {
+    this.captureProfile = { ...this.captureProfile, ...profile };
+  }
+
   getLastPacket(): ContextPacket | null {
-    return null;
+    return this.lastPacket;
   }
 
   setProjectContext(context: {
@@ -623,6 +636,58 @@ export class VisualContextEngine {
     frameworkConfidence: number;
   }): void {
     this.projectScan = context;
+  }
+
+  getBrowserHandle(): BrowserHandle | null {
+    return this.currentHandle;
+  }
+
+  getBrowserRuntime(): BrowserRuntime {
+    return this.browserRuntime;
+  }
+
+  // ponytail: overlay event poller — connects overlay clicks to capture pipeline
+  startOverlayPolling(): void {
+    if (this.overlayPollInterval) return;
+    this.overlayPollInterval = setInterval(async () => {
+      if (!this.currentHandle || this.isGeneratingPacket) return;
+      try {
+        const event = await this.browserRuntime.pollOverlayEvent(this.currentHandle);
+        if (!event.ok || !event.value) return;
+        const data = event.value as Record<string, unknown>;
+        if (data.type === 'overlay:element-clicked' && data.data) {
+          const info = data.data as Record<string, unknown>;
+          const selector = info.tagName
+            ? `${info.tagName}${
+                info.stableAttributes
+                  ? `[${Object.entries(info.stableAttributes as Record<string, string>)
+                      .map(([k, v]) => `${k}="${v}"`)
+                      .join(' & ')}]`
+                  : ''
+              }`
+            : 'body';
+          const boundingBox = info.boundingBox as
+            | { x: number; y: number; width: number; height: number }
+            | undefined;
+          if (boundingBox) {
+            await this.processSelection({
+              selector,
+              boundingBox,
+              source: 'overlay',
+            });
+          }
+        }
+      } catch {
+        // ignore poll errors
+      }
+    }, 200);
+  }
+
+  stopOverlayPolling(): void {
+    if (this.overlayPollInterval) {
+      clearInterval(this.overlayPollInterval);
+      this.overlayPollInterval = null;
+    }
   }
 
   health(): VCEHealth {

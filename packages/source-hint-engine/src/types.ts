@@ -51,11 +51,7 @@ export type SourceHintKind =
   | 'test-owner'
   | 'unknown';
 
-export type SourceHintStatus =
-  | 'ranked'
-  | 'ambiguous'
-  | 'low_confidence'
-  | 'missing';
+export type SourceHintStatus = 'ranked' | 'ambiguous' | 'low_confidence' | 'missing';
 
 export interface HintLocation {
   line?: number;

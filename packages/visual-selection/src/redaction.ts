@@ -8,11 +8,20 @@ export interface SelectionRedactionResult {
 const PASSWORD_PATTERN = /^password$/i;
 const SENSITIVE_INPUT_TYPES = ['password', 'hidden'];
 
-const REDACTION_RULES: Array<{ pattern: RegExp; replacement: string; label: string }> = [
-  { pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, replacement: '[EMAIL_REDACTED]', label: 'email' },
+const REDACTION_RULES: Array<{
+  pattern: RegExp;
+  replacement: string | ((match: string) => string);
+  label: string;
+}> = [
+  {
+    pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+    replacement: '[EMAIL_REDACTED]',
+    label: 'email',
+  },
   { pattern: /\b(?:\d{4}[- ]?){3}\d{4}\b/g, replacement: '[CARD_REDACTED]', label: 'card-number' },
   {
-    pattern: /(?:[?&])(token|access_token|refresh_token|id_token|api_key|apikey|key|secret|password|session|csrf|auth|authorization)=[^&\s]{4,}/gi,
+    pattern:
+      /(?:[?&])(token|access_token|refresh_token|id_token|api_key|apikey|key|secret|password|session|csrf|auth|authorization)=[^&\s]{4,}/gi,
     replacement: (match: string) => {
       const eqIdx = match.indexOf('=');
       return `${match.slice(0, eqIdx + 1)}[REDACTED]`;
@@ -20,12 +29,14 @@ const REDACTION_RULES: Array<{ pattern: RegExp; replacement: string; label: stri
     label: 'query-param-sensitive',
   },
   {
-    pattern: /\b(?:sk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|pk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|sk-[A-Za-z0-9]{6,}|pk-[A-Za-z0-9]{6,})/gi,
+    pattern:
+      /\b(?:sk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|pk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|sk-[A-Za-z0-9]{6,}|pk-[A-Za-z0-9]{6,})/gi,
     replacement: '[API_KEY_REDACTED]',
     label: 'api-key',
   },
   {
-    pattern: /(?<![?&_\w])\b(?:secret|password|passwd|pwd|token|access_token|refresh_token|id_token|api_key|apikey)\s*[:=]\s*['"]?(?:[A-Za-z0-9_\-./]{4,})/gi,
+    pattern:
+      /(?<![?&_\w])\b(?:secret|password|passwd|pwd|token|access_token|refresh_token|id_token|api_key|apikey)\s*[:=]\s*['"]?(?:[A-Za-z0-9_\-./]{4,})/gi,
     replacement: '[SECRET_REDACTED]',
     label: 'assign-secret',
   },
@@ -40,9 +51,10 @@ function applyTextRedaction(text: string): { text: string; redactions: string[] 
   const applied: string[] = [];
   let result = text;
   for (const rule of REDACTION_RULES) {
-    const replacement = typeof rule.replacement === 'function'
-      ? result.replace(rule.pattern, rule.replacement as (match: string) => string)
-      : result.replace(rule.pattern, rule.replacement);
+    const replacement =
+      typeof rule.replacement === 'function'
+        ? result.replace(rule.pattern, rule.replacement as (match: string) => string)
+        : result.replace(rule.pattern, rule.replacement);
     if (replacement !== result) {
       if (!applied.includes(rule.label)) applied.push(rule.label);
       result = replacement;
@@ -51,9 +63,7 @@ function applyTextRedaction(text: string): { text: string; redactions: string[] 
   return { text: result, redactions: applied };
 }
 
-export function redactSelectionData(
-  selection: VisualSelection,
-): SelectionRedactionResult {
+export function redactSelectionData(selection: VisualSelection): SelectionRedactionResult {
   const allRedactions = new Set<string>();
 
   const redactedTargets: VisualSelectionTarget[] = selection.targets.map((target) => {

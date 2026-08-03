@@ -14,8 +14,13 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@viskod/shared": "workspace:*",
+    "@viskod/browser-runtime": "workspace:*",
+    "@viskod/capture-pipeline": "workspace:*",
+    "@viskod/context-engine": "workspace:*",
     "@viskod/event-bus": "workspace:*",
-    "@viskod/project-scanner": "workspace:*"
+    "@viskod/project-scanner": "workspace:*",
+    "@viskod/selection-engine": "workspace:*",
+    "@viskod/shared": "workspace:*",
+    "@viskod/source-hint-engine": "workspace:*"
   }
 }

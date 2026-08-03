@@ -1,24 +1,38 @@
-import { describe, expect, it } from 'vitest';
 import { EventBus } from '@viskod/event-bus';
-import { VisualSelectionServiceImpl } from './service';
+import { describe, expect, it } from 'vitest';
 import {
-  normalizeRect, rectsIntersect, intersectionRect, rectArea,
-  intersectionRatio, visibleRatio, rectContains, centerOfRect, isZeroArea,
-} from './geometry';
-import {
-  scoreCandidate, filterCandidates, scoreAndRank, isAmbiguous, selectBestCandidate,
-} from './scoring';
-import type { CandidateElement, CandidateScore } from './scoring';
-import {
-  collectBoxCandidates, reduceBoxSelection, boxCandidateToTarget, deduplicateTargets,
+  boxCandidateToTarget,
+  collectBoxCandidates,
+  deduplicateTargets,
+  reduceBoxSelection,
 } from './box-selection';
 import type { BoxCandidate } from './box-selection';
+import {
+  centerOfRect,
+  intersectionRatio,
+  intersectionRect,
+  isZeroArea,
+  normalizeRect,
+  rectArea,
+  rectContains,
+  rectsIntersect,
+  visibleRatio,
+} from './geometry';
+import { normalizeText, redactSelectionData, truncateText } from './redaction';
 import { resolveTarget } from './resolver';
 import type { ResolvedElement } from './resolver';
-import { redactSelectionData, normalizeText, truncateText } from './redaction';
-import type { VisualSelection, VisualSelectionTarget, PageInfo, Rect } from './types';
+import { RectSchema, VisualSelectionSchema } from './schemas';
+import {
+  filterCandidates,
+  isAmbiguous,
+  scoreAndRank,
+  scoreCandidate,
+  selectBestCandidate,
+} from './scoring';
+import type { CandidateElement, CandidateScore } from './scoring';
+import { VisualSelectionServiceImpl } from './service';
+import type { PageInfo, Rect, VisualSelection, VisualSelectionTarget } from './types';
 import { DEFAULT_VISUAL_SELECTION_CONFIG } from './types';
-import { VisualSelectionSchema, RectSchema } from './schemas';
 
 // =============================================================================
 // Geometry Tests
@@ -50,10 +64,10 @@ describe('Geometry', () => {
     const b = { x: 50, y: 50, width: 100, height: 100 };
     const inter = intersectionRect(a, b);
     expect(inter).not.toBeNull();
-    expect(inter!.x).toBe(50);
-    expect(inter!.y).toBe(50);
-    expect(inter!.width).toBe(50);
-    expect(inter!.height).toBe(50);
+    expect(inter?.x).toBe(50);
+    expect(inter?.y).toBe(50);
+    expect(inter?.width).toBe(50);
+    expect(inter?.height).toBe(50);
   });
 
   it('returns null for non-overlapping rects', () => {
@@ -164,15 +178,23 @@ describe('Target Scoring', () => {
   });
 
   it('scores element inside pointer bounds higher', () => {
-    const inside = scoreCandidate(makeCandidate({ viewportRect: { x: 0, y: 0, width: 100, height: 40 } }), 50, 20);
-    const outside = scoreCandidate(makeCandidate({ viewportRect: { x: 200, y: 200, width: 100, height: 40 } }), 50, 20);
+    const inside = scoreCandidate(
+      makeCandidate({ viewportRect: { x: 0, y: 0, width: 100, height: 40 } }),
+      50,
+      20,
+    );
+    const outside = scoreCandidate(
+      makeCandidate({ viewportRect: { x: 200, y: 200, width: 100, height: 40 } }),
+      50,
+      20,
+    );
     expect(inside.score).toBeGreaterThan(outside.score);
   });
 
   it('scores appropriate depth higher than extreme depth', () => {
     const shallow = scoreCandidate(makeCandidate({ ancestorDepth: 2 }), 50, 20);
     const deep = scoreCandidate(makeCandidate({ ancestorDepth: 10 }), 50, 20);
-    expect(shallow.signals['appropriateDepth']!).toBeGreaterThan(deep.signals['appropriateDepth']!);
+    expect(shallow.signals.appropriateDepth!).toBeGreaterThan(deep.signals.appropriateDepth!);
   });
 
   it('filters technical elements', () => {
@@ -195,10 +217,7 @@ describe('Target Scoring', () => {
   });
 
   it('filters hidden elements', () => {
-    const elements = [
-      makeCandidate({ isHidden: false }),
-      makeCandidate({ isHidden: true }),
-    ];
+    const elements = [makeCandidate({ isHidden: false }), makeCandidate({ isHidden: true })];
     const filtered = filterCandidates(elements);
     expect(filtered.length).toBe(1);
   });
@@ -214,12 +233,22 @@ describe('Target Scoring', () => {
 
   it('scores and ranks candidates', () => {
     const elements = [
-      makeCandidate({ tagName: 'button', isInteractive: true, ancestorDepth: 1, viewportRect: { x: 0, y: 0, width: 100, height: 40 } }),
-      makeCandidate({ tagName: 'div', isInteractive: false, ancestorDepth: 3, viewportRect: { x: 0, y: 0, width: 100, height: 40 } }),
+      makeCandidate({
+        tagName: 'button',
+        isInteractive: true,
+        ancestorDepth: 1,
+        viewportRect: { x: 0, y: 0, width: 100, height: 40 },
+      }),
+      makeCandidate({
+        tagName: 'div',
+        isInteractive: false,
+        ancestorDepth: 3,
+        viewportRect: { x: 0, y: 0, width: 100, height: 40 },
+      }),
     ];
     const ranked = scoreAndRank(elements, 50, 20);
     expect(ranked.length).toBe(2);
-    expect(ranked[0]!.element.isInteractive).toBe(true);
+    expect(ranked[0]?.element.isInteractive).toBe(true);
   });
 
   it('detects ambiguity when scores are close', () => {
@@ -235,14 +264,12 @@ describe('Target Scoring', () => {
     ];
     const { best, ambiguous } = selectBestCandidate(scored, 0.6, 0.15);
     expect(best).not.toBeNull();
-    expect(best!.score).toBe(0.85);
+    expect(best?.score).toBe(0.85);
     expect(ambiguous).toBe(false);
   });
 
   it('returns null when no candidate meets threshold', () => {
-    const scored: CandidateScore[] = [
-      { element: makeCandidate(), score: 0.4, signals: {} },
-    ];
+    const scored: CandidateScore[] = [{ element: makeCandidate(), score: 0.4, signals: {} }];
     const { best } = selectBestCandidate(scored, 0.6, 0.15);
     expect(best).toBeNull();
   });
@@ -286,7 +313,7 @@ describe('Box Selection', () => {
     const dragRect: Rect = { x: 0, y: 0, width: 150, height: 100 };
     const result = collectBoxCandidates(candidates, dragRect);
     expect(result.length).toBe(1);
-    expect(result[0]!.targetId).toBe('a');
+    expect(result[0]?.targetId).toBe('a');
   });
 
   it('excludes overlay and technical nodes', () => {
@@ -298,7 +325,7 @@ describe('Box Selection', () => {
     const dragRect: Rect = { x: 0, y: 0, width: 500, height: 500 };
     const result = collectBoxCandidates(candidates, dragRect);
     expect(result.length).toBe(1);
-    expect(result[0]!.targetId).toBe('c');
+    expect(result[0]?.targetId).toBe('c');
   });
 
   it('reduces descendants when ancestor represents region', () => {
@@ -349,8 +376,8 @@ describe('Box Selection', () => {
       makeBoxCandidate({ targetId: 'a', documentOrder: 1 }),
     ];
     const { selected } = reduceBoxSelection(candidates);
-    expect(selected[0]!.targetId).toBe('a');
-    expect(selected[1]!.targetId).toBe('b');
+    expect(selected[0]?.targetId).toBe('a');
+    expect(selected[1]?.targetId).toBe('b');
   });
 
   it('truncates when exceeding max target count', () => {
@@ -460,8 +487,17 @@ describe('Re-resolution and Wrong-Node Prevention', () => {
 
   it('detects staleness when confidence is low', () => {
     const target = makeTarget({
-      semantics: { tagName: 'button', role: 'button', accessibleName: 'Save changes', textPreview: 'Save changes', isInteractive: true },
-      fingerprints: { stableAttributes: { 'data-testid': 'original-id' }, ancestorFingerprint: ['div', 'section'] },
+      semantics: {
+        tagName: 'button',
+        role: 'button',
+        accessibleName: 'Save changes',
+        textPreview: 'Save changes',
+        isInteractive: true,
+      },
+      fingerprints: {
+        stableAttributes: { 'data-testid': 'original-id' },
+        ancestorFingerprint: ['div', 'section'],
+      },
       geometry: { viewportRect: { x: 10, y: 20, width: 100, height: 40 } },
     });
     const candidate = makeResolved({
@@ -473,13 +509,26 @@ describe('Re-resolution and Wrong-Node Prevention', () => {
       boundingRect: { x: 500, y: 600, width: 50, height: 20 },
     });
     const result = resolveTarget(target, [candidate]);
-    expect(result.resolution.status === 'stale' || result.resolution.status === 'missing').toBe(true);
+    expect(result.resolution.status === 'stale' || result.resolution.status === 'missing').toBe(
+      true,
+    );
   });
 
   it('reports ambiguous when duplicate similar candidates exist', () => {
-    const target = makeTarget({ semantics: { tagName: 'button', role: 'button', accessibleName: 'Save', textPreview: 'Save', isInteractive: true } });
+    const target = makeTarget({
+      semantics: {
+        tagName: 'button',
+        role: 'button',
+        accessibleName: 'Save',
+        textPreview: 'Save',
+        isInteractive: true,
+      },
+    });
     const candidate = makeResolved({ textContent: 'Save' });
-    const duplicate = makeResolved({ textContent: 'Save', boundingRect: { x: 200, y: 200, width: 100, height: 40 } });
+    const duplicate = makeResolved({
+      textContent: 'Save',
+      boundingRect: { x: 200, y: 200, width: 100, height: 40 },
+    });
     const result = resolveTarget(target, [candidate, duplicate]);
     expect(result.resolution.status).toBe('ambiguous');
   });
@@ -529,14 +578,16 @@ describe('Redaction', () => {
       viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
     },
     region: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-    targets: [{
-      targetId: 't1',
-      documentOrder: 0,
-      geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-      semantics: { tagName: 'button', isInteractive: true },
-      fingerprints: {},
-      resolutionCandidates: [],
-    }],
+    targets: [
+      {
+        targetId: 't1',
+        documentOrder: 0,
+        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+        semantics: { tagName: 'button', isInteractive: true },
+        fingerprints: {},
+        resolutionCandidates: [],
+      },
+    ],
     summary: { targetCount: 1 },
     resolution: { status: 'resolved', confidence: 0.9, resolvedAt: new Date().toISOString() },
     ...overrides,
@@ -544,66 +595,88 @@ describe('Redaction', () => {
 
   it('redacts email addresses from text preview', () => {
     const sel = makeSelection({
-      targets: [{
-        targetId: 't1',
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'div', textPreview: 'Contact user@example.com for info', isInteractive: false },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: 't1',
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: {
+            tagName: 'div',
+            textPreview: 'Contact user@example.com for info',
+            isInteractive: false,
+          },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const { selection, redactions } = redactSelectionData(sel);
-    expect(selection.targets[0]!.semantics.textPreview).toContain('[EMAIL_REDACTED]');
+    expect(selection.targets[0]?.semantics.textPreview).toContain('[EMAIL_REDACTED]');
     expect(redactions).toContain('email');
   });
 
   it('redacts credit card numbers', () => {
     const sel = makeSelection({
-      targets: [{
-        targetId: 't1',
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'div', textPreview: 'Card: 4111 1111 1111 1111', isInteractive: false },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: 't1',
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: {
+            tagName: 'div',
+            textPreview: 'Card: 4111 1111 1111 1111',
+            isInteractive: false,
+          },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const { selection, redactions } = redactSelectionData(sel);
-    expect(selection.targets[0]!.semantics.textPreview).toContain('[CARD_REDACTED]');
+    expect(selection.targets[0]?.semantics.textPreview).toContain('[CARD_REDACTED]');
     expect(redactions).toContain('card-number');
   });
 
   it('redacts API keys', () => {
     const sel = makeSelection({
-      targets: [{
-        targetId: 't1',
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'div', textPreview: 'sk_test_abc123def456', isInteractive: false },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: 't1',
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'div', textPreview: 'sk_test_abc123def456', isInteractive: false },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const { selection, redactions } = redactSelectionData(sel);
-    expect(selection.targets[0]!.semantics.textPreview).toContain('[API_KEY_REDACTED]');
+    expect(selection.targets[0]?.semantics.textPreview).toContain('[API_KEY_REDACTED]');
     expect(redactions).toContain('api-key');
   });
 
   it('strips password input text', () => {
     const sel = makeSelection({
-      targets: [{
-        targetId: 't1',
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'input', inputType: 'password', textPreview: 'mysecret', accessibleName: 'Password', isInteractive: true },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: 't1',
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: {
+            tagName: 'input',
+            inputType: 'password',
+            textPreview: 'mysecret',
+            accessibleName: 'Password',
+            isInteractive: true,
+          },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
     const { selection } = redactSelectionData(sel);
-    expect(selection.targets[0]!.semantics.textPreview).toBeUndefined();
-    expect(selection.targets[0]!.semantics.accessibleName).toBeUndefined();
+    expect(selection.targets[0]?.semantics.textPreview).toBeUndefined();
+    expect(selection.targets[0]?.semantics.accessibleName).toBeUndefined();
   });
 
   it('normalizes whitespace in text', () => {
@@ -618,33 +691,39 @@ describe('Redaction', () => {
 
   it('applies redaction to stable attributes', () => {
     const sel = makeSelection({
-      targets: [{
-        targetId: 't1',
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'input', isInteractive: true },
-        fingerprints: { stableAttributes: { value: 'user@example.com' } },
-        resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: 't1',
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'input', isInteractive: true },
+          fingerprints: { stableAttributes: { value: 'user@example.com' } },
+          resolutionCandidates: [],
+        },
+      ],
     });
     const { selection, redactions } = redactSelectionData(sel);
-    expect(selection.targets[0]!.fingerprints.stableAttributes?.value).toContain('[EMAIL_REDACTED]');
+    expect(selection.targets[0]?.fingerprints.stableAttributes?.value).toContain(
+      '[EMAIL_REDACTED]',
+    );
     expect(redactions).toContain('email');
   });
 
   it('skips password-named attributes', () => {
     const sel = makeSelection({
-      targets: [{
-        targetId: 't1',
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'input', isInteractive: true },
-        fingerprints: { stableAttributes: { password: 'hunter2' } },
-        resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: 't1',
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'input', isInteractive: true },
+          fingerprints: { stableAttributes: { password: 'hunter2' } },
+          resolutionCandidates: [],
+        },
+      ],
     });
     const { selection } = redactSelectionData(sel);
-    expect(selection.targets[0]!.fingerprints.stableAttributes?.password).toBeUndefined();
+    expect(selection.targets[0]?.fingerprints.stableAttributes?.password).toBeUndefined();
   });
 });
 
@@ -667,14 +746,16 @@ describe('Schema Validation', () => {
         viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
       },
       region: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'button', role: 'button', isInteractive: true },
-        fingerprints: { stableAttributes: { 'data-testid': 'btn' } },
-        resolutionCandidates: [{ strategy: 'stable-attribute', value: 'btn', confidence: 0.9 }],
-      }],
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'button', role: 'button', isInteractive: true },
+          fingerprints: { stableAttributes: { 'data-testid': 'btn' } },
+          resolutionCandidates: [{ strategy: 'stable-attribute', value: 'btn', confidence: 0.9 }],
+        },
+      ],
       summary: { targetCount: 1 },
       resolution: { status: 'resolved', confidence: 0.9, resolvedAt: new Date().toISOString() },
     };
@@ -775,18 +856,60 @@ describe('VisualSelectionService', () => {
       targetId: crypto.randomUUID(),
       documentOrder: 0,
       geometry: { viewportRect: { x: 10, y: 20, width: 100, height: 40 } },
-      semantics: { tagName: 'button', role: 'button', accessibleName: 'Save', textPreview: 'Save', isInteractive: true },
+      semantics: {
+        tagName: 'button',
+        role: 'button',
+        accessibleName: 'Save',
+        textPreview: 'Save',
+        isInteractive: true,
+      },
       fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
       resolutionCandidates: [{ strategy: 'stable-attribute', value: 'save-btn', confidence: 0.9 }],
     };
 
-    const result = svc.createSingleSelection('page-1', target, pageInfo, { x: 10, y: 20, width: 100, height: 40 });
+    const result = svc.createSingleSelection('page-1', target, pageInfo, {
+      x: 10,
+      y: 20,
+      width: 100,
+      height: 40,
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.mode).toBe('single');
       expect(result.value.summary.targetCount).toBe(1);
       expect(result.value.selectionId).toBeTruthy();
       expect(result.value.sessionId).toBeTruthy();
+    }
+  });
+
+  it('creates multi selection with every target', async () => {
+    const svc = makeService();
+    await svc.enterSelectionMode('page-1');
+
+    const pageInfo: PageInfo = {
+      url: 'https://example.com',
+      viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
+    };
+    const first: VisualSelectionTarget = {
+      targetId: 'first',
+      documentOrder: 0,
+      geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+      semantics: { tagName: 'button', isInteractive: true },
+      fingerprints: {},
+      resolutionCandidates: [],
+    };
+    const second = { ...first, targetId: 'second', documentOrder: 1 };
+
+    const result = svc.createMultiSelection(
+      'page-1',
+      [first, second],
+      pageInfo,
+      first.geometry.viewportRect,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.targets).toHaveLength(2);
+      expect(result.value.summary.targetCount).toBe(2);
     }
   });
 
@@ -799,11 +922,40 @@ describe('VisualSelectionService', () => {
       viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
     };
     const candidates: BoxCandidate[] = [
-      { targetId: 'a', boundingRect: { x: 10, y: 10, width: 100, height: 40 }, tagName: 'button', documentOrder: 1, ancestorDepth: 2, isInteractive: true, isTechnical: false, isViskodOwned: false, isHidden: false, intersectionArea: 4000, visibleRatio: 1 },
-      { targetId: 'b', boundingRect: { x: 120, y: 10, width: 100, height: 40 }, tagName: 'button', documentOrder: 2, ancestorDepth: 2, isInteractive: true, isTechnical: false, isViskodOwned: false, isHidden: false, intersectionArea: 4000, visibleRatio: 1 },
+      {
+        targetId: 'a',
+        boundingRect: { x: 10, y: 10, width: 100, height: 40 },
+        tagName: 'button',
+        documentOrder: 1,
+        ancestorDepth: 2,
+        isInteractive: true,
+        isTechnical: false,
+        isViskodOwned: false,
+        isHidden: false,
+        intersectionArea: 4000,
+        visibleRatio: 1,
+      },
+      {
+        targetId: 'b',
+        boundingRect: { x: 120, y: 10, width: 100, height: 40 },
+        tagName: 'button',
+        documentOrder: 2,
+        ancestorDepth: 2,
+        isInteractive: true,
+        isTechnical: false,
+        isViskodOwned: false,
+        isHidden: false,
+        intersectionArea: 4000,
+        visibleRatio: 1,
+      },
     ];
 
-    const result = svc.createBoxSelection('page-1', candidates, { x: 0, y: 0, width: 300, height: 100 }, pageInfo);
+    const result = svc.createBoxSelection(
+      'page-1',
+      candidates,
+      { x: 0, y: 0, width: 300, height: 100 },
+      pageInfo,
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.mode).toBe('box');
@@ -825,7 +977,12 @@ describe('VisualSelectionService', () => {
       fingerprints: {},
       resolutionCandidates: [],
     };
-    const result = svc.createSingleSelection('page-1', target, pageInfo, { x: 0, y: 0, width: 100, height: 40 });
+    const result = svc.createSingleSelection('page-1', target, pageInfo, {
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 40,
+    });
     expect(result.ok).toBe(false);
   });
 

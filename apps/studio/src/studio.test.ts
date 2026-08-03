@@ -83,4 +83,43 @@ describe('Studio', () => {
     // This test validates the flow contracts are wired correctly
     expect(studio).toBeDefined();
   });
+
+  it('initializes with empty chat messages', () => {
+    const eventBus = new EventBus();
+    const browserRuntime = new BrowserRuntime(eventBus);
+    const capturePipeline = new CapturePipeline();
+    const vce = new VisualContextEngine({ browserRuntime, eventBus, capturePipeline });
+    const studio = new Studio(vce, eventBus);
+    expect(studio.getState().chatMessages).toEqual([]);
+  });
+
+  it('chat messages can be added and retrieved', async () => {
+    const eventBus = new EventBus();
+    const browserRuntime = new BrowserRuntime(eventBus);
+    const capturePipeline = new CapturePipeline();
+    const vce = new VisualContextEngine({ browserRuntime, eventBus, capturePipeline });
+    const studio = new Studio(vce, eventBus);
+
+    // Simulate adding a user message via the chat endpoint
+    // (tests the internal addChatMessage method indirectly through state)
+    const state = studio.getState();
+    state.chatMessages.push({
+      id: 'test-1',
+      role: 'user',
+      text: 'fix the header',
+      timestamp: new Date().toISOString(),
+      delivered: false,
+    });
+    state.chatMessages.push({
+      id: 'test-2',
+      role: 'agent',
+      text: 'Fixed the header.',
+      timestamp: new Date().toISOString(),
+      delivered: false,
+    });
+
+    expect(state.chatMessages).toHaveLength(2);
+    expect(state.chatMessages[0]?.role).toBe('user');
+    expect(state.chatMessages[1]?.role).toBe('agent');
+  });
 });

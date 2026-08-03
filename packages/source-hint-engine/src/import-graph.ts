@@ -2,19 +2,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ImportGraphEntry } from './classifier';
 
-const IMPORT_PATTERNS = [
-  // import { X } from 'path'
-  /import\s+(?:\{[^}]+\}|[\w*]+)\s+from\s+['"]([^'"]+)['"]/g,
-  // import X from 'path'
-  /import\s+[\w*]+\s+from\s+['"]([^'"]+)['"]/g,
-  // const { X } = require('path')
-  /const\s+\{[^}]+\}\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  // const X = require('path')
-  /const\s+[\w*]+\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  // import 'path' (side effect)
-  /import\s+['"]([^'"]+)['"]/g,
-];
-
 const NAMED_IMPORT_PATTERN = /\{([^}]+)\}/;
 const DEFAULT_IMPORT_PATTERN = /import\s+(\w+)\s+from/;
 const NAMESPACE_IMPORT_PATTERN = /import\s+\*\s+as\s+(\w+)\s+from/;
@@ -106,7 +93,12 @@ function parseImports(sourceFile: string, content: string): ImportGraphEntry[] {
     if (namedMatch) {
       const pathMatch = trimmed.match(/from\s+['"]([^'"]+)['"]/);
       if (pathMatch && !pathMatch[1]?.startsWith('.')) {
-        const names = namedMatch[1].split(',').map((n) => n.trim().split(/\s+as\s+/)[0]!.trim());
+        const names = (namedMatch[1] ?? '').split(',').map((n) =>
+          n
+            .trim()
+            .split(/\s+as\s+/)[0]
+            ?.trim(),
+        );
         for (const name of names) {
           if (name) {
             entries.push({
@@ -143,7 +135,12 @@ function parseImports(sourceFile: string, content: string): ImportGraphEntry[] {
     if (requireMatch && !requireMatch[1]?.startsWith('.')) {
       const destructureMatch = trimmed.match(/const\s+\{([^}]+)\}/);
       if (destructureMatch) {
-        const names = destructureMatch[1].split(',').map((n) => n.trim().split(/\s+as\s+/)[0]!.trim());
+        const names = (destructureMatch[1] ?? '').split(',').map((n) =>
+          n
+            .trim()
+            .split(/\s+as\s+/)[0]
+            ?.trim(),
+        );
         for (const name of names) {
           if (name) {
             entries.push({
@@ -173,22 +170,19 @@ function parseImports(sourceFile: string, content: string): ImportGraphEntry[] {
   return entries;
 }
 
-export function findImporters(
-  graph: ImportGraphEntry[],
-  targetPackage: string,
-): string[] {
+export function findImporters(graph: ImportGraphEntry[], targetPackage: string): string[] {
   const importers = new Set<string>();
   for (const entry of graph) {
-    if (entry.importedFile === targetPackage || entry.importedFile.startsWith(`${targetPackage}/`)) {
+    if (
+      entry.importedFile === targetPackage ||
+      entry.importedFile.startsWith(`${targetPackage}/`)
+    ) {
       importers.add(entry.sourceFile);
     }
   }
   return Array.from(importers);
 }
 
-export function findImports(
-  graph: ImportGraphEntry[],
-  sourceFile: string,
-): ImportGraphEntry[] {
+export function findImports(graph: ImportGraphEntry[], sourceFile: string): ImportGraphEntry[] {
   return graph.filter((e) => e.sourceFile === sourceFile);
 }

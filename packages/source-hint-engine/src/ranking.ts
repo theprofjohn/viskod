@@ -1,14 +1,13 @@
+import { type ImportGraphEntry, classifyHint, detectLanguage } from './classifier';
 import type {
-  SourceHint,
-  UsageSiteSourceHint,
-  RankingResult,
-  SourceHintKind,
-  SourceHintStatus,
-  HintEvidence,
   HintRanking,
   HintSafety,
+  RankingResult,
+  SourceHint,
+  SourceHintKind,
+  SourceHintStatus,
+  UsageSiteSourceHint,
 } from './types';
-import { classifyHint, type ImportGraphEntry, detectLanguage } from './classifier';
 
 const MAX_HINTS = 10;
 const AMBIGUITY_THRESHOLD = 0.1;
@@ -55,7 +54,7 @@ const EVIDENCE_SIGNAL_WEIGHTS: Record<string, number> = {
   'framework-convention': 0.3,
   'directory-convention': 0.3,
   'data-attribute-match': 0.5,
-  'heuristic': 0.2,
+  heuristic: 0.2,
 };
 
 export function rankHints(input: RankInput): RankingResult {
@@ -80,7 +79,7 @@ export function rankHints(input: RankInput): RankingResult {
   }> = [];
 
   for (const hint of input.hints) {
-    const { kind, symbol, route, location } = classifyHint({
+    const { kind } = classifyHint({
       filePath: hint.filePath,
       exists: hint.exists,
       matchType: hint.matchType,
@@ -168,14 +167,16 @@ export function rankHints(input: RankInput): RankingResult {
       schemaVersion: 1 as const,
       hintId: c.hint.hintId,
       kind,
-      status: idx === 0 ? status : (status === 'ambiguous' ? 'ambiguous' : 'ranked'),
+      status: idx === 0 ? status : status === 'ambiguous' ? 'ambiguous' : 'ranked',
       file: {
         displayPath,
         language: detectLanguage(c.hint.filePath),
       },
       location: location ?? c.hint.location,
       symbol: symbol ?? c.hint.symbol,
-      route: route ?? (input.routePath ? { routePath: input.routePath, routeFile: input.routeFile } : undefined),
+      route:
+        route ??
+        (input.routePath ? { routePath: input.routePath, routeFile: input.routeFile } : undefined),
       evidence: c.hint.evidence,
       ranking,
       safety,

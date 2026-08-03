@@ -1,22 +1,20 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { EventBus } from '@viskod/event-bus';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { IssueServiceImpl, IssuePersistence } from '@viskod/visual-issue';
+import { EventBus } from '@viskod/event-bus';
+import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
 import type { VisualIssue } from '@viskod/visual-issue';
 import type { VisualSelection } from '@viskod/visual-selection';
-import { HandoffServiceImpl, HandoffPersistence } from './index';
-import type { AgentHandoff, AgentHandoffStatus } from './types';
-import { AgentHandoffSchema } from './schemas';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateAgentBrief, getDefaultConstraints, truncateBriefText } from './brief';
-import { redactAgentHandoff, deepRedactValue } from './redaction';
+import { HandoffPersistence, HandoffServiceImpl } from './index';
 import {
   isValidHandoffTransition,
   makeHandoffCreatedEvent,
-  makeHandoffOpenedEvent,
   makeHandoffStatusChangeEvent,
-  makeHandoffCancelledEvent,
 } from './lifecycle';
+import { deepRedactValue, redactAgentHandoff } from './redaction';
+import { AgentHandoffSchema } from './schemas';
+import type { AgentHandoff } from './types';
 
 const TEST_DIR = path.join(process.cwd(), '.viskod-test-handoffs');
 const TEST_SESSION_ID = 'test-session-1';
@@ -43,7 +41,9 @@ function makeServices() {
   return { eventBus, issueService, handoffService, issuePersistence, handoffPersistence };
 }
 
-function makeSelection(overrides: Partial<VisualIssue['source']['selectionSnapshot']> = {}): any {
+function makeSelection(
+  overrides: Partial<VisualIssue['source']['selectionSnapshot']> = {},
+): VisualSelection {
   return {
     schemaVersion: 1,
     selectionId: crypto.randomUUID(),
@@ -58,30 +58,52 @@ function makeSelection(overrides: Partial<VisualIssue['source']['selectionSnapsh
       viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
     },
     region: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-    targets: [{
-      targetId: crypto.randomUUID(),
-      documentOrder: 0,
-      geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-      semantics: { tagName: 'button', role: 'button', accessibleName: 'Save', textPreview: 'Save changes', isInteractive: true },
-      fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
-      resolutionCandidates: [{ strategy: 'stable-attribute' as const, value: 'save-btn', confidence: 0.9 }],
-    }],
+    targets: [
+      {
+        targetId: crypto.randomUUID(),
+        documentOrder: 0,
+        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+        semantics: {
+          tagName: 'button',
+          role: 'button',
+          accessibleName: 'Save',
+          textPreview: 'Save changes',
+          isInteractive: true,
+        },
+        fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
+        resolutionCandidates: [
+          { strategy: 'stable-attribute' as const, value: 'save-btn', confidence: 0.9 },
+        ],
+      },
+    ],
     summary: { label: 'Save changes', role: 'button', textPreview: 'Save changes', targetCount: 1 },
-    resolution: { status: 'resolved' as const, confidence: 0.9, resolvedAt: new Date().toISOString() },
+    resolution: {
+      status: 'resolved' as const,
+      confidence: 0.9,
+      resolvedAt: new Date().toISOString(),
+    },
     ...overrides,
   };
 }
 
-function makeBoxSelection(): any {
+function makeBoxSelection(): VisualSelection {
   return makeSelection({ mode: 'box', summary: { label: '5 elements selected', targetCount: 5 } });
 }
 
 beforeEach(() => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 afterEach(() => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 // =============================================================================
@@ -103,7 +125,13 @@ describe('AgentHandoff Schema Validation', () => {
         summary: 'A visual issue on Settings',
         issue: { status: 'open', severity: 'medium', tags: [] },
         page: { title: 'Settings', url: 'https://example.com' },
-        selectedTarget: { mode: 'single', label: 'Save', targetCount: 1, confidence: 0.9, resolutionStatus: 'resolved' },
+        selectedTarget: {
+          mode: 'single',
+          label: 'Save',
+          targetCount: 1,
+          confidence: 0.9,
+          resolutionStatus: 'resolved',
+        },
         task: { objective: 'Investigate', expectedOutput: 'Propose fix', nonGoals: ['No PR'] },
       },
       context: {
@@ -140,18 +168,34 @@ describe('AgentHandoff Schema Validation', () => {
       updatedAt: new Date().toISOString(),
       status: 'invalid_status',
       brief: {
-        title: 'Test', summary: 'Test',
+        title: 'Test',
+        summary: 'Test',
         issue: { status: 'open', severity: 'medium', tags: [] },
         page: {},
-        selectedTarget: { mode: 'single', targetCount: 1, confidence: 0.5, resolutionStatus: 'resolved' },
+        selectedTarget: {
+          mode: 'single',
+          targetCount: 1,
+          confidence: 0.5,
+          resolutionStatus: 'resolved',
+        },
         task: { objective: 'Test', expectedOutput: 'Test', nonGoals: [] },
       },
       context: {
-        contextId: 'c1', issueRef: { issueId: 'i1' }, packetRefs: [],
+        contextId: 'c1',
+        issueRef: { issueId: 'i1' },
+        packetRefs: [],
         selectionRef: { selectionId: 's1', snapshotIncluded: false },
         evidenceSummary: { hasSelection: true, hasSourceHints: false, hasContextPacket: false },
       },
-      constraints: { localFirst: true, noRawPacketPaths: true, noRawJson: true, noSecrets: true, noAutonomousBrowserActions: true, requiresHumanReview: true, phaseBoundary: 'handoff-only' },
+      constraints: {
+        localFirst: true,
+        noRawPacketPaths: true,
+        noRawJson: true,
+        noSecrets: true,
+        noAutonomousBrowserActions: true,
+        requiresHumanReview: true,
+        phaseBoundary: 'handoff-only',
+      },
       lifecycle: [],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
     };
@@ -166,11 +210,19 @@ describe('AgentHandoff Schema Validation', () => {
 describe('Handoff ID', () => {
   it('handoff IDs are opaque and prefixed', async () => {
     const { handoffService, issueService } = makeServices();
-    const issueResult = await issueService.createIssue(makeSelection(), TEST_SESSION_ID, TEST_PAGE_ID);
+    const issueResult = await issueService.createIssue(
+      makeSelection(),
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(issueResult.ok).toBe(true);
     if (!issueResult.ok) return;
 
-    const result = await handoffService.createHandoff({ issueId: issueResult.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const result = await handoffService.createHandoff(
+      { issueId: issueResult.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.handoffId).toMatch(/^handoff_[a-f0-9]{16}$/);
@@ -189,7 +241,11 @@ describe('Create Handoff', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const result = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const result = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('ready');
@@ -205,7 +261,11 @@ describe('Create Handoff', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const result = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const result = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('ready');
@@ -214,7 +274,11 @@ describe('Create Handoff', () => {
 
   it('rejects missing issue', async () => {
     const { handoffService } = makeServices();
-    const result = await handoffService.createHandoff({ issueId: 'nonexistent-id' }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const result = await handoffService.createHandoff(
+      { issueId: 'nonexistent-id' },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(result.ok).toBe(false);
   });
 
@@ -225,7 +289,11 @@ describe('Create Handoff', () => {
     if (!issue.ok) return;
 
     await issueService.deleteIssue(issue.value.issueId);
-    const result = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const result = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(result.ok).toBe(false);
   });
 
@@ -236,7 +304,11 @@ describe('Create Handoff', () => {
     if (!issue.ok) return;
 
     await issueService.archiveIssue(issue.value.issueId);
-    const result = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const result = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.warningCount).toBeGreaterThan(0);
@@ -245,7 +317,13 @@ describe('Create Handoff', () => {
 
   it('includes user instruction in brief', async () => {
     const { handoffService, issueService } = makeServices();
-    const issue = await issueService.createIssue(makeSelection(), TEST_SESSION_ID, TEST_PAGE_ID, 'Button issue', 'Fix the button');
+    const issue = await issueService.createIssue(
+      makeSelection(),
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+      'Button issue',
+      'Fix the button',
+    );
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
@@ -261,8 +339,10 @@ describe('Create Handoff', () => {
   });
 
   it('rejects stale issue', async () => {
-    const { handoffService, issueService } = makeServices();
-    const sel = makeSelection({ resolution: { status: 'stale', confidence: 0.3, resolvedAt: new Date().toISOString() } });
+    const { issueService } = makeServices();
+    const sel = makeSelection({
+      resolution: { status: 'stale', confidence: 0.3, resolvedAt: new Date().toISOString() },
+    });
     const issue = await issueService.createIssue(sel, TEST_SESSION_ID, TEST_PAGE_ID);
     expect(issue.ok).toBe(false);
   });
@@ -285,8 +365,19 @@ describe('Brief Generation', () => {
       title: 'Button · Save',
       description: 'Fix the button',
       source: { createdFrom: 'visual-selection', selectionId: 's1', selectionSnapshot: {} },
-      page: { url: 'https://example.com', title: 'Settings', viewport: { width: 1280, height: 720 } },
-      targetSummary: { mode: 'single', label: 'Save', role: 'button', targetCount: 1, confidence: 0.9, resolutionStatus: 'resolved' },
+      page: {
+        url: 'https://example.com',
+        title: 'Settings',
+        viewport: { width: 1280, height: 720 },
+      },
+      targetSummary: {
+        mode: 'single',
+        label: 'Save',
+        role: 'button',
+        targetCount: 1,
+        confidence: 0.9,
+        resolutionStatus: 'resolved',
+      },
       tags: ['ui-bug'],
       lifecycle: [],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
@@ -317,7 +408,12 @@ describe('Brief Generation', () => {
       title: 'Test',
       source: { createdFrom: 'visual-selection', selectionId: 's1', selectionSnapshot: {} },
       page: { url: 'https://example.com', viewport: { width: 1280, height: 720 } },
-      targetSummary: { mode: 'single', targetCount: 1, confidence: 0.9, resolutionStatus: 'resolved' },
+      targetSummary: {
+        mode: 'single',
+        targetCount: 1,
+        confidence: 0.9,
+        resolutionStatus: 'resolved',
+      },
       tags: [],
       lifecycle: [],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
@@ -341,14 +437,19 @@ describe('Brief Generation', () => {
       title: 'Test',
       source: { createdFrom: 'visual-selection', selectionId: 's1', selectionSnapshot: {} },
       page: { url: 'https://example.com', viewport: { width: 1280, height: 720 } },
-      targetSummary: { mode: 'single', targetCount: 1, confidence: 0.4, resolutionStatus: 'ambiguous' },
+      targetSummary: {
+        mode: 'single',
+        targetCount: 1,
+        confidence: 0.4,
+        resolutionStatus: 'ambiguous',
+      },
       tags: [],
       lifecycle: [],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
     };
 
     const brief = generateAgentBrief(issue);
-    expect(brief.task.nonGoals.some(g => g.includes('ambiguous'))).toBe(true);
+    expect(brief.task.nonGoals.some((g) => g.includes('ambiguous'))).toBe(true);
   });
 
   it('includes source hints when provided', () => {
@@ -364,7 +465,12 @@ describe('Brief Generation', () => {
       title: 'Test',
       source: { createdFrom: 'visual-selection', selectionId: 's1', selectionSnapshot: {} },
       page: { url: 'https://example.com', viewport: { width: 1280, height: 720 } },
-      targetSummary: { mode: 'single', targetCount: 1, confidence: 0.9, resolutionStatus: 'resolved' },
+      targetSummary: {
+        mode: 'single',
+        targetCount: 1,
+        confidence: 0.9,
+        resolutionStatus: 'resolved',
+      },
       tags: [],
       lifecycle: [],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
@@ -373,8 +479,8 @@ describe('Brief Generation', () => {
     const hints = [{ displayName: 'src/components/Button.tsx', confidence: 0.85 }];
     const brief = generateAgentBrief(issue, undefined, hints);
     expect(brief.sourceHints).toBeDefined();
-    expect(brief.sourceHints!.count).toBe(1);
-    expect(brief.sourceHints!.topHints[0].displayName).toBe('src/components/Button.tsx');
+    expect(brief.sourceHints?.count).toBe(1);
+    expect(brief.sourceHints?.topHints[0]?.displayName).toBe('src/components/Button.tsx');
   });
 
   it('brief does not contain packet paths', () => {
@@ -390,7 +496,12 @@ describe('Brief Generation', () => {
       title: 'Test',
       source: { createdFrom: 'visual-selection', selectionId: 's1', selectionSnapshot: {} },
       page: { url: 'https://example.com', viewport: { width: 1280, height: 720 } },
-      targetSummary: { mode: 'single', targetCount: 1, confidence: 0.9, resolutionStatus: 'resolved' },
+      targetSummary: {
+        mode: 'single',
+        targetCount: 1,
+        confidence: 0.9,
+        resolutionStatus: 'resolved',
+      },
       tags: [],
       lifecycle: [],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
@@ -489,7 +600,7 @@ describe('Redaction', () => {
     const input = { key: 'sk_test_abc123def456', nested: { val: 'user@test.com' } };
     const result = deepRedactValue(input) as Record<string, unknown>;
     expect(result.key).not.toContain('sk_test_abc123def456');
-    expect((result.nested as any).val).not.toContain('user@test.com');
+    expect((result.nested as Record<string, unknown>).val).not.toContain('user@test.com');
   });
 
   it('redacts array elements', () => {
@@ -549,7 +660,11 @@ describe('Persistence', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const result = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const result = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       const handoffDir = path.join(handoffPersistence.getBaseDir(), result.value.handoffId);
@@ -564,7 +679,11 @@ describe('Persistence', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     const handoffId = createResult.ok ? createResult.value.handoffId : '';
 
@@ -575,7 +694,7 @@ describe('Persistence', () => {
     expect(listResult.ok).toBe(true);
     if (listResult.ok) {
       expect(listResult.value.length).toBe(1);
-      expect(listResult.value[0]!.handoffId).toBe(handoffId);
+      expect(listResult.value[0]?.handoffId).toBe(handoffId);
     }
   });
 
@@ -585,10 +704,18 @@ describe('Persistence', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (createResult.ok) {
-      const filePath = path.join(handoffPersistence.getBaseDir(), createResult.value.handoffId, 'handoff.json');
+      const filePath = path.join(
+        handoffPersistence.getBaseDir(),
+        createResult.value.handoffId,
+        'handoff.json',
+      );
       fs.writeFileSync(filePath, '{invalid json', 'utf-8');
       const loadResult = await handoffService.getHandoff(createResult.value.handoffId);
       expect(loadResult.ok).toBe(false);
@@ -602,9 +729,17 @@ describe('Persistence', () => {
     expect(issue1.ok && issue2.ok).toBe(true);
     if (!issue1.ok || !issue2.ok) return;
 
-    await handoffService.createHandoff({ issueId: issue1.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
-    await new Promise(r => setTimeout(r, 10));
-    await handoffService.createHandoff({ issueId: issue2.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    await handoffService.createHandoff(
+      { issueId: issue1.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    await handoffService.createHandoff(
+      { issueId: issue2.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
 
     const list = await handoffService.listHandoffs();
     expect(list.ok).toBe(true);
@@ -625,7 +760,11 @@ describe('Get Handoff (Agent Fetch)', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
@@ -648,7 +787,11 @@ describe('Get Handoff (Agent Fetch)', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
@@ -665,7 +808,11 @@ describe('Get Handoff (Agent Fetch)', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
@@ -685,7 +832,11 @@ describe('Get Handoff (Agent Fetch)', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
@@ -703,7 +854,11 @@ describe('Get Handoff (Agent Fetch)', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
@@ -723,21 +878,31 @@ describe('Update Handoff Status', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
     // Mark opened via get
     await handoffService.getHandoff(createResult.value.handoffId);
 
-    const update1 = await handoffService.updateHandoffStatus(createResult.value.handoffId, 'in_progress');
+    const update1 = await handoffService.updateHandoffStatus(
+      createResult.value.handoffId,
+      'in_progress',
+    );
     expect(update1.ok).toBe(true);
     if (update1.ok) {
       expect(update1.value.status).toBe('in_progress');
       expect(update1.value.lifecycle.length).toBeGreaterThanOrEqual(2);
     }
 
-    const update2 = await handoffService.updateHandoffStatus(createResult.value.handoffId, 'completed');
+    const update2 = await handoffService.updateHandoffStatus(
+      createResult.value.handoffId,
+      'completed',
+    );
     expect(update2.ok).toBe(true);
     if (update2.ok) {
       expect(update2.value.status).toBe('completed');
@@ -751,11 +916,18 @@ describe('Update Handoff Status', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
-    const result = await handoffService.updateHandoffStatus(createResult.value.handoffId, 'completed');
+    const result = await handoffService.updateHandoffStatus(
+      createResult.value.handoffId,
+      'completed',
+    );
     expect(result.ok).toBe(false);
   });
 });
@@ -770,7 +942,11 @@ describe('Cancel Handoff', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
@@ -788,7 +964,11 @@ describe('Cancel Handoff', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
@@ -809,7 +989,11 @@ describe('Archived Issue Handoff', () => {
     if (!issue.ok) return;
 
     await issueService.archiveIssue(issue.value.issueId);
-    const result = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const result = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.warningCount).toBeGreaterThan(0);
@@ -827,7 +1011,11 @@ describe('MCP/Tool Schema', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const result = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const result = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.handoffId).toBeTruthy();
@@ -845,7 +1033,11 @@ describe('MCP/Tool Schema', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    const createResult = await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    const createResult = await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
@@ -867,7 +1059,11 @@ describe('MCP/Tool Schema', () => {
     expect(issue.ok).toBe(true);
     if (!issue.ok) return;
 
-    await handoffService.createHandoff({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
+    await handoffService.createHandoff(
+      { issueId: issue.value.issueId },
+      TEST_SESSION_ID,
+      TEST_PAGE_ID,
+    );
     const listResult = await handoffService.listHandoffs();
     expect(listResult.ok).toBe(true);
     if (listResult.ok) {
@@ -901,7 +1097,13 @@ function makeTestHandoff(overrides: Partial<AgentHandoff> = {}): AgentHandoff {
       summary: 'A visual issue on Settings',
       issue: { status: 'open', severity: 'medium', tags: [] },
       page: { title: 'Settings', url: 'https://example.com' },
-      selectedTarget: { mode: 'single', label: 'Save', targetCount: 1, confidence: 0.9, resolutionStatus: 'resolved' },
+      selectedTarget: {
+        mode: 'single',
+        label: 'Save',
+        targetCount: 1,
+        confidence: 0.9,
+        resolutionStatus: 'resolved',
+      },
       task: { objective: 'Investigate', expectedOutput: 'Propose fix', nonGoals: ['No PR'] },
     },
     context: {

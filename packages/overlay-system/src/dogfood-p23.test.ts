@@ -1,15 +1,15 @@
-// Phase 23 dogfood: Phase 21 overlay → Phase 22 issue → Phase 23 agent handoff — end-to-end on shadcn-admin
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { chromium, type Page, type Browser } from 'playwright';
-import { getOverlayScript } from '@viskod/overlay-system';
-import { EventBus } from '@viskod/event-bus';
-import { IssueServiceImpl, IssuePersistence } from '@viskod/visual-issue';
-import { HandoffServiceImpl, HandoffPersistence } from '@viskod/agent-handoff';
-import type { VisualSelection } from '@viskod/visual-selection';
-import { spawn, type ChildProcess } from 'child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { HandoffPersistence, HandoffServiceImpl } from '@viskod/agent-handoff';
+import { EventBus } from '@viskod/event-bus';
+import { getOverlayScript } from '@viskod/overlay-system';
+import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
+import type { VisualSelection } from '@viskod/visual-selection';
+import { type Browser, type Page, chromium } from 'playwright';
+// Phase 23 dogfood: Phase 21 overlay → Phase 22 issue → Phase 23 agent handoff — end-to-end on shadcn-admin
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.setConfig({ testTimeout: 60000 });
 
@@ -32,13 +32,23 @@ interface SharedState {
   issueService: IssueServiceImpl | null;
   handoffService: HandoffServiceImpl | null;
 }
-const state: SharedState = { issueIds: [], handoffIds: [], page: null, issueService: null, handoffService: null };
+const state: SharedState = {
+  issueIds: [],
+  handoffIds: [],
+  page: null,
+  issueService: null,
+  handoffService: null,
+};
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
-  try { fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(HANDOFF_STORAGE, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true });
+  } catch {}
+  try {
+    fs.rmSync(HANDOFF_STORAGE, { recursive: true, force: true });
+  } catch {}
 
   try {
     devProc = spawn('pnpm', ['dev'], { cwd: TARGET_DIR, stdio: 'pipe', shell: true });
@@ -59,13 +69,20 @@ beforeAll(async () => {
 afterAll(async () => {
   if (browser) await browser.close();
   if (devProc) devProc.kill();
-  try { fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(HANDOFF_STORAGE, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true });
+  } catch {}
+  try {
+    fs.rmSync(HANDOFF_STORAGE, { recursive: true, force: true });
+  } catch {}
 });
 
 async function makePage(): Promise<Page> {
   if (!browser) throw new Error('browser not available');
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  const ctx = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 1,
+  });
   const p = await ctx.newPage();
   await p.goto(TARGET_URL, { waitUntil: 'networkidle', timeout: 15000 });
   await sleep(1000);
@@ -76,34 +93,117 @@ async function activateOverlay(p: Page) {
   await p.evaluate(overlayScript);
   await sleep(200);
   await p.evaluate(() => {
-    window.postMessage({ source: '__viskod_browser', command: 'overlay:show', mode: 'selection' }, '*');
+    window.postMessage(
+      { source: '__viskod_browser', command: 'overlay:show', mode: 'selection' },
+      '*',
+    );
   });
   await sleep(300);
 }
 
-async function clickAt(p: Page, x: number, y: number): Promise<any> {
-  await p.mouse.move(x, y); await sleep(30);
-  await p.mouse.down(); await sleep(30);
-  await p.mouse.up(); await sleep(300);
-  return p.evaluate(() => {
-    const evts = (window as any).__vs_events || [];
-    (window as any).__vs_events = [];
-    return evts.filter((e: any) => e.type !== 'overlay:ready');
-  }).then((evts: any[]) => evts.length > 0 ? evts[evts.length - 1] : null);
+async function clickAt(
+  p: Page,
+  x: number,
+  y: number,
+): Promise<{
+  type: string;
+  data?: {
+    source?: string;
+    viewportRect?: { x: number; y: number; width: number; height: number };
+    boundingBox?: { x: number; y: number; width: number; height: number };
+    tagName?: string;
+    textPreview?: string;
+    role?: string;
+    accessibleName?: string;
+    isInteractive?: boolean;
+    inputType?: string;
+    stableAttributes?: Record<string, string>;
+  };
+} | null> {
+  await p.mouse.move(x, y);
+  await sleep(30);
+  await p.mouse.down();
+  await sleep(30);
+  await p.mouse.up();
+  await sleep(300);
+  return p
+    .evaluate(() => {
+      const evts =
+        (
+          window as unknown as {
+            __vs_events: Array<{
+              type: string;
+              data?: {
+                source?: string;
+                viewportRect?: { x: number; y: number; width: number; height: number };
+              };
+            }>;
+          }
+        ).__vs_events || [];
+      (
+        window as unknown as {
+          __vs_events: Array<{
+            type: string;
+            data?: {
+              source?: string;
+              viewportRect?: { x: number; y: number; width: number; height: number };
+            };
+          }>;
+        }
+      ).__vs_events = [];
+      return evts.filter((e) => e.type !== 'overlay:ready');
+    })
+    .then((evts) => (evts.length > 0 ? (evts[evts.length - 1] ?? null) : null));
 }
 
 async function setupCapture(p: Page) {
   await p.evaluate(() => {
-    (window as any).__vs_events = [];
+    (
+      window as unknown as {
+        __vs_events: Array<{
+          type: string;
+          data?: {
+            source?: string;
+            viewportRect?: { x: number; y: number; width: number; height: number };
+          };
+        }>;
+      }
+    ).__vs_events = [];
     window.addEventListener('message', (e) => {
       if (e.data && e.data.source === '__viskod_overlay') {
-        (window as any).__vs_events.push(e.data);
+        (
+          window as unknown as {
+            __vs_events: Array<{
+              type: string;
+              data?: {
+                source?: string;
+                viewportRect?: { x: number; y: number; width: number; height: number };
+              };
+            }>;
+          }
+        ).__vs_events.push(e.data);
       }
     });
   });
 }
 
-function makeVisualSelection(overlayEvent: any, pageUrl: string, title?: string): VisualSelection {
+function makeVisualSelection(
+  overlayEvent: {
+    data?: {
+      source?: string;
+      viewportRect?: { x: number; y: number; width: number; height: number };
+      boundingBox?: { x: number; y: number; width: number; height: number };
+      tagName?: string;
+      textPreview?: string;
+      role?: string;
+      accessibleName?: string;
+      isInteractive?: boolean;
+      stableAttributes?: Record<string, string>;
+    };
+  },
+  pageUrl: string,
+  title?: string,
+): VisualSelection {
   const rect = overlayEvent.data?.boundingBox || { x: 0, y: 0, width: 0, height: 0 };
   const tagName = overlayEvent.data?.tagName || 'element';
   const textPreview = overlayEvent.data?.textPreview || '';
@@ -122,15 +222,28 @@ function makeVisualSelection(overlayEvent: any, pageUrl: string, title?: string)
     updatedAt: new Date().toISOString(),
     page: { url: pageUrl, title, viewport: { width: 1440, height: 720, scrollX: 0, scrollY: 0 } },
     region: { viewportRect: rect },
-    targets: [{
-      targetId: crypto.randomUUID(),
-      documentOrder: 0,
-      geometry: { viewportRect: rect },
-      semantics: { tagName, role, accessibleName, textPreview: textPreview.slice(0, 120), isInteractive },
-      fingerprints: { stableAttributes: stableAttrs as Record<string, string> | undefined },
-      resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
-    }],
-    summary: { label: textPreview || tagName, role, textPreview: textPreview.slice(0, 120), targetCount: 1 },
+    targets: [
+      {
+        targetId: crypto.randomUUID(),
+        documentOrder: 0,
+        geometry: { viewportRect: rect },
+        semantics: {
+          tagName,
+          role,
+          accessibleName,
+          textPreview: textPreview.slice(0, 120),
+          isInteractive,
+        },
+        fingerprints: { stableAttributes: stableAttrs as Record<string, string> | undefined },
+        resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
+      },
+    ],
+    summary: {
+      label: textPreview || tagName,
+      role,
+      textPreview: textPreview.slice(0, 120),
+      targetCount: 1,
+    },
     resolution: { status: 'resolved', confidence: 0.85, resolvedAt: new Date().toISOString() },
   };
 }
@@ -144,13 +257,21 @@ async function createIssueFromOverlay(p: Page): Promise<string | null> {
     for (const el of candidates) {
       const r = el.getBoundingClientRect();
       if (r.width > 20 && r.height > 20 && r.top > 50 && r.top < 900 && r.left < 400) {
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || '').trim().slice(0, 40) };
+        return {
+          x: r.x + r.width / 2,
+          y: r.y + r.height / 2,
+          text: (el.textContent || '').trim().slice(0, 40),
+        };
       }
     }
     for (const el of candidates) {
       const r = el.getBoundingClientRect();
       if (r.width > 20 && r.height > 20 && r.top > 0) {
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || '').trim().slice(0, 40) };
+        return {
+          x: r.x + r.width / 2,
+          y: r.y + r.height / 2,
+          text: (el.textContent || '').trim().slice(0, 40),
+        };
       }
     }
     return null;
@@ -162,7 +283,11 @@ async function createIssueFromOverlay(p: Page): Promise<string | null> {
   if (!ev) return null;
 
   const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-  const result = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+  const result = await state.issueService!.createIssue(
+    selection,
+    'dogfood-session',
+    'dogfood-page',
+  );
   if (result.ok) {
     state.issueIds.push(result.value.issueId);
     return result.value.issueId;
@@ -179,16 +304,25 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     const p = await makePage();
     const issueId = await createIssueFromOverlay(p);
     expect(issueId).not.toBeNull();
-    if (!issueId) { await p.close(); return; }
+    if (!issueId) {
+      await p.close();
+      return;
+    }
 
-    const result = await state.handoffService!.createHandoff({ issueId }, 'dogfood-session', 'dogfood-page');
+    const result = await state.handoffService!.createHandoff(
+      { issueId },
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('ready');
       expect(result.value.handoffId).toMatch(/^handoff_/);
       expect(result.value.title).toBeTruthy();
       state.handoffIds.push(result.value.handoffId);
-      console.log(`  DF23-01: handoff ${result.value.handoffId.slice(0, 20)}… title="${result.value.title}"`);
+      console.log(
+        `  DF23-01: handoff ${result.value.handoffId.slice(0, 20)}… title="${result.value.title}"`,
+      );
     }
     await p.close();
   });
@@ -201,28 +335,51 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     const icon = await p.evaluate(() => {
       for (const b of document.querySelectorAll('button')) {
         const t = (b.textContent || '').trim();
-        if (t.length <= 2) { const r = b.getBoundingClientRect(); if (r.width > 10) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }
+        if (t.length <= 2) {
+          const r = b.getBoundingClientRect();
+          if (r.width > 10) return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }
       }
       return null;
     });
 
-    if (!icon) { console.log('  DF23-02: no icon button found — skipping'); await p.close(); return; }
+    if (!icon) {
+      console.log('  DF23-02: no icon button found — skipping');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, icon.x, icon.y);
     expect(ev).not.toBeNull();
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff({ issueId: issueResult.value.issueId }, 'dogfood-session', 'dogfood-page');
+    const handoffResult = await state.handoffService!.createHandoff(
+      { issueId: issueResult.value.issueId },
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(handoffResult.ok).toBe(true);
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
-      console.log(`  DF23-02: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`);
+      console.log(
+        `  DF23-02: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`,
+      );
     }
     await p.close();
   });
@@ -232,7 +389,12 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     const routes = ['/tasks', '/settings', '/invoices', '/users'];
     let inputPos: { x: number; y: number } | null = null;
     for (const route of routes) {
-      try { await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 }); await sleep(800); } catch { continue; }
+      try {
+        await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
+        await sleep(800);
+      } catch {
+        continue;
+      }
       inputPos = await p.evaluate(() => {
         const i = document.querySelector('input:not([type="hidden"])');
         if (!i) return null;
@@ -242,21 +404,39 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
       if (inputPos) break;
     }
 
-    if (!inputPos) { console.log('  DF23-03: no input found — skipping'); await p.close(); return; }
+    if (!inputPos) {
+      console.log('  DF23-03: no input found — skipping');
+      await p.close();
+      return;
+    }
 
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, inputPos.x, inputPos.y);
     expect(ev).not.toBeNull();
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff({ issueId: issueResult.value.issueId }, 'dogfood-session', 'dogfood-page');
+    const handoffResult = await state.handoffService!.createHandoff(
+      { issueId: issueResult.value.issueId },
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(handoffResult.ok).toBe(true);
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
@@ -266,7 +446,9 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
         const json = JSON.stringify(full.value);
         expect(json).not.toContain('test-user-secret-123');
       }
-      console.log(`  DF23-03: handoff ${handoffResult.value.handoffId.slice(0, 20)}… no value leakage`);
+      console.log(
+        `  DF23-03: handoff ${handoffResult.value.handoffId.slice(0, 20)}… no value leakage`,
+      );
     }
     await p.close();
   });
@@ -276,33 +458,61 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     const routes = ['/tasks', '/invoices', '/settings', '/users'];
     let selPos: { x: number; y: number } | null = null;
     for (const route of routes) {
-      try { await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 }); await sleep(800); } catch { continue; }
+      try {
+        await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
+        await sleep(800);
+      } catch {
+        continue;
+      }
       selPos = await p.evaluate(() => {
-        for (const s of document.querySelectorAll('select, [role="combobox"]')) { const r = s.getBoundingClientRect(); if (r.width > 10) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }
+        for (const s of document.querySelectorAll('select, [role="combobox"]')) {
+          const r = s.getBoundingClientRect();
+          if (r.width > 10) return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }
         return null;
       });
       if (selPos) break;
     }
 
-    if (!selPos) { console.log('  DF23-04: no dropdown found — skipping'); await p.close(); return; }
+    if (!selPos) {
+      console.log('  DF23-04: no dropdown found — skipping');
+      await p.close();
+      return;
+    }
 
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, selPos.x, selPos.y);
     expect(ev).not.toBeNull();
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff({ issueId: issueResult.value.issueId }, 'dogfood-session', 'dogfood-page');
+    const handoffResult = await state.handoffService!.createHandoff(
+      { issueId: issueResult.value.issueId },
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(handoffResult.ok).toBe(true);
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
-      console.log(`  DF23-04: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`);
+      console.log(
+        `  DF23-04: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`,
+      );
     }
     await p.close();
   });
@@ -312,34 +522,60 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     const routes = ['/tasks', '/invoices', '/users', '/orders'];
     let rowPos: { x: number; y: number } | null = null;
     for (const route of routes) {
-      try { await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 }); await sleep(800); } catch { continue; }
+      try {
+        await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
+        await sleep(800);
+      } catch {
+        continue;
+      }
       rowPos = await p.evaluate(() => {
-        const r = document.querySelector('tr'); if (!r) return null;
+        const r = document.querySelector('tr');
+        if (!r) return null;
         const rect = r.getBoundingClientRect();
         return rect.width > 10 ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } : null;
       });
       if (rowPos) break;
     }
 
-    if (!rowPos) { console.log('  DF23-05: no table row found — skipping'); await p.close(); return; }
+    if (!rowPos) {
+      console.log('  DF23-05: no table row found — skipping');
+      await p.close();
+      return;
+    }
 
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, rowPos.x, rowPos.y);
     expect(ev).not.toBeNull();
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff({ issueId: issueResult.value.issueId }, 'dogfood-session', 'dogfood-page');
+    const handoffResult = await state.handoffService!.createHandoff(
+      { issueId: issueResult.value.issueId },
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(handoffResult.ok).toBe(true);
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
-      console.log(`  DF23-05: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`);
+      console.log(
+        `  DF23-05: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`,
+      );
     }
     await p.close();
   });
@@ -349,34 +585,60 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     const routes = ['/tasks', '/invoices', '/users'];
     let cellPos: { x: number; y: number } | null = null;
     for (const route of routes) {
-      try { await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 }); await sleep(800); } catch { continue; }
+      try {
+        await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
+        await sleep(800);
+      } catch {
+        continue;
+      }
       cellPos = await p.evaluate(() => {
-        const c = document.querySelector('td'); if (!c) return null;
+        const c = document.querySelector('td');
+        if (!c) return null;
         const r = c.getBoundingClientRect();
         return r.width > 5 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
       });
       if (cellPos) break;
     }
 
-    if (!cellPos) { console.log('  DF23-06: no table cell found — skipping'); await p.close(); return; }
+    if (!cellPos) {
+      console.log('  DF23-06: no table cell found — skipping');
+      await p.close();
+      return;
+    }
 
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, cellPos.x, cellPos.y);
     expect(ev).not.toBeNull();
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff({ issueId: issueResult.value.issueId }, 'dogfood-session', 'dogfood-page');
+    const handoffResult = await state.handoffService!.createHandoff(
+      { issueId: issueResult.value.issueId },
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(handoffResult.ok).toBe(true);
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
-      console.log(`  DF23-06: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`);
+      console.log(
+        `  DF23-06: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`,
+      );
     }
     await p.close();
   });
@@ -386,33 +648,63 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     const routes = ['/tasks', '/invoices', '/users'];
     let actPos: { x: number; y: number } | null = null;
     for (const route of routes) {
-      try { await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 }); await sleep(800); } catch { continue; }
+      try {
+        await p.goto(TARGET_URL + route, { waitUntil: 'networkidle', timeout: 5000 });
+        await sleep(800);
+      } catch {
+        continue;
+      }
       actPos = await p.evaluate(() => {
-        for (const b of document.querySelectorAll('td button, td a[role="button"], td [class*="action"]')) { const r = b.getBoundingClientRect(); if (r.width > 10) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }
+        for (const b of document.querySelectorAll(
+          'td button, td a[role="button"], td [class*="action"]',
+        )) {
+          const r = b.getBoundingClientRect();
+          if (r.width > 10) return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }
         return null;
       });
       if (actPos) break;
     }
 
-    if (!actPos) { console.log('  DF23-07: no row action found — skipping'); await p.close(); return; }
+    if (!actPos) {
+      console.log('  DF23-07: no row action found — skipping');
+      await p.close();
+      return;
+    }
 
     await setupCapture(p);
     await activateOverlay(p);
     const ev = await clickAt(p, actPos.x, actPos.y);
     expect(ev).not.toBeNull();
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff({ issueId: issueResult.value.issueId }, 'dogfood-session', 'dogfood-page');
+    const handoffResult = await state.handoffService!.createHandoff(
+      { issueId: issueResult.value.issueId },
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(handoffResult.ok).toBe(true);
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
-      console.log(`  DF23-07: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`);
+      console.log(
+        `  DF23-07: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`,
+      );
     }
     await p.close();
   });
@@ -423,26 +715,69 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     await activateOverlay(p);
 
     const region = await p.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll('[class*="card"]:not([class*="inner"]), [class*="Card"]:not([class*="inner"]), article'));
+      const cards = Array.from(
+        document.querySelectorAll(
+          '[class*="card"]:not([class*="inner"]), [class*="Card"]:not([class*="inner"]), article',
+        ),
+      );
       if (cards.length === 0) return null;
-      const r = cards[0].getBoundingClientRect();
+      const r = cards[0]!.getBoundingClientRect();
       return { x1: r.x + 5, y1: r.y + 5, x2: r.x + r.width - 5, y2: r.y + r.height - 5 };
     });
 
-    if (!region) { console.log('  DF23-08: no card found — skipping'); await p.close(); return; }
+    if (!region) {
+      console.log('  DF23-08: no card found — skipping');
+      await p.close();
+      return;
+    }
 
-    await p.mouse.move(region.x1, region.y1); await sleep(30);
-    await p.mouse.down(); await sleep(30);
-    for (let i = 1; i <= 10; i++) { const t = i / 10; await p.mouse.move(region.x1 + (region.x2 - region.x1) * t, region.y1 + (region.y2 - region.y1) * t); await sleep(15); }
-    await p.mouse.up(); await sleep(300);
+    await p.mouse.move(region.x1, region.y1);
+    await sleep(30);
+    await p.mouse.down();
+    await sleep(30);
+    for (let i = 1; i <= 10; i++) {
+      const t = i / 10;
+      await p.mouse.move(
+        region.x1 + (region.x2 - region.x1) * t,
+        region.y1 + (region.y2 - region.y1) * t,
+      );
+      await sleep(15);
+    }
+    await p.mouse.up();
+    await sleep(300);
 
     const dragEv = await p.evaluate(() => {
-      const evts = (window as any).__vs_events || [];
-      (window as any).__vs_events = [];
-      return evts.find((e: any) => e.type === 'overlay:box-drag-completed') || null;
+      const evts =
+        (
+          window as unknown as {
+            __vs_events: Array<{
+              type: string;
+              data?: {
+                source?: string;
+                viewportRect?: { x: number; y: number; width: number; height: number };
+              };
+            }>;
+          }
+        ).__vs_events || [];
+      (
+        window as unknown as {
+          __vs_events: Array<{
+            type: string;
+            data?: {
+              source?: string;
+              viewportRect?: { x: number; y: number; width: number; height: number };
+            };
+          }>;
+        }
+      ).__vs_events = [];
+      return evts.find((e) => e.type === 'overlay:box-drag-completed') || null;
     });
 
-    if (!dragEv) { console.log('  DF23-08: no box drag event — skipping'); await p.close(); return; }
+    if (!dragEv) {
+      console.log('  DF23-08: no box drag event — skipping');
+      await p.close();
+      return;
+    }
 
     const rect = dragEv.data?.viewportRect || { x: 0, y: 0, width: 0, height: 0 };
     const selection: VisualSelection = {
@@ -453,28 +788,49 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
       mode: 'box',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      page: { url: p.url(), title: 'shadcn-admin', viewport: { width: 1440, height: 720, scrollX: 0, scrollY: 0 } },
+      page: {
+        url: p.url(),
+        title: 'shadcn-admin',
+        viewport: { width: 1440, height: 720, scrollX: 0, scrollY: 0 },
+      },
       region: { viewportRect: rect },
-      targets: [{
-        targetId: crypto.randomUUID(), documentOrder: 0,
-        geometry: { viewportRect: rect },
-        semantics: { tagName: 'div', role: 'region', isInteractive: false },
-        fingerprints: {}, resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: rect },
+          semantics: { tagName: 'div', role: 'region', isInteractive: false },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
       summary: { label: 'Box region', targetCount: 1 },
       resolution: { status: 'resolved', confidence: 0.7, resolvedAt: new Date().toISOString() },
     };
 
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff({ issueId: issueResult.value.issueId }, 'dogfood-session', 'dogfood-page');
+    const handoffResult = await state.handoffService!.createHandoff(
+      { issueId: issueResult.value.issueId },
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(handoffResult.ok).toBe(true);
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
-      console.log(`  DF23-08: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`);
+      console.log(
+        `  DF23-08: handoff ${handoffResult.value.handoffId.slice(0, 20)}… title="${handoffResult.value.title}"`,
+      );
     }
     await p.close();
   });
@@ -496,7 +852,11 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
   it('DF23-10: handoffs survive simulated restart', async () => {
     const eventBus = new EventBus();
     const freshIssueService = new IssueServiceImpl(eventBus, new IssuePersistence(ISSUE_STORAGE));
-    const freshHandoffService = new HandoffServiceImpl(eventBus, freshIssueService, new HandoffPersistence(HANDOFF_STORAGE));
+    const freshHandoffService = new HandoffServiceImpl(
+      eventBus,
+      freshIssueService,
+      new HandoffPersistence(HANDOFF_STORAGE),
+    );
     const list = await freshHandoffService.listHandoffs();
     expect(list.ok).toBe(true);
     if (list.ok) {
@@ -521,7 +881,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
       const json = JSON.stringify(result.value);
       expect(json).not.toContain('.viskod');
       expect(json).not.toContain('captures/');
-      console.log(`  DF23-11: agent fetch returns safe brief`);
+      console.log('  DF23-11: agent fetch returns safe brief');
     }
   });
 
@@ -532,7 +892,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('opened');
-      console.log(`  DF23-12: handoff marked opened`);
+      console.log('  DF23-12: handoff marked opened');
     }
   });
 
@@ -552,7 +912,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
     if (update2.ok) {
       expect(update2.value.status).toBe('completed');
       expect(update2.value.completedAt).toBeTruthy();
-      console.log(`  DF23-13: handoff completed`);
+      console.log('  DF23-13: handoff completed');
     }
   });
 
@@ -564,7 +924,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
     if (result.ok) {
       expect(result.value.status).toBe('cancelled');
       expect(result.value.cancelledAt).toBeTruthy();
-      console.log(`  DF23-14: handoff cancelled`);
+      console.log('  DF23-14: handoff cancelled');
     }
 
     const fetchResult = await state.handoffService!.getHandoff(handoffId);
@@ -580,28 +940,43 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
       mode: 'single',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      page: { url: 'https://example.com', viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 } },
+      page: {
+        url: 'https://example.com',
+        viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
+      },
       region: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-      targets: [{
-        targetId: crypto.randomUUID(), documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'button', isInteractive: true },
-        fingerprints: {}, resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'button', isInteractive: true },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
       summary: { label: 'Duplicate button', targetCount: 1 },
       resolution: { status: 'ambiguous', confidence: 0.5, resolvedAt: new Date().toISOString() },
     };
 
-    const issueResult = await state.issueService!.createIssue(ambiguousSelection, 'dogfood-session', 'dogfood-page');
+    const issueResult = await state.issueService!.createIssue(
+      ambiguousSelection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(issueResult.ok).toBe(true);
     if (!issueResult.ok) return;
 
-    const handoffResult = await state.handoffService!.createHandoff({ issueId: issueResult.value.issueId }, 'dogfood-session', 'dogfood-page');
+    const handoffResult = await state.handoffService!.createHandoff(
+      { issueId: issueResult.value.issueId },
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(handoffResult.ok).toBe(true);
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
       expect(handoffResult.value.warningCount).toBeGreaterThan(0);
-      console.log(`  DF23-15: ambiguous issue handoff created with warning`);
+      console.log('  DF23-15: ambiguous issue handoff created with warning');
     }
   });
 
@@ -614,21 +989,32 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
       mode: 'single',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      page: { url: 'https://example.com', viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 } },
+      page: {
+        url: 'https://example.com',
+        viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
+      },
       region: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-      targets: [{
-        targetId: crypto.randomUUID(), documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'button', isInteractive: true },
-        fingerprints: {}, resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'button', isInteractive: true },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
       summary: { label: 'Old button', targetCount: 1 },
       resolution: { status: 'stale', confidence: 0.2, resolvedAt: new Date().toISOString() },
     };
 
-    const issueResult = await state.issueService!.createIssue(staleSelection, 'dogfood-session', 'dogfood-page');
+    const issueResult = await state.issueService!.createIssue(
+      staleSelection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(issueResult.ok).toBe(false);
-    console.log(`  DF23-16: stale issue creation blocked`);
+    console.log('  DF23-16: stale issue creation blocked');
   });
 
   it('DF23-17: synthetic secrets absent from persisted handoff and tool output', async () => {
@@ -648,23 +1034,44 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
         mode: 'single',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        page: { url: 'https://example.com', viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 } },
+        page: {
+          url: 'https://example.com',
+          viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
+        },
         region: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        targets: [{
-          targetId: crypto.randomUUID(), documentOrder: 0,
-          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-          semantics: { tagName: 'div', textPreview: secret, accessibleName: secret, isInteractive: false },
-          fingerprints: {}, resolutionCandidates: [],
-        }],
+        targets: [
+          {
+            targetId: crypto.randomUUID(),
+            documentOrder: 0,
+            geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+            semantics: {
+              tagName: 'div',
+              textPreview: secret,
+              accessibleName: secret,
+              isInteractive: false,
+            },
+            fingerprints: {},
+            resolutionCandidates: [],
+          },
+        ],
         summary: { textPreview: secret, label: secret, targetCount: 1 },
         resolution: { status: 'resolved', confidence: 0.9, resolvedAt: new Date().toISOString() },
       };
 
-      const issueResult = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page', `${label} test`);
+      const issueResult = await state.issueService!.createIssue(
+        selection,
+        'dogfood-session',
+        'dogfood-page',
+        `${label} test`,
+      );
       expect(issueResult.ok).toBe(true);
       if (!issueResult.ok) continue;
 
-      const handoffResult = await state.handoffService!.createHandoff({ issueId: issueResult.value.issueId }, 'dogfood-session', 'dogfood-page');
+      const handoffResult = await state.handoffService!.createHandoff(
+        { issueId: issueResult.value.issueId },
+        'dogfood-session',
+        'dogfood-page',
+      );
       expect(handoffResult.ok).toBe(true);
       if (!handoffResult.ok) continue;
 
@@ -698,28 +1105,34 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
       expect(json).not.toMatch(/context[/\\]/);
       expect(json).not.toMatch(/C:[\\/]/);
       expect(json).not.toMatch(/\/home\//);
-      console.log(`  DF23-18: no packet paths in tool output`);
+      console.log('  DF23-18: no packet paths in tool output');
     }
   });
 
   it('DF23-19: existing capture_context regression', async () => {
     const selection = makeSelection({
       summary: { label: 'Test', role: 'button', textPreview: 'Test', targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'button', textPreview: 'Test', isInteractive: true },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'button', textPreview: 'Test', isInteractive: true },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
-    const result = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    const result = await state.issueService!.createIssue(
+      selection,
+      'dogfood-session',
+      'dogfood-page',
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       state.issueIds.push(result.value.issueId);
     }
-    console.log(`  DF23-19: capture regression passes`);
+    console.log('  DF23-19: capture regression passes');
   });
 
   it('DF23-20: Phase 21 overlay smoke', async () => {
@@ -738,7 +1151,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
     if (btn) {
       const ev = await clickAt(p, btn.x, btn.y);
       expect(ev).not.toBeNull();
-      expect(ev!.type).toBe('overlay:element-clicked');
+      expect(ev?.type).toBe('overlay:element-clicked');
     }
 
     await p.evaluate(() => {
@@ -755,16 +1168,23 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
   it('DF23-21: Phase 22 issue dogfood smoke', async () => {
     const selection = makeSelection({
       summary: { label: 'Test', role: 'button', textPreview: 'Smoke test', targetCount: 1 },
-      targets: [{
-        targetId: crypto.randomUUID(),
-        documentOrder: 0,
-        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-        semantics: { tagName: 'button', textPreview: 'Smoke test', isInteractive: true },
-        fingerprints: {},
-        resolutionCandidates: [],
-      }],
+      targets: [
+        {
+          targetId: crypto.randomUUID(),
+          documentOrder: 0,
+          geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+          semantics: { tagName: 'button', textPreview: 'Smoke test', isInteractive: true },
+          fingerprints: {},
+          resolutionCandidates: [],
+        },
+      ],
     });
-    const result = await state.issueService!.createIssue(selection, 'dogfood-session', 'dogfood-page', 'Smoke issue');
+    const result = await state.issueService!.createIssue(
+      selection,
+      'dogfood-session',
+      'dogfood-page',
+      'Smoke issue',
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('open');
@@ -775,7 +1195,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
   });
 });
 
-function makeSelection(overrides: Partial<any> = {}): any {
+function makeSelection(overrides: Partial<VisualSelection> = {}): VisualSelection {
   return {
     schemaVersion: 1,
     selectionId: crypto.randomUUID(),
@@ -784,16 +1204,21 @@ function makeSelection(overrides: Partial<any> = {}): any {
     mode: 'single',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    page: { url: 'https://example.com', viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 } },
+    page: {
+      url: 'https://example.com',
+      viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
+    },
     region: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-    targets: [{
-      targetId: crypto.randomUUID(),
-      documentOrder: 0,
-      geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-      semantics: { tagName: 'button', role: 'button', textPreview: 'Save', isInteractive: true },
-      fingerprints: {},
-      resolutionCandidates: [{ strategy: 'stable-attribute', value: 'test', confidence: 0.9 }],
-    }],
+    targets: [
+      {
+        targetId: crypto.randomUUID(),
+        documentOrder: 0,
+        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+        semantics: { tagName: 'button', role: 'button', textPreview: 'Save', isInteractive: true },
+        fingerprints: {},
+        resolutionCandidates: [{ strategy: 'stable-attribute', value: 'test', confidence: 0.9 }],
+      },
+    ],
     summary: { label: 'Save', role: 'button', textPreview: 'Save', targetCount: 1 },
     resolution: { status: 'resolved', confidence: 0.9, resolvedAt: new Date().toISOString() },
     ...overrides,

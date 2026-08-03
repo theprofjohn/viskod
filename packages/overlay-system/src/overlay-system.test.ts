@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getOverlayScript, getOverlayCleanupScript, toSelectionTarget } from './index';
+import { getOverlayCleanupScript, getOverlayScript, toSelectionTarget } from './index';
 
 describe('OverlaySystem', () => {
   it('generates overlay script that is a valid IIFE', () => {
@@ -12,19 +12,19 @@ describe('OverlaySystem', () => {
 
   it('overlay script is idempotent (checks for existing root)', () => {
     const script = getOverlayScript();
-    expect(script).toContain('if (document.getElementById(\'__viskod_overlay_root\')) return;');
+    expect(script).toContain("if (document.getElementById('__viskod_overlay_root')) return;");
   });
 
   it('overlay script uses closed Shadow DOM', () => {
     const script = getOverlayScript();
-    expect(script).toContain('attachShadow({ mode: \'closed\' })');
+    expect(script).toContain("attachShadow({ mode: 'closed' })");
   });
 
   it('overlay script includes CSS prefix for all classes', () => {
     const script = getOverlayScript();
     const prefixMatches = script.match(/PREFIX/g);
     expect(prefixMatches).not.toBeNull();
-    expect(prefixMatches!.length).toBeGreaterThan(5);
+    expect(prefixMatches?.length).toBeGreaterThan(5);
   });
 
   it('overlay script defines highlight-box styling with fixed positioning', () => {
@@ -75,6 +75,21 @@ describe('OverlaySystem', () => {
     expect(script).toContain('overlay:selection-cleared');
   });
 
+  it('renders every selected element and toggles individual selections', () => {
+    const script = getOverlayScript();
+    expect(script).toContain('selectedHighlightBoxes');
+    expect(script).toContain('renderSelectedElements');
+    expect(script).toContain('selected.el && selected.el.isConnected');
+    expect(script).toContain('getSelectionKey');
+    expect(script).toContain('selectedElements[i].key === selectionKey');
+    expect(script).toContain('renumberSelectedElements');
+    expect(script).toContain('selectedElements.length + 1');
+    expect(script).toContain('badge.textContent = String(selected.number)');
+    expect(script).toContain('selectionNumber: s.number');
+    expect(script).toContain('overlay:element-deselected');
+    expect(script).toContain('click a highlighted element to remove');
+  });
+
   it('overlay script respects reduced-motion preference', () => {
     const script = getOverlayScript();
     expect(script).toContain('prefers-reduced-motion');
@@ -83,6 +98,23 @@ describe('OverlaySystem', () => {
   it('overlay script uses elementFromPoint for hit testing', () => {
     const script = getOverlayScript();
     expect(script).toContain('elementFromPoint');
+  });
+
+  it('overlay script applies selection and diagnostics settings', () => {
+    const script = getOverlayScript();
+    expect(script).toContain('applyOverlaySettings');
+    expect(script).toContain('overlaySettings.multiSelect');
+    expect(script).toContain('overlaySettings.boxSelect');
+    expect(script).toContain('overlaySettings.hoverHighlight');
+    expect(script).toContain('overlaySettings.diagnosticsOverlay');
+    expect(script).toContain('overlaySettings.spacingVisualization');
+  });
+
+  it('overlay script makes multi-select the default without modifier keys', () => {
+    const script = getOverlayScript();
+    expect(script).toContain('overlaySettings.multiSelect = true');
+    expect(script).not.toContain('e.ctrlKey');
+    expect(script).not.toContain('e.metaKey');
   });
 
   it('overlay script excludes overlay-owned elements from selection', () => {
@@ -138,6 +170,38 @@ describe('OverlaySystem', () => {
     expect(script).toContain('overlay:highlight');
     expect(script).toContain('overlay:clear');
     expect(script).toContain('overlay:set-selection');
+    expect(script).toContain('overlay:set-selection-targets');
     expect(script).toContain('overlay:clear-selection');
+  });
+
+  it('overlay script supports diagnostics mode', () => {
+    const script = getOverlayScript();
+    expect(script).toContain('overlay:diagnostics');
+    expect(script).toContain('showBoundingBoxes');
+    expect(script).toContain('showSpacing');
+  });
+
+  it('overlay script has diagnostics layer and rendering functions', () => {
+    const script = getOverlayScript();
+    expect(script).toContain('diag-layer');
+    expect(script).toContain('diag-box');
+    expect(script).toContain('diag-margin');
+    expect(script).toContain('diag-padding');
+    expect(script).toContain('diag-spacing-label');
+    expect(script).toContain('showDiagnostics');
+    expect(script).toContain('clearDiagnostics');
+  });
+
+  it('overlay script sends diagnostics events', () => {
+    const script = getOverlayScript();
+    expect(script).toContain('overlay:diagnostics-shown');
+    expect(script).toContain('overlay:diagnostics-hidden');
+  });
+
+  it('overlay script reads computed styles for margin/padding', () => {
+    const script = getOverlayScript();
+    expect(script).toContain('getComputedStyle');
+    expect(script).toContain('margin');
+    expect(script).toContain('padding');
   });
 });

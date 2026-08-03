@@ -34,7 +34,9 @@ cd <REPO_PATH>
 pnpm viskod serve --url http://localhost:3000
 ```
 
-The server prints `Viskod MCP Server started` and waits for JSON-RPC messages on stdin.
+The server starts the browser, verifies the target URL, and waits for JSON-RPC messages on stdin.
+
+> **Note:** `viskod serve` exits at startup if nothing is listening on the target URL (`ERR_CONNECTION_REFUSED`). Start the fixture (or your app) first.
 
 ## 4. Configure Your MCP Client
 
@@ -75,8 +77,9 @@ Add the server entry to your `claude_desktop_config.json`.
 
 The MCP client will send a `tools/list` request on startup. The response should include:
 
-- `capture_context`
-- `recapture_context`
+- `viskod_select_element`
+- `viskod_capture_context`
+- `viskod_navigate`
 
 You can also verify manually by sending a JSON-RPC initialize:
 
@@ -84,18 +87,15 @@ You can also verify manually by sending a JSON-RPC initialize:
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
 ```
 
-Expected response includes `protocolVersion: "2024-11-05"` and capabilities listing both tools.
+Expected response includes `protocolVersion: "2024-11-05"` and capabilities listing the tools.
 
 ## 6. Run Your First Capture
 
 Ask your agent (or send a JSON-RPC request):
 
 ```
-capture_context(
-  selector: ".target-card",
-  url: "http://localhost:3000",
-  profile: "debug",
-  projectPath: "examples/phase12-source-hint-app"
+viskod_capture_context(
+  selector: ".target-card"
 )
 ```
 
@@ -103,11 +103,18 @@ The response includes:
 
 | Field | What It Contains |
 |-------|-----------------|
-| `packetPath` | Path to the full packet JSON (for `previousPacketPath` in recapture) |
-| `captureDir` | Directory with packet.json and screenshots |
-| `brief` | Markdown summary: bounding box, DOM, styles, source hints, evidence |
-| `sourceHintCount` | How many source files were linked |
-| `runtimeEvidenceSummary` | Console and network counts |
+| `ok` | Whether the capture succeeded |
+| `packetId` | Unique ID of the captured context packet |
+| `selection` | Selector, tag name, bounding box, and text of the captured element |
+| `dom` | Tag name, attributes, and child count |
+| `styles` | Computed styles of the element |
+| `screenshots` | Screenshot metadata (capture ID, type, format, dimensions) |
+| `hierarchy` | Selected node, parents, sibling and child counts |
+| `confidence` | Source mapping, semantic labeling, layout analysis, framework detection |
+| `evidenceSources` | Which subsystems produced evidence |
+| `processingTimeMs` | Capture duration |
+
+For a page-level capture, use `viskod_select_element(selector)` first (after navigating with `viskod_navigate`), or pass an explicit `selector` to `viskod_capture_context`.
 
 ## 7. Fix a Visual Issue
 
@@ -119,39 +126,28 @@ Make a change (e.g., add or remove a style rule) that affects the element's boun
 
 ## 8. Re-Capture and Compare
 
-Call `recapture_context` with:
+Navigate back to the page and capture again:
 
 ```
-recapture_context(
-  selector: ".target-card",
-  url: "http://localhost:3000",
-  profile: "default",
-  projectPath: "examples/phase12-source-hint-app",
-  previousPacketPath: "<packetPath from capture_context>",
-  reload: true,
-  cacheBust: true
+viskod_navigate(
+  url: "http://localhost:3000"
+)
+
+viskod_capture_context(
+  selector: ".target-card"
 )
 ```
 
-The response includes a `comparisonSummary` with:
+Compare the `selection.boundingBox` and `styles` fields between the two captures to verify the fix.
 
-| Field | What It Shows |
-|-------|--------------|
-| `boundingBoxDelta` | Before/after/delta for x, y, width, height |
-| `areaDelta` | Area change with percentChange |
-| `evidenceDelta` | Console, network, source hint, screenshot count changes |
-| `changedFields` | Which fields changed meaningfully |
-| `verdict` | `"changed"`, `"improved"`, or `"unchanged"` |
-| `notes` | Machine-readable explanation |
-
-**No server restart needed.** The browser reloads via `reload: true` and bypasses cache with `cacheBust: true`.
+**No server restart needed.** Use `viskod_navigate` (or the daemon capture protocol's `reload`/`cacheBust` options) to refresh the page between captures.
 
 ## Troubleshooting
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | `tools/list` returns empty | MCP server not running | Check the server terminal for errors |
-| `capture_context` hangs | Playwright browser launch issue | Ensure Playwright browsers are installed (`pnpm exec playwright install chromium`) |
-| `recapture_context` returns 404 | Server doesn't handle query params | The fixture server was patched to strip query strings. For your own server, ensure routes ignore `__viskod_cb` |
-| Source hints are empty | No project scan was run | Pass `projectPath` to point at the scanned project |
+| Server exits at startup | Target URL not listening | Start the app first, then `viskod serve` (`ERR_CONNECTION_REFUSED`) |
+| `viskod_capture_context` hangs | Playwright browser launch issue | Ensure Playwright browsers are installed (`pnpm exec playwright install chromium`) |
+| Source hints are empty | No project scan was run | Run `pnpm viskod scan` in the project, or use the CLI capture with `--project-path` |
 | Element not found | Selector doesn't match | Use browser DevTools to verify the selector works |

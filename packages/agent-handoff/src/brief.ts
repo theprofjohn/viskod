@@ -1,9 +1,11 @@
 import type { VisualIssue } from '@viskod/visual-issue';
-import type { AgentIssueBrief, AgentHandoffConstraints } from './types';
+import type { AgentHandoffConstraints, AgentIssueBrief } from './types';
 
-const DEFAULT_OBJECTIVE = 'Investigate the selected UI issue, identify the likely source area, and propose or implement the smallest safe code change. Use the provided Viskod context as evidence, but verify in the repository before changing code.';
+const DEFAULT_OBJECTIVE =
+  'Investigate the selected UI issue, identify the likely source area, and propose or implement the smallest safe code change. Use the provided Viskod context as evidence, but verify in the repository before changing code.';
 
-const DEFAULT_EXPECTED_OUTPUT = 'A description of the issue root cause and the minimal code change needed to fix it. Include file paths and line numbers where the change should be made.';
+const DEFAULT_EXPECTED_OUTPUT =
+  'A description of the issue root cause and the minimal code change needed to fix it. Include file paths and line numbers where the change should be made.';
 
 const REQUIRED_NON_GOALS = [
   'Do not rely on packet paths shown by the user.',
@@ -72,11 +74,15 @@ export function generateAgentBrief(
   }
 
   if (issue.targetSummary.resolutionStatus === 'ambiguous') {
-    task.nonGoals.push('The selected target is ambiguous. Investigate all candidates before changing code.');
+    task.nonGoals.push(
+      'The selected target is ambiguous. Investigate all candidates before changing code.',
+    );
   }
 
   if (issue.targetSummary.resolutionStatus === 'stale') {
-    task.nonGoals.push('The page context may be stale. Verify the current state before investigating.');
+    task.nonGoals.push(
+      'The page context may be stale. Verify the current state before investigating.',
+    );
   }
 
   return brief;

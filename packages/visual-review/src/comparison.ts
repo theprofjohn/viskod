@@ -1,8 +1,21 @@
-import type { VisualComparison, VisualComparisonStatus, ReviewSnapshotRef, RectDelta } from './types';
+import { type PixelDiffResult, compareScreenshots } from './pixel-diff';
+import type {
+  RectDelta,
+  ReviewSnapshotRef,
+  VisualComparison,
+  VisualComparisonStatus,
+} from './types';
+
+export interface ComparisonOptions {
+  /** File paths to screenshots for pixel-level comparison */
+  beforeScreenshotPath?: string;
+  afterScreenshotPath?: string;
+}
 
 export function computeComparison(
   before: ReviewSnapshotRef,
   after: ReviewSnapshotRef,
+  options?: ComparisonOptions,
 ): VisualComparison {
   const warnings: string[] = [];
   const targetWarnings: string[] = [];
@@ -11,7 +24,9 @@ export function computeComparison(
   const afterStatus = after.targetSummary.resolutionStatus;
 
   if (beforeStatus === 'stale') {
-    warnings.push('The before snapshot may be stale — the page has changed since the issue was created.');
+    warnings.push(
+      'The before snapshot may be stale — the page has changed since the issue was created.',
+    );
   }
   if (beforeStatus === 'missing') {
     warnings.push('The before target cannot be resolved in the original page context.');
@@ -21,7 +36,9 @@ export function computeComparison(
     targetWarnings.push('Target disappeared after recapture.');
   }
   if (afterStatus === 'ambiguous') {
-    warnings.push('Multiple targets match after recapture — the fix may have introduced duplicates.');
+    warnings.push(
+      'Multiple targets match after recapture — the fix may have introduced duplicates.',
+    );
     targetWarnings.push('Target is ambiguous after recapture.');
   }
 
@@ -29,11 +46,17 @@ export function computeComparison(
 
   const confidence = computeConfidence(before, after, sameTargetLikely, warnings);
 
-  const status = determineComparisonStatus(before, after, sameTargetLikely, warnings);
+  const status = determineComparisonStatus(before, after, sameTargetLikely);
 
-  const summary = buildComparisonSummary(status, before, after, sameTargetLikely, warnings);
+  const summary = buildComparisonSummary(status, sameTargetLikely);
 
   const boundingBoxDelta = computeBoundingBoxDelta(before, after);
+
+  // Pixel-level comparison when screenshot paths are available
+  let pixelDiff: PixelDiffResult | null = null;
+  if (options?.beforeScreenshotPath && options?.afterScreenshotPath) {
+    pixelDiff = compareScreenshots(options.beforeScreenshotPath, options.afterScreenshotPath);
+  }
 
   return {
     status,
@@ -45,7 +68,15 @@ export function computeComparison(
       sameTargetLikely,
       warnings: targetWarnings,
     },
-    visual: boundingBoxDelta ? { boundingBoxDelta } : undefined,
+    visual: {
+      ...(boundingBoxDelta ? { boundingBoxDelta } : {}),
+      ...(pixelDiff
+        ? {
+            changedPixelRatio: pixelDiff.changedPixelRatio,
+            screenshotDiffId: pixelDiff.changedPixelRatio > 0 ? 'available' : undefined,
+          }
+        : {}),
+    },
     warnings,
   };
 }
@@ -101,7 +132,6 @@ function determineComparisonStatus(
   before: ReviewSnapshotRef,
   after: ReviewSnapshotRef,
   sameTargetLikely: boolean,
-  warnings: string[],
 ): VisualComparisonStatus {
   if (after.targetSummary.resolutionStatus === 'missing') return 'missing_after';
   if (after.targetSummary.resolutionStatus === 'ambiguous') return 'ambiguous_after';
@@ -149,13 +179,7 @@ function computeBoundingBoxDelta(
   return computeRectDelta(bv, av);
 }
 
-function buildComparisonSummary(
-  status: VisualComparisonStatus,
-  before: ReviewSnapshotRef,
-  after: ReviewSnapshotRef,
-  sameTargetLikely: boolean,
-  warnings: string[],
-): string {
+function buildComparisonSummary(status: VisualComparisonStatus, sameTargetLikely: boolean): string {
   switch (status) {
     case 'unchanged':
       return 'The selected target appears unchanged after recapture. Review the visual evidence to confirm.';

@@ -22,21 +22,32 @@ const OVERLAY_SCRIPT = `
   var PREFIX = '__viskod_';
   var host = document.createElement('div');
   host.id = PREFIX + 'overlay_root';
-  document.body.appendChild(host);
+  host.style.cssText = 'position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;overflow:visible!important;z-index:2147483647!important;pointer-events:none!important;isolation:isolate!important;';
+  document.documentElement.appendChild(host);
 
   var shadow = host.attachShadow({ mode: 'closed' });
 
   var prefersReducedMotion = false;
   try { prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e) {}
 
+  // ponytail: motion-design layers — primary (highlight), secondary (badge), ambient (indicator)
+  // timing from motion-principles: hover 100ms, selection 200ms, confirmation 300ms
+  // only transform/opacity animated — never layout properties
+  var tHighlight = prefersReducedMotion ? 'none' : 'transform 0.1s ease-out, opacity 0.1s ease-out, border-color 0.15s ease-out, background 0.15s ease-out';
+  var tBadge = prefersReducedMotion ? 'none' : 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease-out';
+  var tConfirm = prefersReducedMotion ? 'none' : 'transform 0.3s ease-out, opacity 0.3s ease-out';
+  var tIndicator = prefersReducedMotion ? 'none' : 'opacity 0.2s ease-out';
+
   var style = document.createElement('style');
   style.textContent = [
     '.' + PREFIX + 'highlight-box {',
       'position: fixed; pointer-events: none; z-index: 2147483646;',
       'border: 2px solid #4A90D9; background: rgba(74, 144, 217, 0.1);',
-      prefersReducedMotion ? '' : 'transition: all 0.1s ease;',
-      'box-sizing: border-box;',
+      'box-sizing: border-box; will-change: transform, opacity;',
+      'left: 0; top: 0; width: 0; height: 0; opacity: 0;',
+      'transition: ' + tHighlight + ';',
     '}',
+    '.' + PREFIX + 'highlight-box.' + PREFIX + 'visible { opacity: 1; }',
     '.' + PREFIX + 'highlight-box.' + PREFIX + 'hover {',
       'border-color: #90CAF9; background: rgba(144, 202, 249, 0.15); border-style: dashed;',
     '}',
@@ -48,10 +59,14 @@ const OVERLAY_SCRIPT = `
     '}',
     '.' + PREFIX + 'label {',
       'position: fixed; pointer-events: none; z-index: 2147483647;',
-      'background: #333; color: #fff; font: 11px -apple-system, BlinkMacSystemFont, sans-serif;',
-      'padding: 3px 8px; border-radius: 4px; white-space: nowrap; max-width: 300px;',
-      'overflow: hidden; text-overflow: ellipsis; line-height: 1.4;',
+      'background: rgba(17, 24, 39, 0.92); color: #fff;',
+      'font: 500 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
+      'padding: 5px 10px; border-radius: 6px; white-space: nowrap; max-width: 300px;',
+      'overflow: hidden; text-overflow: ellipsis;',
+      'box-shadow: 0 2px 8px rgba(0,0,0,0.25); backdrop-filter: blur(4px);',
+      'opacity: 0; transition: ' + tIndicator + ';',
     '}',
+    '.' + PREFIX + 'label.' + PREFIX + 'visible { opacity: 1; }',
     '.' + PREFIX + 'event-layer {',
       'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;',
       'z-index: 2147483645; pointer-events: none;',
@@ -62,55 +77,101 @@ const OVERLAY_SCRIPT = `
     '.' + PREFIX + 'drag-rect {',
       'position: fixed; pointer-events: none; z-index: 2147483646;',
       'border: 2px dashed #4A90D9; background: rgba(74, 144, 217, 0.08);',
-      'box-sizing: border-box; display: none;',
+      'box-sizing: border-box; opacity: 0;',
+      'transition: opacity 0.1s ease-out;',
     '}',
+    '.' + PREFIX + 'drag-rect.' + PREFIX + 'visible { opacity: 1; }',
     '.' + PREFIX + 'selection-badge {',
       'position: fixed; pointer-events: none; z-index: 2147483647;',
       'background: #22C55E; color: #fff; font: bold 14px -apple-system, BlinkMacSystemFont, sans-serif;',
-      'width: 22px; height: 22px; border-radius: 50%; display: none;',
-      'align-items: center; justify-content: center; line-height: 1;',
+      'width: 22px; height: 22px; border-radius: 50%;',
+      'display: flex; align-items: center; justify-content: center; line-height: 1;',
+      'opacity: 0; transform: scale(0); will-change: transform, opacity;',
+      'transition: ' + tBadge + ';',
     '}',
+    '.' + PREFIX + 'selection-badge.' + PREFIX + 'visible { opacity: 1; transform: scale(1); }',
     '.' + PREFIX + 'selection-indicator {',
-      'position: fixed; top: 8px; right: 8px; z-index: 2147483647;',
-      'background: rgba(0, 0, 0, 0.75); color: #fff; font: 12px -apple-system, BlinkMacSystemFont, sans-serif;',
-      'padding: 4px 10px; border-radius: 6px; pointer-events: none; display: none;',
-      'backdrop-filter: blur(4px);',
+      'position: fixed; top: 10px; right: 10px; z-index: 2147483647;',
+      'background: rgba(15, 23, 42, 0.9); color: #fff;',
+      'font: 500 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
+      'padding: 7px 12px; border-radius: 8px; pointer-events: none;',
+      'backdrop-filter: blur(6px); opacity: 0;',
+      'box-shadow: 0 2px 12px rgba(0,0,0,0.3);',
+      'display: flex; align-items: center; gap: 8px;',
+      'transition: ' + tIndicator + ';',
     '}',
-    '.' + PREFIX + 'selection-indicator.' + PREFIX + 'visible {',
-      'display: block;',
+    '.' + PREFIX + 'selection-indicator.' + PREFIX + 'visible { opacity: 1; }',
+    '.' + PREFIX + 'selection-indicator-dot {',
+      'width: 8px; height: 8px; border-radius: 50%; background: #6366F1; flex-shrink: 0;',
     '}',
     '.' + PREFIX + 'confirmation {',
-      'position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);',
-      'z-index: 2147483647; background: rgba(0, 0, 0, 0.8);',
-      'color: #fff; font: 13px -apple-system, BlinkMacSystemFont, sans-serif;',
-      'padding: 8px 16px; border-radius: 8px; pointer-events: auto; display: none;',
-      'backdrop-filter: blur(4px); gap: 12px; align-items: center;',
-      'white-space: nowrap;',
+      'position: fixed; bottom: 16px; left: 50%;',
+      'z-index: 2147483647; background: rgba(15, 23, 42, 0.92);',
+      'color: #fff; font: 500 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
+      'padding: 9px 18px; border-radius: 10px; pointer-events: none;',
+      'backdrop-filter: blur(6px); gap: 12px; align-items: center;',
+      'white-space: nowrap; opacity: 0; will-change: transform, opacity;',
+      'box-shadow: 0 4px 20px rgba(0,0,0,0.35);',
+      'transform: translateX(-50%) translateY(8px);',
+      'transition: ' + tConfirm + ';',
     '}',
     '.' + PREFIX + 'confirmation.' + PREFIX + 'visible {',
-      'display: flex;',
+      'opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto;',
     '}',
     '.' + PREFIX + 'confirmation-btn {',
       'background: rgba(255, 255, 255, 0.15); border: none; color: #fff;',
-      'font: 12px -apple-system, BlinkMacSystemFont, sans-serif; padding: 4px 10px;',
-      'border-radius: 4px; cursor: pointer;',
+      'font: 500 12px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; padding: 5px 12px;',
+      'border-radius: 6px; cursor: pointer; transition: background 0.1s ease-out;',
     '}',
     '.' + PREFIX + 'confirmation-btn:hover {',
-      'background: rgba(255, 255, 255, 0.25);',
+      'background: rgba(255, 255, 255, 0.28);',
     '}',
     '.' + PREFIX + 'confirmation-text {',
-      'pointer-events: none; max-width: 250px; overflow: hidden; text-overflow: ellipsis;',
+      'pointer-events: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis;',
+    '}',
+    // Diagnostics layer — bounding boxes and spacing visualization
+    '.' + PREFIX + 'diag-layer {',
+      'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;',
+      'z-index: 2147483644; pointer-events: none; display: none;',
+    '}',
+    '.' + PREFIX + 'diag-layer.' + PREFIX + 'visible { display: block; }',
+    '.' + PREFIX + 'diag-box {',
+      'position: fixed; pointer-events: none;',
+      'border: 1px dashed rgba(74, 144, 217, 0.4);',
+      'background: rgba(74, 144, 217, 0.04);',
+      'box-sizing: border-box;',
+    '}',
+    '.' + PREFIX + 'diag-margin {',
+      'position: fixed; pointer-events: none;',
+      'background: rgba(239, 68, 68, 0.08);',
+      'box-sizing: border-box;',
+    '}',
+    '.' + PREFIX + 'diag-padding {',
+      'position: fixed; pointer-events: none;',
+      'background: rgba(34, 197, 94, 0.08);',
+      'box-sizing: border-box;',
+    '}',
+    '.' + PREFIX + 'diag-spacing {',
+      'position: fixed; pointer-events: none;',
+      'box-sizing: border-box;',
+    '}',
+    '.' + PREFIX + 'diag-spacing-label {',
+      'position: fixed; pointer-events: none; z-index: 2147483647;',
+      'background: rgba(249, 115, 22, 0.9); color: #fff;',
+      'font: bold 10px -apple-system, BlinkMacSystemFont, sans-serif;',
+      'padding: 1px 4px; border-radius: 2px; white-space: nowrap;',
     '}',
   ].join('\\n');
   shadow.appendChild(style);
 
   var highlightBox = shadow.appendChild(document.createElement('div'));
   highlightBox.className = PREFIX + 'highlight-box';
-  highlightBox.style.display = 'none';
+  var selectedHighlightBoxes = [];
+  var selectedBadges = [];
 
   var label = shadow.appendChild(document.createElement('div'));
   label.className = PREFIX + 'label';
-  label.style.display = 'none';
+  label.setAttribute('role', 'tooltip');
 
   var dragRect = shadow.appendChild(document.createElement('div'));
   dragRect.className = PREFIX + 'drag-rect';
@@ -118,21 +179,31 @@ const OVERLAY_SCRIPT = `
   var selectionBadge = shadow.appendChild(document.createElement('div'));
   selectionBadge.className = PREFIX + 'selection-badge';
   selectionBadge.textContent = '\\u2713';
+  selectionBadge.setAttribute('aria-hidden', 'true');
 
   var selectionIndicator = shadow.appendChild(document.createElement('div'));
   selectionIndicator.className = PREFIX + 'selection-indicator';
-  selectionIndicator.textContent = 'Selection mode active \\u00B7 Click or drag to select \\u00B7 Esc to exit';
+  selectionIndicator.setAttribute('role', 'status');
+  selectionIndicator.setAttribute('aria-live', 'polite');
+  var selIndicatorDot = selectionIndicator.appendChild(document.createElement('span'));
+  selIndicatorDot.className = PREFIX + 'selection-indicator-dot';
+  var selIndicatorText = selectionIndicator.appendChild(document.createElement('span'));
+  selIndicatorText.textContent = 'Selection mode \\u00B7 Click or drag \\u00B7 Esc to exit';
 
   var confirmation = shadow.appendChild(document.createElement('div'));
   confirmation.className = PREFIX + 'confirmation';
+  confirmation.setAttribute('role', 'toolbar');
+  confirmation.setAttribute('aria-label', 'Selection actions');
   var confirmationText = confirmation.appendChild(document.createElement('span'));
   confirmationText.className = PREFIX + 'confirmation-text';
   var clearBtn = confirmation.appendChild(document.createElement('button'));
   clearBtn.className = PREFIX + 'confirmation-btn';
   clearBtn.textContent = 'Clear';
+  clearBtn.setAttribute('aria-label', 'Clear selection');
   var exitBtn = confirmation.appendChild(document.createElement('button'));
   exitBtn.className = PREFIX + 'confirmation-btn';
   exitBtn.textContent = 'Exit';
+  exitBtn.setAttribute('aria-label', 'Exit selection mode');
 
   var eventLayer = shadow.querySelector('.' + PREFIX + 'event-layer');
   if (!eventLayer) {
@@ -140,18 +211,70 @@ const OVERLAY_SCRIPT = `
     eventLayer.className = PREFIX + 'event-layer';
   }
 
+  var diagLayer = shadow.appendChild(document.createElement('div'));
+  diagLayer.className = PREFIX + 'diag-layer';
+
   var mode = 'hidden';
   var isDragging = false;
   var dragStart = null;
   var hasSelection = false;
+  var selectedElements = []; // array of { el, info, key, number } for multi-select
   var currentElementInfo = null;
+  var lastHoveredElement = null;
   var throttleTimer = null;
+  var diagnosticsOn = false;
+  var diagOptions = { showBoundingBoxes: true, showSpacing: false };
+  var overlaySettings = {
+    multiSelect: true,
+    boxSelect: true,
+    hoverHighlight: true,
+    diagnosticsOverlay: false,
+    spacingVisualization: false,
+  };
 
   function sendMessage(type, data) {
     window.postMessage({ source: '__viskod_overlay', type: type, data: data }, '*');
+    // Write to shared DOM element for content script to read (bridges isolation gap)
+    try {
+      var bridge = document.getElementById('__viskod_bridge');
+      if (!bridge) {
+        bridge = document.createElement('div');
+        bridge.id = '__viskod_bridge';
+        bridge.style.display = 'none';
+        document.body.appendChild(bridge);
+      }
+      bridge.textContent = JSON.stringify({ type: type, data: data });
+    } catch(e) {}
   }
 
-  function getElementInfo(el) {
+  // Listen for commands from content script via DOM polling
+  setInterval(function() {
+    try {
+      var cmd = document.getElementById('__viskod_cmd');
+      if (cmd && cmd.textContent) {
+        var parsed = JSON.parse(cmd.textContent);
+        cmd.textContent = '';
+        if (parsed.command === 'overlay:show') {
+          applyOverlaySettings(parsed.settings);
+          setMode(parsed.mode || 'hover');
+          sendMessage('overlay:ready', {});
+        } else if (parsed.command === 'overlay:hide') {
+          isDragging = false;
+          dragStart = null;
+          hideDragRect();
+          hideConfirmation();
+          clearSelectedVisuals();
+          hideSelectionIndicator();
+          setMode('hidden');
+          clearHighlight();
+          selectedElements = [];
+          hasSelection = false;
+        }
+      }
+    } catch(e) {}
+  }, 100);
+
+  function getElementInfo(el, includeDocumentOrder) {
     var rect = el.getBoundingClientRect();
     var tagName = el.tagName.toLowerCase();
     var role = el.getAttribute('role') || undefined;
@@ -187,7 +310,7 @@ const OVERLAY_SCRIPT = `
       isInteractive: isInteractive,
       stableAttributes: Object.keys(attrs).length > 0 ? attrs : undefined,
       ancestorTags: ancestors.length > 0 ? ancestors : undefined,
-      documentOrder: getDocumentOrder(el),
+      documentOrder: includeDocumentOrder === false ? -1 : getDocumentOrder(el),
     };
   }
 
@@ -203,30 +326,29 @@ const OVERLAY_SCRIPT = `
   }
 
   function showHighlight(box, text, className) {
-    highlightBox.style.display = 'block';
-    highlightBox.style.top = box.y + 'px';
     highlightBox.style.left = box.x + 'px';
+    highlightBox.style.top = box.y + 'px';
     highlightBox.style.width = box.width + 'px';
     highlightBox.style.height = box.height + 'px';
-    var cls = PREFIX + 'highlight-box ' + PREFIX + (className || 'hover');
-    if (hasSelection) cls += ' ' + PREFIX + 'selected';
+    var cls = PREFIX + 'highlight-box ' + PREFIX + 'visible ' + PREFIX + (className || 'hover');
     highlightBox.className = cls;
     if (text) {
-      label.style.display = 'block';
       var lx = Math.min(box.x + box.width + 8, window.innerWidth - 310);
       var ly = Math.max(box.y - 22, 4);
       label.style.top = ly + 'px';
       label.style.left = lx + 'px';
       label.textContent = text;
+      label.classList.add(PREFIX + 'visible');
     } else {
-      label.style.display = 'none';
+      label.classList.remove(PREFIX + 'visible');
     }
   }
 
   function clearHighlight() {
-    highlightBox.style.display = 'none';
-    label.style.display = 'none';
+    highlightBox.classList.remove(PREFIX + 'visible');
+    label.classList.remove(PREFIX + 'visible');
     currentElementInfo = null;
+    lastHoveredElement = null;
   }
 
   function showDragRect(x1, y1, x2, y2) {
@@ -234,25 +356,74 @@ const OVERLAY_SCRIPT = `
     var top = Math.min(y1, y2);
     var width = Math.abs(x2 - x1);
     var height = Math.abs(y2 - y1);
-    dragRect.style.display = 'block';
     dragRect.style.left = left + 'px';
     dragRect.style.top = top + 'px';
     dragRect.style.width = width + 'px';
     dragRect.style.height = height + 'px';
+    dragRect.classList.add(PREFIX + 'visible');
   }
 
   function hideDragRect() {
-    dragRect.style.display = 'none';
+    dragRect.classList.remove(PREFIX + 'visible');
   }
 
   function showSelectionBadge(box) {
-    selectionBadge.style.display = 'flex';
     selectionBadge.style.top = (box.y - 11) + 'px';
     selectionBadge.style.left = (box.x + box.width - 11) + 'px';
+    selectionBadge.classList.add(PREFIX + 'visible');
   }
 
   function hideSelectionBadge() {
-    selectionBadge.style.display = 'none';
+    selectionBadge.classList.remove(PREFIX + 'visible');
+  }
+
+  function clearSelectedVisuals() {
+    for (var i = 0; i < selectedHighlightBoxes.length; i++) {
+      selectedHighlightBoxes[i].remove();
+    }
+    for (var j = 0; j < selectedBadges.length; j++) {
+      selectedBadges[j].remove();
+    }
+    selectedHighlightBoxes = [];
+    selectedBadges = [];
+    hideSelectionBadge();
+  }
+
+  function renderSelectedElements() {
+    clearSelectedVisuals();
+    var active = [];
+
+    for (var i = 0; i < selectedElements.length; i++) {
+      var selected = selectedElements[i];
+      if (!selected || !selected.info) continue;
+
+      var info = selected.info;
+      if (selected.el && selected.el.isConnected) {
+        info = getElementInfo(selected.el);
+        selected.info = info;
+      }
+      active.push(selected);
+
+      var box = shadow.appendChild(document.createElement('div'));
+      box.className = PREFIX + 'highlight-box ' + PREFIX + 'visible ' + PREFIX + 'selected';
+      box.style.left = info.boundingBox.x + 'px';
+      box.style.top = info.boundingBox.y + 'px';
+      box.style.width = info.boundingBox.width + 'px';
+      box.style.height = info.boundingBox.height + 'px';
+      box.setAttribute('aria-hidden', 'true');
+      selectedHighlightBoxes.push(box);
+
+      var badge = shadow.appendChild(document.createElement('div'));
+      badge.className = PREFIX + 'selection-badge ' + PREFIX + 'visible';
+      badge.textContent = String(selected.number);
+      badge.style.top = (info.boundingBox.y - 11) + 'px';
+      badge.style.left = (info.boundingBox.x + info.boundingBox.width - 11) + 'px';
+      badge.setAttribute('aria-hidden', 'true');
+      selectedBadges.push(badge);
+    }
+
+    selectedElements = active;
+    hasSelection = active.length > 0;
   }
 
   function showConfirmation(text) {
@@ -272,11 +443,137 @@ const OVERLAY_SCRIPT = `
     selectionIndicator.classList.remove(PREFIX + 'visible');
   }
 
+  // ponytail: diagnostics overlay — bounding boxes + spacing visualization
+  // spec: overlay:diagnostics { show, showBoundingBoxes, showSpacing }
+  function clearDiagnostics() {
+    diagLayer.innerHTML = '';
+    diagLayer.classList.remove(PREFIX + 'visible');
+    diagnosticsOn = false;
+  }
+
+  function showDiagnostics(opts) {
+    clearDiagnostics();
+    diagnosticsOn = true;
+    diagOptions.showBoundingBoxes = opts.showBoundingBoxes !== false;
+    diagOptions.showSpacing = opts.showSpacing === true;
+    diagLayer.classList.add(PREFIX + 'visible');
+
+    // Walk visible elements and draw bounding boxes
+    var elements = document.querySelectorAll('body > *');
+    var prevRect = null;
+
+    for (var i = 0; i < elements.length; i++) {
+      var el = elements[i];
+      if (el === host || host.contains(el)) continue;
+      if (el.getAttribute && el.getAttribute('data-viskod-overlay') !== null) continue;
+
+      var rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) continue;
+      if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+      if (rect.right < 0 || rect.left > window.innerWidth) continue;
+
+      var cs = window.getComputedStyle(el);
+
+      if (diagOptions.showBoundingBoxes) {
+        // Content box
+        var box = document.createElement('div');
+        box.className = PREFIX + 'diag-box';
+        box.style.left = rect.left + 'px';
+        box.style.top = rect.top + 'px';
+        box.style.width = rect.width + 'px';
+        box.style.height = rect.height + 'px';
+        diagLayer.appendChild(box);
+
+        // Margin (red)
+        var mt = parseFloat(cs.marginTop) || 0;
+        var mr = parseFloat(cs.marginRight) || 0;
+        var mb = parseFloat(cs.marginBottom) || 0;
+        var ml = parseFloat(cs.marginLeft) || 0;
+        if (mt || mr || mb || ml) {
+          var mg = document.createElement('div');
+          mg.className = PREFIX + 'diag-margin';
+          mg.style.left = (rect.left - ml) + 'px';
+          mg.style.top = (rect.top - mt) + 'px';
+          mg.style.width = (rect.width + ml + mr) + 'px';
+          mg.style.height = (rect.height + mt + mb) + 'px';
+          mg.style.borderLeft = ml ? '2px solid rgba(239,68,68,0.3)' : 'none';
+          mg.style.borderRight = mr ? '2px solid rgba(239,68,68,0.3)' : 'none';
+          mg.style.borderTop = mt ? '2px solid rgba(239,68,68,0.3)' : 'none';
+          mg.style.borderBottom = mb ? '2px solid rgba(239,68,68,0.3)' : 'none';
+          diagLayer.appendChild(mg);
+        }
+
+        // Padding (green)
+        var pt = parseFloat(cs.paddingTop) || 0;
+        var pr = parseFloat(cs.paddingRight) || 0;
+        var pb = parseFloat(cs.paddingBottom) || 0;
+        var pl = parseFloat(cs.paddingLeft) || 0;
+        if (pt || pr || pb || pl) {
+          var pg = document.createElement('div');
+          pg.className = PREFIX + 'diag-padding';
+          pg.style.left = (rect.left + pl) + 'px';
+          pg.style.top = (rect.top + pt) + 'px';
+          pg.style.width = (rect.width - pl - pr) + 'px';
+          pg.style.height = (rect.height - pt - pb) + 'px';
+          diagLayer.appendChild(pg);
+        }
+      }
+
+      // Spacing between adjacent elements
+      if (diagOptions.showSpacing && prevRect) {
+        var gapX = rect.left - prevRect.right;
+        var gapY = rect.top - prevRect.bottom;
+        if (gapX > 0 && gapX < 200 && Math.abs(gapY) < 5) {
+          var lbl = document.createElement('div');
+          lbl.className = PREFIX + 'diag-spacing-label';
+          lbl.textContent = Math.round(gapX) + 'px';
+          lbl.style.left = (prevRect.right + gapX / 2 - 12) + 'px';
+          lbl.style.top = (prevRect.top + prevRect.height / 2 - 7) + 'px';
+          diagLayer.appendChild(lbl);
+
+          var line = document.createElement('div');
+          line.className = PREFIX + 'diag-spacing';
+          line.style.left = prevRect.right + 'px';
+          line.style.top = (prevRect.top + prevRect.height / 2) + 'px';
+          line.style.width = gapX + 'px';
+          line.style.height = '1px';
+          line.style.background = 'rgba(249,115,22,0.5)';
+          diagLayer.appendChild(line);
+        }
+      }
+
+      prevRect = rect;
+    }
+  }
+
+  function applyOverlaySettings(settings) {
+    if (settings) {
+      // Multi-select is the default interaction. Modifier keys are not required.
+      overlaySettings.multiSelect = true;
+      overlaySettings.boxSelect = settings.boxSelect !== false;
+      overlaySettings.hoverHighlight = settings.hoverHighlight !== false;
+      overlaySettings.diagnosticsOverlay = settings.diagnosticsOverlay === true;
+      overlaySettings.spacingVisualization = settings.spacingVisualization === true;
+    }
+
+    var showDiagnosticsLayer = overlaySettings.diagnosticsOverlay || overlaySettings.spacingVisualization;
+    if (showDiagnosticsLayer) {
+      showDiagnostics({
+        showBoundingBoxes: overlaySettings.diagnosticsOverlay,
+        showSpacing: overlaySettings.spacingVisualization,
+      });
+    } else if (diagnosticsOn) {
+      clearDiagnostics();
+    }
+  }
+
   function setMode(newMode) {
     mode = newMode;
     if (mode === 'hover' || mode === 'selection') {
+      // Track pointer for highlight/hover, but only selection blocks clicks
       eventLayer.classList.add(PREFIX + 'active');
-      showSelectionIndicator();
+      if (mode === 'selection') showSelectionIndicator();
+      else hideSelectionIndicator();
     } else if (mode === 'box-select') {
       eventLayer.classList.add(PREFIX + 'active');
     } else {
@@ -286,12 +583,12 @@ const OVERLAY_SCRIPT = `
   }
 
   function getTargetElement(clientX, clientY) {
-    highlightBox.style.display = 'none';
+    highlightBox.classList.remove(PREFIX + 'visible');
     var savedPE = eventLayer.style.pointerEvents;
     eventLayer.style.pointerEvents = 'none';
     var el = document.elementFromPoint(clientX, clientY);
     eventLayer.style.pointerEvents = savedPE;
-    highlightBox.style.display = hasSelection ? 'block' : 'none';
+    if (hasSelection) highlightBox.classList.add(PREFIX + 'visible');
     if (!el) return null;
     if (el === host || host.contains(el)) return null;
     if (el.getAttribute && el.getAttribute('data-viskod-overlay') !== null) return null;
@@ -301,15 +598,33 @@ const OVERLAY_SCRIPT = `
   function handlePointerMove(clientX, clientY) {
     if (mode !== 'hover' && mode !== 'selection') return;
     if (isDragging) return;
-    if (hasSelection) return;
-
+    if (!overlaySettings.hoverHighlight) {
+      clearHighlight();
+      return;
+    }
     var el = getTargetElement(clientX, clientY);
-    if (!el) { clearHighlight(); return; }
+    if (!el) {
+      lastHoveredElement = null;
+      clearHighlight();
+      return;
+    }
+    if (el === lastHoveredElement) return;
 
-    var info = getElementInfo(el);
+    lastHoveredElement = el;
+    var info = getElementInfo(el, false);
     currentElementInfo = info;
     showHighlight(info.boundingBox, info.tagName + (info.textPreview ? ' \\u00B7 ' + info.textPreview : ''), 'hover');
     sendMessage('overlay:element-hovered', info);
+  }
+
+  function getSelectionKey(info) {
+    return String(info.documentOrder) + ':' + info.tagName;
+  }
+
+  function renumberSelectedElements() {
+    for (var i = 0; i < selectedElements.length; i++) {
+      selectedElements[i].number = i + 1;
+    }
   }
 
   function handleClick(clientX, clientY) {
@@ -321,26 +636,71 @@ const OVERLAY_SCRIPT = `
 
     var info = getElementInfo(el);
     currentElementInfo = info;
-    hasSelection = true;
-    showHighlight(info.boundingBox, info.tagName + (info.textPreview ? ' \\u00B7 ' + info.textPreview : ''), 'selection');
-    showSelectionBadge(info.boundingBox);
-    showConfirmation(info.tagName + (info.textPreview ? ' \\u00B7 ' + info.textPreview : ''));
-    sendMessage('overlay:element-clicked', info);
+    var selectionKey = getSelectionKey(info);
+    var existingIdx = -1;
+    for (var i = 0; i < selectedElements.length; i++) {
+      if (selectedElements[i].key === selectionKey) { existingIdx = i; break; }
+    }
+
+    var wasDeselected = existingIdx >= 0;
+    if (wasDeselected) {
+      selectedElements.splice(existingIdx, 1);
+      renumberSelectedElements();
+    } else if (selectedElements.length === 0 || overlaySettings.multiSelect) {
+      selectedElements.push({ el: el, info: info, key: selectionKey, number: selectedElements.length + 1 });
+    } else {
+      selectedElements = [{ el: el, info: info, key: selectionKey, number: 1 }];
+    }
+
+    var count = selectedElements.length;
+    hasSelection = count > 0;
+    var allInfos = selectedElements.map(function(s) {
+      return Object.assign({}, s.info, { selectionNumber: s.number });
+    });
+    var selectionMsg = {};
+    for (var k in info) { if (info.hasOwnProperty(k)) selectionMsg[k] = info[k]; }
+    selectionMsg.multi = count > 1;
+    selectionMsg.selectionCount = count;
+    selectionMsg.selectedElements = allInfos;
+
+    if (!hasSelection) {
+      clearHighlight();
+      clearSelectedVisuals();
+      hideConfirmation();
+      sendMessage('overlay:element-deselected', selectionMsg);
+      return;
+    }
+
+    clearHighlight();
+    renderSelectedElements();
+    count = selectedElements.length;
+    if (count > 1) {
+      showConfirmation(count + ' elements selected \\u00B7 click a highlighted element to remove');
+    } else {
+      showConfirmation('1 element selected \\u00B7 click it again to remove');
+    }
+
+    selectionMsg.selectionCount = count;
+    selectionMsg.selectedElements = selectedElements.map(function(s) {
+      return Object.assign({}, s.info, { selectionNumber: s.number });
+    });
+    sendMessage(wasDeselected ? 'overlay:element-deselected' : 'overlay:element-clicked', selectionMsg);
   }
 
   function handlePointerDown(clientX, clientY) {
     if (mode !== 'selection') return;
-    if (hasSelection) return;
+    // Allow starting a new drag/click even when a selection exists (for multi-select)
     if (clientX === undefined) return;
 
     dragStart = { x: clientX, y: clientY };
     isDragging = false;
+    if (!overlaySettings.boxSelect) return;
     showDragRect(clientX, clientY, clientX, clientY);
     setMode('box-select');
   }
 
   function handlePointerMoveDrag(clientX, clientY) {
-    if (!dragStart) return;
+    if (!dragStart || !overlaySettings.boxSelect) return;
     var dx = clientX - dragStart.x;
     var dy = clientY - dragStart.y;
     if (!isDragging && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
@@ -353,6 +713,16 @@ const OVERLAY_SCRIPT = `
 
   function handlePointerUp(clientX, clientY) {
     if (!dragStart) { isDragging = false; return; }
+
+    if (!overlaySettings.boxSelect) {
+      var clickStart = dragStart;
+      dragStart = null;
+      isDragging = false;
+      if (Math.abs(clientX - clickStart.x) <= 5 && Math.abs(clientY - clickStart.y) <= 5) {
+        handleClick(clientX, clientY);
+      }
+      return;
+    }
 
     if (!isDragging && dragStart) {
       hideDragRect();
@@ -394,8 +764,9 @@ const OVERLAY_SCRIPT = `
 
   function clearSelection() {
     hasSelection = false;
+    selectedElements = [];
     clearHighlight();
-    hideSelectionBadge();
+    clearSelectedVisuals();
     hideConfirmation();
     sendMessage('overlay:selection-cleared', {});
   }
@@ -460,6 +831,14 @@ const OVERLAY_SCRIPT = `
     }
   });
 
+  // Keep selected boxes aligned after scrolling by recalculating their live DOM rects.
+  window.addEventListener('scroll', function() {
+    lastHoveredElement = null;
+    if (hasSelection) {
+      clearHighlight();
+      renderSelectedElements();
+    }
+  }, { passive: true });
   window.addEventListener('message', function(event) {
     if (event.data && event.data.source === '__viskod_browser') {
       var cmd = event.data.command;
@@ -471,11 +850,12 @@ const OVERLAY_SCRIPT = `
         dragStart = null;
         hideDragRect();
         hideConfirmation();
-        hideSelectionBadge();
+        clearSelectedVisuals();
         hideSelectionIndicator();
-        setMode('hidden');
-        clearHighlight();
-        hasSelection = false;
+         setMode('hidden');
+         clearHighlight();
+         selectedElements = [];
+         hasSelection = false;
       } else if (cmd === 'overlay:highlight') {
         var sel = event.data.selector;
         if (sel) {
@@ -497,12 +877,33 @@ const OVERLAY_SCRIPT = `
           showSelectionBadge(si.boundingBox);
           showConfirmation(si.label);
         }
+      } else if (cmd === 'overlay:set-selection-targets') {
+        var incomingTargets = Array.isArray(event.data.targets) ? event.data.targets : [];
+        selectedElements = incomingTargets
+          .filter(function(info) { return info && info.boundingBox; })
+          .map(function(info, index) { return { el: null, info: info, key: getSelectionKey(info), number: index + 1 }; });
+        renderSelectedElements();
+        if (selectedElements.length > 0) {
+          showConfirmation(selectedElements.length + ' elements selected \\u00B7 click a highlighted element to remove');
+        } else {
+          hideConfirmation();
+        }
       } else if (cmd === 'overlay:clear-selection') {
-        hasSelection = false;
-        hideSelectionBadge();
-        hideConfirmation();
-        clearHighlight();
-        sendMessage('overlay:selection-cleared', {});
+        clearSelection();
+      } else if (cmd === 'overlay:diagnostics') {
+        if (event.data.show) {
+          showDiagnostics({
+            showBoundingBoxes: event.data.showBoundingBoxes !== false,
+            showSpacing: event.data.showSpacing === true,
+          });
+          sendMessage('overlay:diagnostics-shown', {
+            showBoundingBoxes: diagOptions.showBoundingBoxes,
+            showSpacing: diagOptions.showSpacing,
+          });
+        } else {
+          clearDiagnostics();
+          sendMessage('overlay:diagnostics-hidden', {});
+        }
       }
     }
   });

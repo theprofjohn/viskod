@@ -14,21 +14,39 @@ export interface IssueIntegration {
 
   listIssues(): Promise<{ ok: true; issues: VisualIssue[] } | { ok: false; error: string }>;
 
-  getIssue(issueId: string): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
+  getIssue(
+    issueId: string,
+  ): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
 
-  updateIssue(issueId: string, updates: IssueUpdate): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
+  updateIssue(
+    issueId: string,
+    updates: IssueUpdate,
+  ): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
 
-  archiveIssue(issueId: string): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
+  archiveIssue(
+    issueId: string,
+  ): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
 
-  reopenIssue(issueId: string): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
+  reopenIssue(
+    issueId: string,
+  ): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
 
-  deleteIssue(issueId: string): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
+  deleteIssue(
+    issueId: string,
+  ): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
 }
 
 export function createIssueIntegration(service: IssueService): IssueIntegration {
   return {
     async createIssueFromSelection(selection, sessionId, pageId, title, description, severity) {
-      const result = await service.createIssue(selection, sessionId, pageId, title, description, severity);
+      const result = await service.createIssue(
+        selection,
+        sessionId,
+        pageId,
+        title,
+        description,
+        severity,
+      );
       if (!result.ok) return { ok: false, error: result.error.message };
       return { ok: true, issue: result.value };
     },

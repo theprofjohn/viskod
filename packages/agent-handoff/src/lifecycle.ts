@@ -1,4 +1,4 @@
-import type { AgentHandoffStatus, AgentHandoffEvent } from './types';
+import type { AgentHandoffEvent, AgentHandoffStatus } from './types';
 
 const VALID_TRANSITIONS: Record<AgentHandoffStatus, AgentHandoffStatus[]> = {
   draft: ['ready', 'cancelled'],
@@ -10,7 +10,10 @@ const VALID_TRANSITIONS: Record<AgentHandoffStatus, AgentHandoffStatus[]> = {
   cancelled: [],
 };
 
-export function isValidHandoffTransition(from: AgentHandoffStatus, to: AgentHandoffStatus): boolean {
+export function isValidHandoffTransition(
+  from: AgentHandoffStatus,
+  to: AgentHandoffStatus,
+): boolean {
   if (from === to) return true;
   const allowed = VALID_TRANSITIONS[from];
   return allowed?.includes(to) ?? false;

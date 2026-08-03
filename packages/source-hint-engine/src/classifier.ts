@@ -1,25 +1,65 @@
 import * as path from 'node:path';
 import type {
-  SourceHintKind,
-  HintEvidence,
   DiscoveryMethod,
+  HintEvidence,
   HintLocation,
-  HintSymbol,
   HintRoute,
+  HintSymbol,
+  SourceHintKind,
 } from './types';
 
-const GENERATED_DIRS = ['node_modules', 'dist', 'build', '.next', '.output', '.nuxt', 'coverage', '.cache'];
+const GENERATED_DIRS = [
+  'node_modules',
+  'dist',
+  'build',
+  '.next',
+  '.output',
+  '.nuxt',
+  'coverage',
+  '.cache',
+];
 
 const TEST_PATTERNS = [/\.test\./, /\.spec\./, /\.stories?\./, /__tests__/, /__mocks__/];
 
-const STYLE_EXTENSIONS = new Set(['.css', '.scss', '.less', '.module.css', '.module.scss', '.styled.ts', '.styled.tsx']);
+const STYLE_EXTENSIONS = new Set([
+  '.css',
+  '.scss',
+  '.less',
+  '.module.css',
+  '.module.scss',
+  '.styled.ts',
+  '.styled.tsx',
+]);
 
 const COMPONENT_PRIMITIVES = new Set([
-  'button', 'input', 'select', 'textarea', 'checkbox', 'radio',
-  'label', 'form', 'dialog', 'menu', 'tooltip', 'popover',
-  'card', 'badge', 'alert', 'tabs', 'accordion', 'modal',
-  'dropdown', 'combobox', 'avatar', 'separator', 'spinner',
-  'table', 'data-table', 'calendar', 'command', 'sheet',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  'checkbox',
+  'radio',
+  'label',
+  'form',
+  'dialog',
+  'menu',
+  'tooltip',
+  'popover',
+  'card',
+  'badge',
+  'alert',
+  'tabs',
+  'accordion',
+  'modal',
+  'dropdown',
+  'combobox',
+  'avatar',
+  'separator',
+  'spinner',
+  'table',
+  'data-table',
+  'calendar',
+  'command',
+  'sheet',
 ]);
 
 const ROUTE_DIR_PATTERNS = [

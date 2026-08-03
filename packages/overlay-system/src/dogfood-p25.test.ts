@@ -1,21 +1,20 @@
 // Phase 25 dogfood: Usage-Site Source Hints — end-to-end on shadcn-admin
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.setConfig({ testTimeout: 60000 });
-import { chromium, type Page, type Browser } from 'playwright';
-import { getOverlayScript } from '@viskod/overlay-system';
-import { EventBus } from '@viskod/event-bus';
-import { IssueServiceImpl, IssuePersistence } from '@viskod/visual-issue';
-import { HandoffServiceImpl, HandoffPersistence } from '@viskod/agent-handoff';
-import { ReviewServiceImpl, ReviewPersistence } from '@viskod/visual-review';
-import { SourceHintEngine } from '@viskod/source-hint-engine';
-import { ProjectScanner } from '@viskod/project-scanner';
-import type { VisualSelection } from '@viskod/visual-selection';
-import type { RecaptureAdapter, RecaptureResult } from '@viskod/visual-review';
-import { spawn, type ChildProcess } from 'child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { HandoffPersistence, HandoffServiceImpl } from '@viskod/agent-handoff';
+import { EventBus } from '@viskod/event-bus';
+import { getOverlayScript } from '@viskod/overlay-system';
+import { ProjectScanner } from '@viskod/project-scanner';
+import { SourceHintEngine } from '@viskod/source-hint-engine';
+import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
+import { ReviewPersistence, ReviewServiceImpl } from '@viskod/visual-review';
+import type { VisualSelection } from '@viskod/visual-selection';
+import { type Browser, type Page, chromium } from 'playwright';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -71,9 +70,15 @@ const state: SharedState = {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
-  try { fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(HANDOFF_STORAGE, { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(REVIEW_STORAGE, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true });
+  } catch {}
+  try {
+    fs.rmSync(HANDOFF_STORAGE, { recursive: true, force: true });
+  } catch {}
+  try {
+    fs.rmSync(REVIEW_STORAGE, { recursive: true, force: true });
+  } catch {}
 
   try {
     devProc = spawn('pnpm', ['dev'], { cwd: TARGET_DIR, stdio: 'pipe', shell: true });
@@ -90,7 +95,12 @@ beforeAll(async () => {
   const handoffPersistence = new HandoffPersistence(HANDOFF_STORAGE);
   state.handoffService = new HandoffServiceImpl(eventBus, state.issueService, handoffPersistence);
   const reviewPersistence = new ReviewPersistence(REVIEW_STORAGE);
-  state.reviewService = new ReviewServiceImpl(eventBus, state.issueService, state.handoffService, reviewPersistence);
+  state.reviewService = new ReviewServiceImpl(
+    eventBus,
+    state.issueService,
+    state.handoffService,
+    reviewPersistence,
+  );
   state.sourceHintEngine = new SourceHintEngine(eventBus);
   state.projectScanner = new ProjectScanner(eventBus);
 
@@ -98,7 +108,9 @@ beforeAll(async () => {
   const scanResult = await state.projectScanner.scan(TARGET_DIR);
   if (scanResult.ok) {
     state.projectRootPath = scanResult.value.metadata.rootPath;
-    console.log(`  Project scanned: ${scanResult.value.metadata.name} (${scanResult.value.metadata.rootPath})`);
+    console.log(
+      `  Project scanned: ${scanResult.value.metadata.name} (${scanResult.value.metadata.rootPath})`,
+    );
     console.log(`  Framework: ${scanResult.value.framework.primary ?? 'unknown'}`);
     console.log(`  Components: ${scanResult.value.components.directories.join(', ')}`);
     console.log(`  Routes: ${scanResult.value.routes.totalRoutes}`);
@@ -108,9 +120,15 @@ beforeAll(async () => {
 afterAll(async () => {
   if (browser) await browser.close();
   if (devProc) devProc.kill();
-  try { fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(HANDOFF_STORAGE, { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(REVIEW_STORAGE, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true });
+  } catch {}
+  try {
+    fs.rmSync(HANDOFF_STORAGE, { recursive: true, force: true });
+  } catch {}
+  try {
+    fs.rmSync(REVIEW_STORAGE, { recursive: true, force: true });
+  } catch {}
 
   // Print summary
   console.log('\n=== Phase 25 Dogfood Summary ===');
@@ -122,14 +140,19 @@ afterAll(async () => {
     const mark = r.pass ? '✅' : '❌';
     console.log(`  ${mark} ${r.id}: ${r.description}`);
     if (r.actualTop5Hints.length > 0) {
-      console.log(`    Top hint: ${r.actualTop5Hints[0]!.displayPath} (${r.actualTop5Hints[0]!.kind}, conf=${r.actualTop5Hints[0]!.confidence})`);
+      console.log(
+        `    Top hint: ${r.actualTop5Hints[0]?.displayPath} (${r.actualTop5Hints[0]?.kind}, conf=${r.actualTop5Hints[0]?.confidence})`,
+      );
     }
   }
 });
 
 async function makePage(): Promise<Page> {
   if (!browser) throw new Error('browser not available');
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  const ctx = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 1,
+  });
   const p = await ctx.newPage();
   await p.goto(TARGET_URL, { waitUntil: 'networkidle', timeout: 15000 });
   await sleep(1000);
@@ -140,34 +163,149 @@ async function activateOverlay(p: Page) {
   await p.evaluate(overlayScript);
   await sleep(200);
   await p.evaluate(() => {
-    window.postMessage({ source: '__viskod_browser', command: 'overlay:show', mode: 'selection' }, '*');
+    window.postMessage(
+      { source: '__viskod_browser', command: 'overlay:show', mode: 'selection' },
+      '*',
+    );
   });
   await sleep(300);
 }
 
-async function clickAt(p: Page, x: number, y: number): Promise<any> {
-  await p.mouse.move(x, y); await sleep(30);
-  await p.mouse.down(); await sleep(30);
-  await p.mouse.up(); await sleep(300);
-  return p.evaluate(() => {
-    const evts = (window as any).__vs_events || [];
-    (window as any).__vs_events = [];
-    return evts.filter((e: any) => e.type !== 'overlay:ready');
-  }).then((evts: any[]) => (evts.length > 0 ? evts[evts.length - 1] : null));
+async function clickAt(
+  p: Page,
+  x: number,
+  y: number,
+): Promise<{
+  type: string;
+  data?: {
+    source?: string;
+    viewportRect?: { x: number; y: number; width: number; height: number };
+    boundingBox?: { x: number; y: number; width: number; height: number };
+    tagName?: string;
+    textPreview?: string;
+    role?: string;
+    accessibleName?: string;
+    isInteractive?: boolean;
+    inputType?: string;
+    stableAttributes?: Record<string, string>;
+  };
+} | null> {
+  await p.mouse.move(x, y);
+  await sleep(30);
+  await p.mouse.down();
+  await sleep(30);
+  await p.mouse.up();
+  await sleep(300);
+  return p
+    .evaluate(() => {
+      const evts =
+        (
+          window as unknown as {
+            __vs_events: Array<{
+              type: string;
+              data?: {
+                source?: string;
+                viewportRect?: { x: number; y: number; width: number; height: number };
+                boundingBox?: { x: number; y: number; width: number; height: number };
+                tagName?: string;
+                textPreview?: string;
+                role?: string;
+                accessibleName?: string;
+                isInteractive?: boolean;
+                inputType?: string;
+                stableAttributes?: Record<string, string>;
+              };
+            }>;
+          }
+        ).__vs_events || [];
+      (
+        window as unknown as {
+          __vs_events: Array<{
+            type: string;
+            data?: {
+              source?: string;
+              viewportRect?: { x: number; y: number; width: number; height: number };
+              boundingBox?: { x: number; y: number; width: number; height: number };
+              tagName?: string;
+              textPreview?: string;
+              role?: string;
+              accessibleName?: string;
+              isInteractive?: boolean;
+              inputType?: string;
+              stableAttributes?: Record<string, string>;
+            };
+          }>;
+        }
+      ).__vs_events = [];
+      return evts.filter((e) => e.type !== 'overlay:ready');
+    })
+    .then((evts) => (evts.length > 0 ? (evts[evts.length - 1] ?? null) : null));
 }
 
 async function setupCapture(p: Page) {
   await p.evaluate(() => {
-    (window as any).__vs_events = [];
+    (
+      window as unknown as {
+        __vs_events: Array<{
+          type: string;
+          data?: {
+            source?: string;
+            viewportRect?: { x: number; y: number; width: number; height: number };
+            boundingBox?: { x: number; y: number; width: number; height: number };
+            tagName?: string;
+            textPreview?: string;
+            role?: string;
+            accessibleName?: string;
+            isInteractive?: boolean;
+            inputType?: string;
+            stableAttributes?: Record<string, string>;
+          };
+        }>;
+      }
+    ).__vs_events = [];
     window.addEventListener('message', (e) => {
       if (e.data && e.data.source === '__viskod_overlay') {
-        (window as any).__vs_events.push(e.data);
+        (
+          window as unknown as {
+            __vs_events: Array<{
+              type: string;
+              data?: {
+                source?: string;
+                viewportRect?: { x: number; y: number; width: number; height: number };
+                boundingBox?: { x: number; y: number; width: number; height: number };
+                tagName?: string;
+                textPreview?: string;
+                role?: string;
+                accessibleName?: string;
+                isInteractive?: boolean;
+                inputType?: string;
+                stableAttributes?: Record<string, string>;
+              };
+            }>;
+          }
+        ).__vs_events.push(e.data);
       }
     });
   });
 }
 
-function makeVisualSelection(overlayEvent: any, pageUrl: string, title?: string): VisualSelection {
+function makeVisualSelection(
+  overlayEvent: {
+    data?: {
+      source?: string;
+      viewportRect?: { x: number; y: number; width: number; height: number };
+      boundingBox?: { x: number; y: number; width: number; height: number };
+      tagName?: string;
+      textPreview?: string;
+      role?: string;
+      accessibleName?: string;
+      isInteractive?: boolean;
+      stableAttributes?: Record<string, string>;
+    };
+  },
+  pageUrl: string,
+  title?: string,
+): VisualSelection {
   const rect = overlayEvent.data?.boundingBox || { x: 0, y: 0, width: 0, height: 0 };
   const tagName = overlayEvent.data?.tagName || 'element';
   const textPreview = overlayEvent.data?.textPreview || '';
@@ -201,14 +339,25 @@ function makeVisualSelection(overlayEvent: any, pageUrl: string, title?: string)
         resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
       },
     ],
-    summary: { label: textPreview || tagName, role, textPreview: textPreview.slice(0, 120), targetCount: 1 },
+    summary: {
+      label: textPreview || tagName,
+      role,
+      textPreview: textPreview.slice(0, 120),
+      targetCount: 1,
+    },
     resolution: { status: 'resolved', confidence: 0.85, resolvedAt: new Date().toISOString() },
   };
 }
 
 async function resolveHintsForIssue(issueId: string): Promise<{
-  status: string;
-  hints: Array<{ displayPath: string; kind: string; confidence: number; score: number; reasons: string[] }>;
+  status: 'ranked' | 'ambiguous' | 'low_confidence' | 'missing';
+  hints: Array<{
+    displayPath: string;
+    kind: string;
+    confidence: number;
+    score: number;
+    reasons: string[];
+  }>;
   warnings: string[];
 }> {
   const issueResult = await state.issueService!.getIssue(issueId);
@@ -242,7 +391,11 @@ async function resolveHintsForIssue(issueId: string): Promise<{
         language: 'typescript',
       },
       componentIndex: { directories: ['src/components', 'components'] },
-      framework: { primary: 'next.js', detected: ['next.js', 'react', 'tailwind'], confidence: 0.95 },
+      framework: {
+        primary: 'next.js',
+        detected: ['next.js', 'react', 'tailwind'],
+        confidence: 0.95,
+      },
     },
     captureId: crypto.randomUUID(),
   };
@@ -267,23 +420,6 @@ function recordScenario(result: ScenarioResult) {
   state.scenarioResults.push(result);
 }
 
-function makeRecaptureResult(overrides?: Partial<RecaptureResult>): RecaptureResult {
-  return {
-    packetId: crypto.randomUUID(),
-    selector: 'button',
-    tagName: 'button',
-    boundingBox: { x: 100, y: 200, width: 120, height: 40 },
-    text: 'Save',
-    url: TARGET_URL,
-    viewport: { width: 1440, height: 900 },
-    ...overrides,
-  };
-}
-
-function makeMockAdapter(overrides?: Partial<RecaptureResult>): RecaptureAdapter {
-  return async () => makeRecaptureResult(overrides);
-}
-
 // =========================================================================
 // Dogfood tests — Phase 25: Usage-Site Source Hints
 // =========================================================================
@@ -303,26 +439,48 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       for (const el of links) {
         const r = el.getBoundingClientRect();
         if (r.width > 20 && r.height > 20 && r.top > 50 && r.top < 800) {
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || '').trim().slice(0, 40) };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: (el.textContent || '').trim().slice(0, 40),
+          };
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-01: SKIP — no sidebar nav found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-01: SKIP — no sidebar nav found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-01: target="${target.text}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)}, score=${h.score.toFixed(3)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(
+        `    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)}, score=${h.score.toFixed(3)})`,
+      ),
+    );
 
     recordScenario({
       id: 'DF25-01',
@@ -330,7 +488,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text,
       expectedTopUsageSite: 'app/ or features/ route file',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: hints.status !== 'missing' && hints.hints.length > 0,
     });
 
@@ -350,31 +508,58 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       const buttons = document.querySelectorAll('button');
       for (const el of buttons) {
         const r = el.getBoundingClientRect();
-        if (r.width > 15 && r.width < 60 && r.height > 15 && r.height < 60 && r.top > 30 && r.top < 100) {
+        if (
+          r.width > 15 &&
+          r.width < 60 &&
+          r.height > 15 &&
+          r.height < 60 &&
+          r.top > 30 &&
+          r.top < 100
+        ) {
           const ariaLabel = el.getAttribute('aria-label') || '';
           const text = (el.textContent || '').trim();
           if (ariaLabel || text.length < 5) {
-            return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: ariaLabel || text || 'icon-button' };
+            return {
+              x: r.x + r.width / 2,
+              y: r.y + r.height / 2,
+              text: ariaLabel || text || 'icon-button',
+            };
           }
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-02: SKIP — no icon-only control found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-02: SKIP — no icon-only control found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-02: target="${target.text}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`),
+    );
 
     recordScenario({
       id: 'DF25-02',
@@ -382,7 +567,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text,
       expectedTopUsageSite: 'route/form file using the icon button',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: hints.status !== 'missing',
     });
 
@@ -401,26 +586,46 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       for (const el of inputs) {
         const r = el.getBoundingClientRect();
         if (r.width > 50 && r.height > 20 && r.top > 100 && r.top < 800) {
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.getAttribute('placeholder') || el.getAttribute('aria-label') || 'input') };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: el.getAttribute('placeholder') || el.getAttribute('aria-label') || 'input',
+          };
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-03: SKIP — no input found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-03: SKIP — no input found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-03: target="${target.text}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`),
+    );
 
     recordScenario({
       id: 'DF25-03',
@@ -428,7 +633,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text,
       expectedTopUsageSite: 'settings page/form file',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: hints.status !== 'missing' && hints.hints.length > 0,
     });
 
@@ -444,30 +649,52 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
 
     // Find a select/combobox trigger
     const target = await p.evaluate(() => {
-      const triggers = document.querySelectorAll('[role="combobox"], [role="listbox"], select, [data-state]');
+      const triggers = document.querySelectorAll(
+        '[role="combobox"], [role="listbox"], select, [data-state]',
+      );
       for (const el of triggers) {
         const r = el.getBoundingClientRect();
         if (r.width > 30 && r.height > 20 && r.top > 50 && r.top < 800) {
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || el.getAttribute('aria-label') || 'dropdown') };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: el.textContent || el.getAttribute('aria-label') || 'dropdown',
+          };
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-04: SKIP — no dropdown found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-04: SKIP — no dropdown found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-04: target="${target.text}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`),
+    );
 
     recordScenario({
       id: 'DF25-04',
@@ -475,7 +702,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text,
       expectedTopUsageSite: 'route/form using dropdown',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: hints.status !== 'missing',
     });
 
@@ -494,26 +721,46 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       for (const el of rows) {
         const r = el.getBoundingClientRect();
         if (r.width > 100 && r.height > 20 && r.top > 100 && r.top < 800) {
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || '').trim().slice(0, 60) };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: (el.textContent || '').trim().slice(0, 60),
+          };
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-05: SKIP — no table row found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-05: SKIP — no table row found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-05: target="${target.text.slice(0, 40)}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`),
+    );
 
     recordScenario({
       id: 'DF25-05',
@@ -521,7 +768,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text.slice(0, 40),
       expectedTopUsageSite: 'table usage file or route owner',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: hints.status !== 'missing' && hints.hints.length > 0,
     });
 
@@ -540,26 +787,46 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       for (const el of cells) {
         const r = el.getBoundingClientRect();
         if (r.width > 30 && r.height > 15 && r.top > 100 && r.top < 800) {
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || '').trim().slice(0, 40) };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: (el.textContent || '').trim().slice(0, 40),
+          };
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-06: SKIP — no table cell found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-06: SKIP — no table cell found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-06: target="${target.text}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`),
+    );
 
     recordScenario({
       id: 'DF25-06',
@@ -567,7 +834,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text,
       expectedTopUsageSite: 'table column definition or route file',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: hints.status !== 'missing',
     });
 
@@ -589,27 +856,47 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
         for (const btn of buttons) {
           const r = btn.getBoundingClientRect();
           if (r.width > 10 && r.height > 10 && r.top > 100 && r.top < 800) {
-            return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (btn.textContent || btn.getAttribute('aria-label') || 'action') };
+            return {
+              x: r.x + r.width / 2,
+              y: r.y + r.height / 2,
+              text: btn.textContent || btn.getAttribute('aria-label') || 'action',
+            };
           }
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-07: SKIP — no row action button found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-07: SKIP — no row action button found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-07: target="${target.text}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`),
+    );
 
     recordScenario({
       id: 'DF25-07',
@@ -617,7 +904,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text,
       expectedTopUsageSite: 'table actions column or route file',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: hints.status !== 'missing',
     });
 
@@ -632,30 +919,52 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     await activateOverlay(p);
 
     const target = await p.evaluate(() => {
-      const cards = document.querySelectorAll('[class*="card"], [data-slot="card"], [role="region"]');
+      const cards = document.querySelectorAll(
+        '[class*="card"], [data-slot="card"], [role="region"]',
+      );
       for (const el of cards) {
         const r = el.getBoundingClientRect();
         if (r.width > 100 && r.height > 60 && r.top > 80 && r.top < 800) {
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || '').trim().slice(0, 60) };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: (el.textContent || '').trim().slice(0, 60),
+          };
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-08: SKIP — no card found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-08: SKIP — no card found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-08: target="${target.text.slice(0, 40)}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`),
+    );
 
     recordScenario({
       id: 'DF25-08',
@@ -663,7 +972,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text.slice(0, 40),
       expectedTopUsageSite: 'dashboard/page file using Card',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: hints.status !== 'missing' && hints.hints.length > 0,
     });
 
@@ -683,26 +992,46 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       for (const el of divs) {
         const r = el.getBoundingClientRect();
         if (r.width > 200 && r.height > 100 && r.top > 50 && r.top < 700 && r.left < 1200) {
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: `container ${r.width}x${r.height}` };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: `container ${r.width}x${r.height}`,
+          };
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-09: SKIP — no container found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-09: SKIP — no container found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-09: target="${target.text}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`),
+    );
 
     // Box regions may have less context, so accept missing/low_confidence too
     recordScenario({
@@ -711,7 +1040,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text,
       expectedTopUsageSite: 'page/layout file containing the container',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: true, // Box regions are acceptable with any status
     });
 
@@ -740,20 +1069,36 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       return null;
     });
 
-    if (!target) { console.log('  DF25-10: SKIP — no duplicate text found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-10: SKIP — no duplicate text found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
     console.log(`  DF25-10: target="${target.text}" status=${hints.status}`);
-    hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`));
+    hints.hints.forEach((h, i) =>
+      console.log(`    ${i + 1}. ${h.displayPath} (${h.kind}, conf=${h.confidence.toFixed(2)})`),
+    );
 
     // Duplicate text may produce ambiguous status — that's acceptable
     recordScenario({
@@ -762,7 +1107,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       selectedTarget: target.text,
       expectedTopUsageSite: 'current route file or ambiguous',
       actualTop5Hints: hints.hints,
-      status: hints.status as any,
+      status: hints.status,
       pass: hints.status !== 'missing' && hints.hints.length > 0,
     });
 
@@ -781,19 +1126,37 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       const el = document.querySelector('a, button');
       if (el) {
         const r = el.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || '').trim().slice(0, 40) };
+        return {
+          x: r.x + r.width / 2,
+          y: r.y + r.height / 2,
+          text: (el.textContent || '').trim().slice(0, 40),
+        };
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-11: SKIP — no element found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-11: SKIP — no element found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
-    if (!issueResult.ok) { await p.close(); return; }
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     // Resolve hints manually to pass to handoff
@@ -810,7 +1173,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
           score: h.score,
           reasons: h.reasons,
         })),
-        sourceHintStatus: hints.status as any,
+        sourceHintStatus: hints.status,
       },
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -824,13 +1187,17 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       expect(get.ok).toBe(true);
       if (get.ok) {
         const brief = get.value.brief;
-        console.log(`  DF25-11: handoff brief has sourceHints=${!!brief.sourceHints}, count=${brief.sourceHints?.count ?? 0}`);
+        console.log(
+          `  DF25-11: handoff brief has sourceHints=${!!brief.sourceHints}, count=${brief.sourceHints?.count ?? 0}`,
+        );
         if (brief.sourceHints) {
           expect(brief.sourceHints.count).toBeGreaterThan(0);
           expect(brief.sourceHints.topHints.length).toBeGreaterThan(0);
           expect(brief.sourceHints.status).toBeTruthy();
           brief.sourceHints.topHints.forEach((h, i) => {
-            console.log(`    ${i + 1}. ${h.displayName} (kind=${h.kind}, conf=${h.confidence?.toFixed(2)})`);
+            console.log(
+              `    ${i + 1}. ${h.displayName} (kind=${h.kind}, conf=${h.confidence?.toFixed(2)})`,
+            );
           });
         }
       }
@@ -849,22 +1216,44 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       const el = document.querySelector('a, button');
       if (el) {
         const r = el.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || '').trim().slice(0, 40) };
+        return {
+          x: r.x + r.width / 2,
+          y: r.y + r.height / 2,
+          text: (el.textContent || '').trim().slice(0, 40),
+        };
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-12: SKIP — no element found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-12: SKIP — no element found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
-    if (!issueResult.ok) { await p.close(); return; }
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
-    const createResult = await state.reviewService!.createReview({ issueId: issueResult.value.issueId }, 'dogfood-p25-session', 'dogfood-p25-page');
+    const createResult = await state.reviewService!.createReview(
+      { issueId: issueResult.value.issueId },
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(createResult.ok).toBe(true);
     if (createResult.ok) {
       state.reviewIds.push(createResult.value.reviewId);
@@ -874,14 +1263,16 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       if (get.ok) {
         // Verify the review preserves evidence summary
         expect(get.value.before.evidenceSummary).toBeDefined();
-        console.log(`  DF25-12: review before hasSourceHints=${get.value.before.evidenceSummary.hasSourceHints}`);
+        console.log(
+          `  DF25-12: review before hasSourceHints=${get.value.before.evidenceSummary.hasSourceHints}`,
+        );
 
         // Verify no secrets or paths in output
         const json = JSON.stringify(get.value);
         expect(json).not.toContain('C:\\');
         expect(json).not.toContain('/home/');
         expect(json).not.toContain('.viskod');
-        console.log(`  DF25-12: review output safe — no absolute paths or secrets`);
+        console.log('  DF25-12: review output safe — no absolute paths or secrets');
       }
     }
     await p.close();
@@ -918,7 +1309,9 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     const result = await state.sourceHintEngine!.resolveUsageSiteHints(hintInput, 5);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      console.log(`  DF25-13: no source status=${result.value.status}, hints=${result.value.topHints.length}`);
+      console.log(
+        `  DF25-13: no source status=${result.value.status}, hints=${result.value.topHints.length}`,
+      );
 
       recordScenario({
         id: 'DF25-13',
@@ -932,7 +1325,10 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
           score: h.ranking.score,
         })),
         status: result.value.status,
-        pass: result.value.status === 'missing' || result.value.status === 'low_confidence' || result.value.topHints.length <= 2,
+        pass:
+          result.value.status === 'missing' ||
+          result.value.status === 'low_confidence' ||
+          result.value.topHints.length <= 2,
       });
 
       // Should not fabricate paths
@@ -947,7 +1343,11 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
   it('DF25-14: path safety — no absolute paths or packet paths in output', async () => {
     const p = await makePage();
     const issueId = state.issueIds[0];
-    if (!issueId) { console.log('  DF25-14: SKIP — no issue available'); await p.close(); return; }
+    if (!issueId) {
+      console.log('  DF25-14: SKIP — no issue available');
+      await p.close();
+      return;
+    }
 
     const hints = await resolveHintsForIssue(issueId);
     const output = JSON.stringify(hints);
@@ -963,7 +1363,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     expect(output).not.toContain('captures/');
     expect(output).not.toContain('packets/');
 
-    console.log(`  DF25-14: path safety verified — no absolute or packet paths`);
+    console.log('  DF25-14: path safety verified — no absolute or packet paths');
     await p.close();
   });
 
@@ -971,7 +1371,11 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
   it('DF25-15: redaction — no secrets in hints/tool/handoff output', async () => {
     const p = await makePage();
     const issueId = state.issueIds[0];
-    if (!issueId) { console.log('  DF25-15: SKIP — no issue available'); await p.close(); return; }
+    if (!issueId) {
+      console.log('  DF25-15: SKIP — no issue available');
+      await p.close();
+      return;
+    }
 
     const hints = await resolveHintsForIssue(issueId);
     const output = JSON.stringify(hints);
@@ -983,7 +1387,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     expect(output).not.toMatch(/Bearer\s+[A-Za-z0-9._-]{20,}/);
     expect(output).not.toMatch(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
 
-    console.log(`  DF25-15: redaction verified — no secrets in hints output`);
+    console.log('  DF25-15: redaction verified — no secrets in hints output');
     await p.close();
   });
 
@@ -991,10 +1395,13 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
   it('DF25-16: existing capture_context regression — overlay system intact', async () => {
     const p = await makePage();
     const hasOverlay = await p.evaluate(() => {
-      return typeof (window as any).__viskod_overlay !== 'undefined' || true;
+      return (
+        typeof (window as unknown as { __viskod_overlay?: unknown }).__viskod_overlay !==
+          'undefined' || true
+      );
     });
     expect(hasOverlay).toBe(true);
-    console.log(`  DF25-16: capture_context regression — overlay system intact`);
+    console.log('  DF25-16: capture_context regression — overlay system intact');
     await p.close();
   });
 
@@ -1006,7 +1413,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       return document.body.children.length > 0;
     });
     expect(hasContent).toBe(true);
-    console.log(`  DF25-17: recapture_context regression — page structure intact`);
+    console.log('  DF25-17: recapture_context regression — page structure intact');
     await p.close();
   });
 
@@ -1027,7 +1434,11 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       for (const el of candidates) {
         const r = el.getBoundingClientRect();
         if (r.width > 20 && r.height > 20 && r.top > 50 && r.top < 800 && r.left < 400) {
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: (el.textContent || '').trim().slice(0, 40) };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: (el.textContent || '').trim().slice(0, 40),
+          };
         }
       }
       return null;
@@ -1037,7 +1448,11 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       const ev = await clickAt(p, target.x, target.y);
       if (ev) {
         const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-        const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+        const issueResult = await state.issueService!.createIssue(
+          selection,
+          'dogfood-p25-session',
+          'dogfood-p25-page',
+        );
         if (issueResult.ok) {
           state.issueIds.push(issueResult.value.issueId);
 
@@ -1057,7 +1472,9 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
           );
           if (reviewResult.ok) state.reviewIds.push(reviewResult.value.reviewId);
 
-          console.log(`  DF25-18: full pipeline smoke — issue=${issueResult.ok}, handoff=${handoffResult.ok}, review=${reviewResult.ok}`);
+          console.log(
+            `  DF25-18: full pipeline smoke — issue=${issueResult.ok}, handoff=${handoffResult.ok}, review=${reviewResult.ok}`,
+          );
         }
       }
     }
@@ -1085,14 +1502,28 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       return null;
     });
 
-    if (!target) { console.log('  DF25-19: SKIP — no button found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-19: SKIP — no button found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
-    if (!issueResult.ok) { await p.close(); return; }
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
@@ -1101,7 +1532,9 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
 
     // Verify that if there are both usage-site and definition-site hints,
     // usage-site ranks higher
-    const usageHints = hints.hints.filter((h) => h.kind === 'usage-site' || h.kind === 'route-owner');
+    const usageHints = hints.hints.filter(
+      (h) => h.kind === 'usage-site' || h.kind === 'route-owner',
+    );
     const defHints = hints.hints.filter((h) => h.kind === 'definition-site');
 
     if (usageHints.length > 0 && defHints.length > 0) {
@@ -1127,27 +1560,47 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       for (const el of cards) {
         const r = el.getBoundingClientRect();
         if (r.width > 100 && r.height > 60 && r.top > 80 && r.top < 800) {
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, text: `card ${r.width}x${r.height}` };
+          return {
+            x: r.x + r.width / 2,
+            y: r.y + r.height / 2,
+            text: `card ${r.width}x${r.height}`,
+          };
         }
       }
       return null;
     });
 
-    if (!target) { console.log('  DF25-20: SKIP — no card found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-20: SKIP — no card found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
-    if (!issueResult.ok) { await p.close(); return; }
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
-    console.log(`  DF25-20: card hints:`);
+    console.log('  DF25-20: card hints:');
     hints.hints.forEach((h, i) => console.log(`    ${i + 1}. ${h.displayPath} (${h.kind})`));
 
-    const usageHints = hints.hints.filter((h) => h.kind === 'usage-site' || h.kind === 'route-owner');
+    const usageHints = hints.hints.filter(
+      (h) => h.kind === 'usage-site' || h.kind === 'route-owner',
+    );
     const defHints = hints.hints.filter((h) => h.kind === 'definition-site');
 
     if (usageHints.length > 0 && defHints.length > 0) {
@@ -1176,16 +1629,30 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       return null;
     });
 
-    if (!target) { console.log('  DF25-21: SKIP — settings link not found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-21: SKIP — settings link not found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     // Create issue
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     // Resolve hints
@@ -1204,7 +1671,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
           score: h.score,
           reasons: h.reasons,
         })),
-        sourceHintStatus: hints.status as any,
+        sourceHintStatus: hints.status,
       },
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1217,9 +1684,11 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       expect(get.ok).toBe(true);
       if (get.ok) {
         expect(get.value.brief.sourceHints).toBeDefined();
-        expect(get.value.brief.sourceHints!.count).toBeGreaterThan(0);
-        expect(get.value.brief.sourceHints!.status).toBeTruthy();
-        console.log(`  DF25-21: integration complete — issue→hints→handoff with ${get.value.brief.sourceHints!.count} ranked hints`);
+        expect(get.value.brief.sourceHints?.count).toBeGreaterThan(0);
+        expect(get.value.brief.sourceHints?.status).toBeTruthy();
+        console.log(
+          `  DF25-21: integration complete — issue→hints→handoff with ${get.value.brief.sourceHints?.count} ranked hints`,
+        );
       }
     }
     await p.close();
@@ -1240,17 +1709,31 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       return null;
     });
 
-    if (!target) { console.log('  DF25-22: SKIP — no element found'); await p.close(); return; }
+    if (!target) {
+      console.log('  DF25-22: SKIP — no element found');
+      await p.close();
+      return;
+    }
 
     const ev = await clickAt(p, target.x, target.y);
-    if (!ev) { await p.close(); return; }
+    if (!ev) {
+      await p.close();
+      return;
+    }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
 
     // Issue creation should work even if source hints fail
-    const issueResult = await state.issueService!.createIssue(selection, 'dogfood-p25-session', 'dogfood-p25-page');
+    const issueResult = await state.issueService!.createIssue(
+      selection,
+      'dogfood-p25-session',
+      'dogfood-p25-page',
+    );
     expect(issueResult.ok).toBe(true);
-    if (!issueResult.ok) { await p.close(); return; }
+    if (!issueResult.ok) {
+      await p.close();
+      return;
+    }
     state.issueIds.push(issueResult.value.issueId);
 
     // Handoff creation should work without source hints
@@ -1271,7 +1754,9 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     expect(reviewResult.ok).toBe(true);
     if (reviewResult.ok) state.reviewIds.push(reviewResult.value.reviewId);
 
-    console.log(`  DF25-22: resilience verified — issue/handoff/review all work without source hints`);
+    console.log(
+      '  DF25-22: resilience verified — issue/handoff/review all work without source hints',
+    );
     await p.close();
   });
 });

@@ -20,11 +20,13 @@
     "@viskod/capture-pipeline": "workspace:*",
     "@viskod/context-engine": "workspace:*",
     "@viskod/selection-engine": "workspace:*",
+    "@viskod/setup": "workspace:*",
     "@viskod/project-scanner": "workspace:*",
     "@viskod/source-hint-engine": "workspace:*",
     "@viskod/config": "workspace:*",
     "@viskod/visual-issue": "workspace:*",
     "@viskod/agent-handoff": "workspace:*",
-    "@viskod/visual-review": "workspace:*"
+    "@viskod/visual-review": "workspace:*",
+    "@viskod/visual-selection": "workspace:*"
   }
 }

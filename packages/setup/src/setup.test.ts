@@ -1,43 +1,57 @@
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { detectProject } from './detector';
-import { initializeWorkspace } from './workspace';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runSetupChecks, verifyMcpToolsLive } from './checks';
-import { loadSetupState, saveSetupState, createInitialSetupState } from './persistence';
-import { containsSecrets, containsAbsolutePath, sanitizePath, validateOutputSafety } from './redaction';
+import { detectProject } from './detector';
 import {
-  getSetupState,
-  detectAndConfigureProject,
-  initializeProjectWorkspace,
-  runAllChecks,
-  completeSetup,
-  repairSetup,
-  runSmoke,
-  createWizardState,
   advanceWizard,
-  getWizardStepDescription,
-  isSetupComplete,
-  verifyMcpTools,
-  validateAppUrl,
   checkAgentConfigReadiness,
+  completeSetup,
+  createWizardState,
+  detectAndConfigureProject,
+  getSetupState,
+  getWizardStepDescription,
+  initializeProjectWorkspace,
+  isSetupComplete,
+  repairSetup,
+  runAllChecks,
+  runSmoke,
+  validateAppUrl,
+  verifyMcpTools,
 } from './index';
+import { createInitialSetupState, loadSetupState, saveSetupState } from './persistence';
+import {
+  containsAbsolutePath,
+  containsSecrets,
+  sanitizePath,
+  validateOutputSafety,
+} from './redaction';
+import { initializeWorkspace } from './workspace';
 
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = path.join(tmpdir(), `viskod-setup-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  tmpDir = path.join(
+    tmpdir(),
+    `viskod-setup-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   fs.mkdirSync(tmpDir, { recursive: true });
 });
 
 afterEach(() => {
-  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {}
 });
 
 describe('Project Detection', () => {
   it('detects project from directory with package.json', () => {
-    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-project' }), 'utf-8');
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({ name: 'test-project' }),
+      'utf-8',
+    );
     const result = detectProject({ projectRoot: tmpDir });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -138,7 +152,7 @@ describe('Setup Checks', () => {
     const checks = await runSetupChecks({ projectRoot: tmpDir });
     const nodeCheck = checks.find((c) => c.checkId === 'node-version');
     expect(nodeCheck).toBeDefined();
-    expect(nodeCheck!.status).toBe('pass');
+    expect(nodeCheck?.status).toBe('pass');
   }, 30000);
 
   it('checks workspace writable', async () => {
@@ -146,7 +160,7 @@ describe('Setup Checks', () => {
     const checks = await runSetupChecks({ projectRoot: tmpDir });
     const writableCheck = checks.find((c) => c.checkId === 'viskod-writable');
     expect(writableCheck).toBeDefined();
-    expect(writableCheck!.status).toBe('pass');
+    expect(writableCheck?.status).toBe('pass');
   }, 30000);
 
   it('each check has required fields', async () => {
@@ -188,17 +202,17 @@ describe('Setup Checks', () => {
     const checks = await runSetupChecks({ projectRoot: tmpDir });
     const mcpRuntimeCheck = checks.find((c) => c.checkId === 'mcp-tools-runtime');
     expect(mcpRuntimeCheck).toBeDefined();
-    expect(mcpRuntimeCheck!.severity).toBe('required');
+    expect(mcpRuntimeCheck?.severity).toBe('required');
     // Should pass since we're in the monorepo with a working MCP server
-    expect(mcpRuntimeCheck!.status).toMatch(/^(pass|fail)$/);
+    expect(mcpRuntimeCheck?.status).toMatch(/^(pass|fail)$/);
   }, 60000);
 
   it('browser-runtime check uses live verification', async () => {
     const checks = await runSetupChecks({ projectRoot: tmpDir });
     const browserCheck = checks.find((c) => c.checkId === 'browser-runtime');
     expect(browserCheck).toBeDefined();
-    expect(browserCheck!.severity).toBe('required');
-    expect(browserCheck!.status).toMatch(/^(pass|warning)$/);
+    expect(browserCheck?.severity).toBe('required');
+    expect(browserCheck?.status).toMatch(/^(pass|warning)$/);
   }, 30000);
 });
 
@@ -356,7 +370,7 @@ describe('Wizard Flow', () => {
     state = result.value;
     expect(state.step).toBe('ready');
     expect(state.setupState).toBeDefined();
-    expect(state.setupState!.completed).toBe(true);
+    expect(state.setupState?.completed).toBe(true);
   }, 60000);
 
   it('returns step descriptions', () => {
@@ -524,7 +538,7 @@ describe('App URL in Setup State', () => {
     initializeProjectWorkspace({ projectRoot: tmpDir });
     const project = detectAndConfigureProject({ projectRoot: tmpDir });
     if (project.ok) {
-      const checks = await runAllChecks({ projectRoot: tmpDir, limitedMode: true } as any);
+      const checks = await runAllChecks({ projectRoot: tmpDir, limitedMode: true });
       const result = completeSetup({
         projectRoot: tmpDir,
         project: project.value,
@@ -544,7 +558,7 @@ describe('App URL in Setup State', () => {
     initializeProjectWorkspace({ projectRoot: tmpDir });
     const project = detectAndConfigureProject({ projectRoot: tmpDir });
     if (project.ok) {
-      const checks = await runAllChecks({ projectRoot: tmpDir, limitedMode: true } as any);
+      const checks = await runAllChecks({ projectRoot: tmpDir, limitedMode: true });
       const result = completeSetup({
         projectRoot: tmpDir,
         project: project.value,
@@ -554,7 +568,7 @@ describe('App URL in Setup State', () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.agentConfig).toBeDefined();
-        expect(result.value.agentConfig!.kind).toBeTruthy();
+        expect(result.value.agentConfig?.kind).toBeTruthy();
       }
     }
   }, 60000);
@@ -567,11 +581,11 @@ describe('App Reachability Check', () => {
 
     // This will fail because no server is running, but the check should exist
     const checks = await runAllChecks({ projectRoot: tmpDir, appUrl: 'http://localhost:99999' });
-    const reachCheck = checks.find(c => c.checkId === 'app-reachability');
+    const reachCheck = checks.find((c) => c.checkId === 'app-reachability');
     expect(reachCheck).toBeDefined();
-    expect(reachCheck!.severity).toBe('required');
+    expect(reachCheck?.severity).toBe('required');
     // Should fail because port 99999 is not reachable
-    expect(reachCheck!.status).toBe('fail');
+    expect(reachCheck?.status).toBe('fail');
   }, 60000);
 
   it('app-reachability check is skipped when no appUrl provided', async () => {
@@ -579,7 +593,7 @@ describe('App Reachability Check', () => {
     initializeProjectWorkspace({ projectRoot: tmpDir });
 
     const checks = await runAllChecks({ projectRoot: tmpDir });
-    const reachCheck = checks.find(c => c.checkId === 'app-reachability');
+    const reachCheck = checks.find((c) => c.checkId === 'app-reachability');
     expect(reachCheck).toBeUndefined();
   }, 60000);
 });
@@ -587,10 +601,13 @@ describe('App Reachability Check', () => {
 describe('Wizard Flow with appUrl', () => {
   it('wizard accepts appUrl in input', async () => {
     fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test' }), 'utf-8');
-    let state = createWizardState();
+    const state = createWizardState();
 
     // Welcome -> Project Confirmation
-    const result = await advanceWizard(state, { projectRoot: tmpDir, appUrl: 'http://localhost:3000' });
+    const result = await advanceWizard(state, {
+      projectRoot: tmpDir,
+      appUrl: 'http://localhost:3000',
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.appUrl).toBe('http://localhost:3000');
@@ -602,7 +619,7 @@ describe('Wizard Flow with appUrl', () => {
     initializeProjectWorkspace({ projectRoot: tmpDir });
     const project = detectAndConfigureProject({ projectRoot: tmpDir });
     if (project.ok) {
-      const checks = await runAllChecks({ projectRoot: tmpDir, limitedMode: true } as any);
+      const checks = await runAllChecks({ projectRoot: tmpDir, limitedMode: true });
       const result = completeSetup({
         projectRoot: tmpDir,
         project: project.value,

@@ -1,7 +1,9 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Result } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity } from '@viskod/shared';
+import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 import type { LiveMcpVerification, McpToolVerification } from './types';
 
 const REQUIRED_MCP_TOOLS = [
@@ -17,6 +19,14 @@ const REQUIRED_MCP_TOOLS = [
 
 const MCP_TIMEOUT_MS = 12000;
 const STARTUP_WAIT_MS = 4000;
+const VISKOD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+function resolveServerPath(): string {
+  const sourcePath = path.join(VISKOD_ROOT, 'packages', 'mcp-server', 'src', 'entry.ts');
+  return fs.existsSync(sourcePath)
+    ? sourcePath
+    : path.join(process.cwd(), 'packages', 'mcp-server', 'src', 'entry.ts');
+}
 
 function mcpError(code: string, message: string) {
   return {
@@ -71,19 +81,21 @@ function sendRequest(
             resolve(parsed);
             return;
           }
-        } catch { /* not JSON-RPC, ignore */ }
+        } catch {
+          /* not JSON-RPC, ignore */
+        }
       }
     };
 
     proc.stdout?.on('data', onData);
-    proc.stdin?.write(JSON.stringify(request) + '\n');
+    proc.stdin?.write(`${JSON.stringify(request)}\n`);
   });
 }
 
 export async function verifyMcpToolsRuntime(
   projectRoot?: string,
 ): Promise<Result<LiveMcpVerification>> {
-  const serverPath = path.join(process.cwd(), 'packages', 'mcp-server', 'src', 'entry.ts');
+  const serverPath = resolveServerPath();
   const missingRequiredTools: string[] = [];
   const toolsFound: McpToolVerification[] = [];
 
@@ -116,7 +128,9 @@ export async function verifyMcpToolsRuntime(
     const response = await sendRequest(proc, toolsListRequest, MCP_TIMEOUT_MS);
 
     if (response.error) {
-      return err(mcpError('MCP_TOOLS_LIST_FAILED', `tools/list returned error: ${response.error.message}`));
+      return err(
+        mcpError('MCP_TOOLS_LIST_FAILED', `tools/list returned error: ${response.error.message}`),
+      );
     }
 
     const result = response.result as { tools?: Array<{ name: string }> } | undefined;
@@ -152,10 +166,12 @@ export async function verifyMcpToolsRuntime(
       missingRequiredTools,
     });
   } catch (e) {
-    return err(mcpError(
-      'MCP_RUNTIME_VERIFY_FAILED',
-      `MCP runtime verification failed: ${e instanceof Error ? e.message : String(e)}`,
-    ));
+    return err(
+      mcpError(
+        'MCP_RUNTIME_VERIFY_FAILED',
+        `MCP runtime verification failed: ${e instanceof Error ? e.message : String(e)}`,
+      ),
+    );
   } finally {
     if (proc) {
       try {
@@ -164,7 +180,9 @@ export async function verifyMcpToolsRuntime(
         if (!proc.killed) {
           proc.kill('SIGKILL');
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 }

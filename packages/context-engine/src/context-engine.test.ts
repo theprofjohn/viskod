@@ -79,7 +79,7 @@ describe('VisualContextEngine', () => {
     expect(health.averageProcessingTimeMs).toBe(0);
   });
 
-  it('getLastPacket returns null', () => {
+  it('getLastPacket returns null before any capture', () => {
     const bus = new EventBus();
     const br = new BrowserRuntime(bus);
     const vce = new VisualContextEngine({ browserRuntime: br, eventBus: bus });

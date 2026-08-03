@@ -15,12 +15,16 @@ export type {
   MCPResourceHandler,
 } from './types';
 
+export { buildViskodServer } from './entry';
+export type { BuildViskodServerOptions } from './entry';
+
 export class MCPServer {
   private tools = new Map<string, MCPToolDefinition>();
   private toolHandlers = new Map<string, MCPToolHandler>();
   private resources = new Map<string, MCPResourceDefinition>();
   private resourceHandlers = new Map<string, MCPResourceHandler>();
-  private serverInfo = { name: 'viskod-mcp', version: '0.0.1' };
+  private serverInfo = { name: 'viskod-mcp', version: '0.2.0-alpha' };
+  private startup?: () => Promise<void>;
 
   registerTool(definition: MCPToolDefinition, handler: MCPToolHandler): void {
     this.tools.set(definition.name, definition);
@@ -32,7 +36,12 @@ export class MCPServer {
     this.resourceHandlers.set(definition.uri, handler);
   }
 
+  setStartup(startup: () => Promise<void>): void {
+    this.startup = startup;
+  }
+
   async start(): Promise<void> {
+    if (this.startup) await this.startup();
     process.stdin.setEncoding('utf-8');
 
     let buffer = '';

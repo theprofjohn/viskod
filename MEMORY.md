@@ -13,7 +13,7 @@
 
 This document is the long-term engineering memory for Viskod.
 
-Unlike `CLAUDE.md`, which defines permanent engineering principles, this file records **why important decisions were made**.
+Unlike the repository instruction files (`AGENTS.md`, `README.md`), which define current engineering conventions, this file records **why important decisions were made**.
 
 It provides historical context for future contributors and AI coding agents.
 
@@ -623,7 +623,7 @@ Each review should produce new decision records rather than modifying previous e
 
 This document explains **why** Viskod became what it is.
 
-`CLAUDE.md` defines how to build.
+The repository instruction files (`AGENTS.md`, `README.md`) define how to build.
 
 `MEMORY.md` explains why those decisions exist.
 

@@ -46,10 +46,12 @@ export const TargetGeometrySchema = z.object({
 export const FingerprintsSchema = z.object({
   stableAttributes: z.record(z.string()).optional(),
   ancestorFingerprint: z.array(z.string()).optional(),
-  siblingFingerprint: z.object({
-    index: z.number().optional(),
-    nearbyText: z.array(z.string()).optional(),
-  }).optional(),
+  siblingFingerprint: z
+    .object({
+      index: z.number().optional(),
+      nearbyText: z.array(z.string()).optional(),
+    })
+    .optional(),
   domPathFingerprint: z.array(z.string()).optional(),
 });
 

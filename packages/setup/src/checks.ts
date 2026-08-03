@@ -1,10 +1,24 @@
+import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
-import { execSync } from 'node:child_process';
-import type { Result } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR } from '@viskod/shared';
-import type { SetupCheckResult, SetupCheckSeverity, LiveMcpVerification, McpToolVerification, AppUrlValidation, AgentConfigInfo } from './types';
+import { fileURLToPath } from 'node:url';
+import { VISKOD_STORAGE_DIR } from '@viskod/shared';
+import type {
+  AgentConfigInfo,
+  AppUrlValidation,
+  LiveMcpVerification,
+  McpToolVerification,
+  SetupCheckResult,
+  SetupCheckSeverity,
+} from './types';
+
+const VISKOD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+function resolveViskodRoot(): string {
+  return fs.existsSync(path.join(VISKOD_ROOT, 'packages', 'mcp-server', 'src', 'entry.ts'))
+    ? VISKOD_ROOT
+    : process.cwd();
+}
 
 const REQUIRED_MCP_TOOLS = [
   'viskod_capture_context',
@@ -51,14 +65,30 @@ function runCheck(fn: () => SetupCheckResult): SetupCheckResult {
 function checkNodeVersion(): SetupCheckResult {
   return runCheck(() => {
     const version = process.version;
-    const major = parseInt(version.slice(1), 10);
+    const major = Number.parseInt(version.slice(1), 10);
     if (major >= 22) {
-      return check('node-version', 'Node.js version', 'required', 'pass', `Node ${version} (>= 22 required)`);
+      return check(
+        'node-version',
+        'Node.js version',
+        'required',
+        'pass',
+        `Node ${version} (>= 22 required)`,
+      );
     }
-    return check('node-version', 'Node.js version', 'required', 'fail',
+    return check(
+      'node-version',
+      'Node.js version',
+      'required',
+      'fail',
       `Node ${version} detected, but >= 22 is required`,
       'Upgrade Node.js to version 22 or later.',
-      { actionId: 'upgrade-node', label: 'Upgrade Node.js', kind: 'manual_command', commandPreview: 'nvm install 22', safe: true },
+      {
+        actionId: 'upgrade-node',
+        label: 'Upgrade Node.js',
+        kind: 'manual_command',
+        commandPreview: 'nvm install 22',
+        safe: true,
+      },
     );
   });
 }
@@ -69,13 +99,31 @@ function checkPackageManager(): SetupCheckResult {
     for (const mgr of managers) {
       try {
         execSync(`${mgr} --version`, { stdio: 'pipe', timeout: 5000 });
-        return check('package-manager', 'Package manager', 'required', 'pass', `${mgr} is available`);
-      } catch { /* continue */ }
+        return check(
+          'package-manager',
+          'Package manager',
+          'required',
+          'pass',
+          `${mgr} is available`,
+        );
+      } catch {
+        /* continue */
+      }
     }
-    return check('package-manager', 'Package manager', 'required', 'fail',
+    return check(
+      'package-manager',
+      'Package manager',
+      'required',
+      'fail',
       'No supported package manager found',
       'Install pnpm, npm, yarn, or bun.',
-      { actionId: 'install-package-manager', label: 'Install pnpm', kind: 'manual_command', commandPreview: 'npm install -g pnpm', safe: true },
+      {
+        actionId: 'install-package-manager',
+        label: 'Install pnpm',
+        kind: 'manual_command',
+        commandPreview: 'npm install -g pnpm',
+        safe: true,
+      },
     );
   });
 }
@@ -84,13 +132,28 @@ function checkViskodWorkspace(projectRoot: string): SetupCheckResult {
   return runCheck(() => {
     const viskodDir = path.join(projectRoot, VISKOD_STORAGE_DIR);
     if (!fs.existsSync(viskodDir)) {
-      return check('viskod-workspace', 'Viskod workspace', 'required', 'fail',
+      return check(
+        'viskod-workspace',
+        'Viskod workspace',
+        'required',
+        'fail',
         `${VISKOD_STORAGE_DIR} directory does not exist`,
         'Initialize the workspace during setup.',
-        { actionId: 'init-workspace', label: 'Initialize workspace', kind: 'repair_workspace', safe: true },
+        {
+          actionId: 'init-workspace',
+          label: 'Initialize workspace',
+          kind: 'repair_workspace',
+          safe: true,
+        },
       );
     }
-    return check('viskod-workspace', 'Viskod workspace', 'required', 'pass', `${VISKOD_STORAGE_DIR} directory exists`);
+    return check(
+      'viskod-workspace',
+      'Viskod workspace',
+      'required',
+      'pass',
+      `${VISKOD_STORAGE_DIR} directory exists`,
+    );
   });
 }
 
@@ -101,17 +164,37 @@ function checkProjectReadability(projectRoot: string): SetupCheckResult {
       const pkgPath = path.join(projectRoot, 'package.json');
       if (fs.existsSync(pkgPath)) {
         fs.readFileSync(pkgPath, 'utf-8');
-        return check('project-readable', 'Project readability', 'required', 'pass', 'Project files are readable');
+        return check(
+          'project-readable',
+          'Project readability',
+          'required',
+          'pass',
+          'Project files are readable',
+        );
       }
-      return check('project-readable', 'Project readability', 'required', 'warning',
+      return check(
+        'project-readable',
+        'Project readability',
+        'required',
+        'warning',
         'package.json not found but directory is readable',
         'Ensure you are in a valid project directory.',
       );
     } catch {
-      return check('project-readable', 'Project readability', 'required', 'fail',
+      return check(
+        'project-readable',
+        'Project readability',
+        'required',
+        'fail',
         'Cannot read project files',
         'Check folder permissions.',
-        { actionId: 'check-permissions', label: 'Check permissions', kind: 'manual_command', commandPreview: `ls -la "${projectRoot}"`, safe: true },
+        {
+          actionId: 'check-permissions',
+          label: 'Check permissions',
+          kind: 'manual_command',
+          commandPreview: `ls -la "${projectRoot}"`,
+          safe: true,
+        },
       );
     }
   });
@@ -121,7 +204,11 @@ function checkViskodWorkspaceWritable(projectRoot: string): SetupCheckResult {
   return runCheck(() => {
     const viskodDir = path.join(projectRoot, VISKOD_STORAGE_DIR);
     if (!fs.existsSync(viskodDir)) {
-      return check('viskod-writable', 'Workspace writable', 'required', 'skipped',
+      return check(
+        'viskod-writable',
+        'Workspace writable',
+        'required',
+        'skipped',
         'Workspace not initialized yet',
       );
     }
@@ -129,12 +216,28 @@ function checkViskodWorkspaceWritable(projectRoot: string): SetupCheckResult {
       const testFile = path.join(viskodDir, '.viskod-write-test');
       fs.writeFileSync(testFile, '', 'utf-8');
       fs.unlinkSync(testFile);
-      return check('viskod-writable', 'Workspace writable', 'required', 'pass', 'Workspace directory is writable');
+      return check(
+        'viskod-writable',
+        'Workspace writable',
+        'required',
+        'pass',
+        'Workspace directory is writable',
+      );
     } catch {
-      return check('viskod-writable', 'Workspace writable', 'required', 'fail',
+      return check(
+        'viskod-writable',
+        'Workspace writable',
+        'required',
+        'fail',
         'Cannot write to workspace directory',
         'Check folder permissions.',
-        { actionId: 'check-permissions', label: 'Check permissions', kind: 'manual_command', commandPreview: `ls -la "${viskodDir}"`, safe: true },
+        {
+          actionId: 'check-permissions',
+          label: 'Check permissions',
+          kind: 'manual_command',
+          commandPreview: `ls -la "${viskodDir}"`,
+          safe: true,
+        },
       );
     }
   });
@@ -143,15 +246,35 @@ function checkViskodWorkspaceWritable(projectRoot: string): SetupCheckResult {
 function checkProjectScanner(): SetupCheckResult {
   return runCheck(() => {
     try {
-      const scannerPath = path.join(process.cwd(), 'packages', 'project-scanner', 'src', 'index.ts');
+      const scannerPath = path.join(
+        process.cwd(),
+        'packages',
+        'project-scanner',
+        'src',
+        'index.ts',
+      );
       if (fs.existsSync(scannerPath)) {
-        return check('project-scanner', 'Project scanner', 'required', 'pass', 'Project scanner is available');
+        return check(
+          'project-scanner',
+          'Project scanner',
+          'required',
+          'pass',
+          'Project scanner is available',
+        );
       }
-      return check('project-scanner', 'Project scanner', 'required', 'warning',
+      return check(
+        'project-scanner',
+        'Project scanner',
+        'required',
+        'warning',
         'Project scanner not found at expected path',
       );
     } catch {
-      return check('project-scanner', 'Project scanner', 'required', 'warning',
+      return check(
+        'project-scanner',
+        'Project scanner',
+        'required',
+        'warning',
         'Could not verify project scanner',
       );
     }
@@ -166,7 +289,9 @@ async function checkBrowserRuntimeLive(projectRoot: string): Promise<SetupCheckR
     try {
       require.resolve('playwright', { paths: [projectRoot, process.cwd()] });
       playwrightAvailable = true;
-    } catch { /* continue */ }
+    } catch {
+      /* continue */
+    }
 
     if (!playwrightAvailable) {
       const nmPath = path.join(projectRoot, 'node_modules', 'playwright');
@@ -204,8 +329,6 @@ async function checkBrowserRuntimeLive(projectRoot: string): Promise<SetupCheckR
     await page.setContent('<html><body><h1>Viskod Setup</h1></body></html>', { timeout: 5000 });
 
     // Verify page loaded
-    const title = await page.title();
-
     // Shutdown cleanly
     await page.close();
     await context.close();
@@ -216,7 +339,7 @@ async function checkBrowserRuntimeLive(projectRoot: string): Promise<SetupCheckR
       name: 'Browser runtime',
       severity: 'required',
       status: 'pass',
-      summary: `Browser launch, navigate, and shutdown verified`,
+      summary: 'Browser launch, navigate, and shutdown verified',
       durationMs: Date.now() - start,
     };
   } catch (e) {
@@ -243,16 +366,30 @@ function checkExistingCaptures(projectRoot: string): SetupCheckResult {
   return runCheck(() => {
     const capturesDir = path.join(projectRoot, VISKOD_STORAGE_DIR, 'captures');
     if (!fs.existsSync(capturesDir)) {
-      return check('existing-captures', 'Existing captures', 'optional', 'skipped', 'No captures directory');
+      return check(
+        'existing-captures',
+        'Existing captures',
+        'optional',
+        'skipped',
+        'No captures directory',
+      );
     }
     try {
       const entries = fs.readdirSync(capturesDir, { withFileTypes: true });
       const captureCount = entries.filter((e) => e.isDirectory()).length;
-      return check('existing-captures', 'Existing captures', 'optional', 'pass',
+      return check(
+        'existing-captures',
+        'Existing captures',
+        'optional',
+        'pass',
         `${captureCount} capture(s) found`,
       );
     } catch {
-      return check('existing-captures', 'Existing captures', 'optional', 'warning',
+      return check(
+        'existing-captures',
+        'Existing captures',
+        'optional',
+        'warning',
         'Could not read captures directory',
       );
     }
@@ -262,15 +399,35 @@ function checkExistingCaptures(projectRoot: string): SetupCheckResult {
 function checkSourceHintEngine(): SetupCheckResult {
   return runCheck(() => {
     try {
-      const enginePath = path.join(process.cwd(), 'packages', 'source-hint-engine', 'src', 'index.ts');
+      const enginePath = path.join(
+        process.cwd(),
+        'packages',
+        'source-hint-engine',
+        'src',
+        'index.ts',
+      );
       if (fs.existsSync(enginePath)) {
-        return check('source-hints', 'Source hint engine', 'optional', 'pass', 'Source hint engine is available');
+        return check(
+          'source-hints',
+          'Source hint engine',
+          'optional',
+          'pass',
+          'Source hint engine is available',
+        );
       }
-      return check('source-hints', 'Source hint engine', 'optional', 'skipped',
+      return check(
+        'source-hints',
+        'Source hint engine',
+        'optional',
+        'skipped',
         'Source hint engine not found',
       );
     } catch {
-      return check('source-hints', 'Source hint engine', 'optional', 'skipped',
+      return check(
+        'source-hints',
+        'Source hint engine',
+        'optional',
+        'skipped',
         'Could not verify source hint engine',
       );
     }
@@ -280,9 +437,19 @@ function checkSourceHintEngine(): SetupCheckResult {
 export function checkMcpToolsLive(): SetupCheckResult {
   return runCheck(() => {
     try {
-      const serverPath = path.join(process.cwd(), 'packages', 'mcp-server', 'src', 'entry.ts');
+      const serverPath = path.join(
+        resolveViskodRoot(),
+        'packages',
+        'mcp-server',
+        'src',
+        'entry.ts',
+      );
       if (!fs.existsSync(serverPath)) {
-        return check('mcp-tools', 'MCP server tools', 'required', 'fail',
+        return check(
+          'mcp-tools',
+          'MCP server tools',
+          'required',
+          'fail',
           'MCP server entry not found',
           'Ensure the mcp-server package is built.',
           { actionId: 'restart-mcp', label: 'Restart MCP server', kind: 'restart_mcp', safe: true },
@@ -299,18 +466,30 @@ export function checkMcpToolsLive(): SetupCheckResult {
       }
 
       if (missingTools.length > 0) {
-        return check('mcp-tools', 'MCP server tools', 'required', 'fail',
+        return check(
+          'mcp-tools',
+          'MCP server tools',
+          'required',
+          'fail',
           `Missing required MCP tools: ${missingTools.join(', ')}`,
           `The MCP server is missing ${missingTools.length} required tool(s).`,
           { actionId: 'restart-mcp', label: 'Restart MCP server', kind: 'restart_mcp', safe: true },
         );
       }
 
-      return check('mcp-tools', 'MCP server tools', 'required', 'pass',
+      return check(
+        'mcp-tools',
+        'MCP server tools',
+        'required',
+        'pass',
         `All ${REQUIRED_MCP_TOOLS.length} required MCP tools verified`,
       );
     } catch (e) {
-      return check('mcp-tools', 'MCP server tools', 'required', 'warning',
+      return check(
+        'mcp-tools',
+        'MCP server tools',
+        'required',
+        'warning',
         `Could not verify MCP tools: ${e instanceof Error ? e.message : String(e)}`,
         'MCP tools may still be available at runtime.',
       );
@@ -318,9 +497,7 @@ export function checkMcpToolsLive(): SetupCheckResult {
   });
 }
 
-export async function checkMcpToolsRuntime(
-  projectRoot?: string,
-): Promise<SetupCheckResult> {
+export async function checkMcpToolsRuntime(projectRoot?: string): Promise<SetupCheckResult> {
   const start = Date.now();
   try {
     const mod = await import('./mcp-runtime');
@@ -335,9 +512,10 @@ export async function checkMcpToolsRuntime(
         severity: 'required',
         status: staticCheck.status === 'pass' ? 'fail' : 'fail',
         summary: `MCP runtime tools/list failed: ${result.error.message}`,
-        details: staticCheck.status === 'pass'
-          ? 'Static check passed but runtime tools/list did not respond. The MCP server may not be startable.'
-          : 'Both static and runtime verification failed.',
+        details:
+          staticCheck.status === 'pass'
+            ? 'Static check passed but runtime tools/list did not respond. The MCP server may not be startable.'
+            : 'Both static and runtime verification failed.',
         remediation: {
           actionId: 'restart-mcp',
           label: 'Restart MCP server',
@@ -393,7 +571,7 @@ export async function checkMcpToolsRuntime(
 }
 
 export function verifyMcpToolsLive(): LiveMcpVerification {
-  const serverPath = path.join(process.cwd(), 'packages', 'mcp-server', 'src', 'entry.ts');
+  const serverPath = path.join(resolveViskodRoot(), 'packages', 'mcp-server', 'src', 'entry.ts');
   const missingRequiredTools: string[] = [];
   const toolsFound: McpToolVerification[] = [];
 
@@ -426,20 +604,38 @@ function checkVisualIssuePersistence(projectRoot: string): SetupCheckResult {
   return runCheck(() => {
     const issuesDir = path.join(projectRoot, VISKOD_STORAGE_DIR, 'issues');
     if (!fs.existsSync(issuesDir)) {
-      return check('visual-issue', 'VisualIssue persistence', 'recommended', 'skipped',
+      return check(
+        'visual-issue',
+        'VisualIssue persistence',
+        'recommended',
+        'skipped',
         'Issues directory not initialized',
       );
     }
     try {
       fs.accessSync(issuesDir, fs.constants.R_OK | fs.constants.W_OK);
-      return check('visual-issue', 'VisualIssue persistence', 'recommended', 'pass',
+      return check(
+        'visual-issue',
+        'VisualIssue persistence',
+        'recommended',
+        'pass',
         'VisualIssue persistence is ready',
       );
     } catch {
-      return check('visual-issue', 'VisualIssue persistence', 'recommended', 'fail',
+      return check(
+        'visual-issue',
+        'VisualIssue persistence',
+        'recommended',
+        'fail',
         'Cannot access issues directory',
         'Check folder permissions for .viskod/issues/',
-        { actionId: 'check-permissions', label: 'Check permissions', kind: 'manual_command', commandPreview: `ls -la "${issuesDir}"`, safe: true },
+        {
+          actionId: 'check-permissions',
+          label: 'Check permissions',
+          kind: 'manual_command',
+          commandPreview: `ls -la "${issuesDir}"`,
+          safe: true,
+        },
       );
     }
   });
@@ -449,20 +645,38 @@ function checkAgentHandoffPersistence(projectRoot: string): SetupCheckResult {
   return runCheck(() => {
     const handoffsDir = path.join(projectRoot, VISKOD_STORAGE_DIR, 'handoffs');
     if (!fs.existsSync(handoffsDir)) {
-      return check('agent-handoff', 'AgentHandoff persistence', 'recommended', 'skipped',
+      return check(
+        'agent-handoff',
+        'AgentHandoff persistence',
+        'recommended',
+        'skipped',
         'Handoffs directory not initialized',
       );
     }
     try {
       fs.accessSync(handoffsDir, fs.constants.R_OK | fs.constants.W_OK);
-      return check('agent-handoff', 'AgentHandoff persistence', 'recommended', 'pass',
+      return check(
+        'agent-handoff',
+        'AgentHandoff persistence',
+        'recommended',
+        'pass',
         'AgentHandoff persistence is ready',
       );
     } catch {
-      return check('agent-handoff', 'AgentHandoff persistence', 'recommended', 'fail',
+      return check(
+        'agent-handoff',
+        'AgentHandoff persistence',
+        'recommended',
+        'fail',
         'Cannot access handoffs directory',
         'Check folder permissions for .viskod/handoffs/',
-        { actionId: 'check-permissions', label: 'Check permissions', kind: 'manual_command', commandPreview: `ls -la "${handoffsDir}"`, safe: true },
+        {
+          actionId: 'check-permissions',
+          label: 'Check permissions',
+          kind: 'manual_command',
+          commandPreview: `ls -la "${handoffsDir}"`,
+          safe: true,
+        },
       );
     }
   });
@@ -472,68 +686,138 @@ function checkVisualReviewPersistence(projectRoot: string): SetupCheckResult {
   return runCheck(() => {
     const reviewsDir = path.join(projectRoot, VISKOD_STORAGE_DIR, 'reviews');
     if (!fs.existsSync(reviewsDir)) {
-      return check('visual-review', 'VisualReview persistence', 'recommended', 'skipped',
+      return check(
+        'visual-review',
+        'VisualReview persistence',
+        'recommended',
+        'skipped',
         'Reviews directory not initialized',
       );
     }
     try {
       fs.accessSync(reviewsDir, fs.constants.R_OK | fs.constants.W_OK);
-      return check('visual-review', 'VisualReview persistence', 'recommended', 'pass',
+      return check(
+        'visual-review',
+        'VisualReview persistence',
+        'recommended',
+        'pass',
         'VisualReview persistence is ready',
       );
     } catch {
-      return check('visual-review', 'VisualReview persistence', 'recommended', 'fail',
+      return check(
+        'visual-review',
+        'VisualReview persistence',
+        'recommended',
+        'fail',
         'Cannot access reviews directory',
         'Check folder permissions for .viskod/reviews/',
-        { actionId: 'check-permissions', label: 'Check permissions', kind: 'manual_command', commandPreview: `ls -la "${reviewsDir}"`, safe: true },
+        {
+          actionId: 'check-permissions',
+          label: 'Check permissions',
+          kind: 'manual_command',
+          commandPreview: `ls -la "${reviewsDir}"`,
+          safe: true,
+        },
       );
     }
   });
 }
 
-function checkVisualSelection(projectRoot: string): SetupCheckResult {
+function checkVisualSelection(): SetupCheckResult {
   return runCheck(() => {
     const overlayPath = path.join(process.cwd(), 'packages', 'overlay-system', 'src', 'index.ts');
-    const selectionPath = path.join(process.cwd(), 'packages', 'visual-selection', 'src', 'index.ts');
+    const selectionPath = path.join(
+      process.cwd(),
+      'packages',
+      'visual-selection',
+      'src',
+      'index.ts',
+    );
 
     const overlayExists = fs.existsSync(overlayPath);
     const selectionExists = fs.existsSync(selectionPath);
 
     if (overlayExists && selectionExists) {
-      return check('visual-selection', 'Visual Selection', 'recommended', 'pass',
+      return check(
+        'visual-selection',
+        'Visual Selection',
+        'recommended',
+        'pass',
         'Visual Selection overlay and engine are available',
       );
     }
     if (!overlayExists && !selectionExists) {
-      return check('visual-selection', 'Visual Selection', 'recommended', 'fail',
+      return check(
+        'visual-selection',
+        'Visual Selection',
+        'recommended',
+        'fail',
         'Visual Selection overlay and engine not found',
         'Install or rebuild the overlay-system and visual-selection packages.',
-        { actionId: 'rebuild-packages', label: 'Rebuild packages', kind: 'manual_command', commandPreview: 'pnpm build', safe: true },
+        {
+          actionId: 'rebuild-packages',
+          label: 'Rebuild packages',
+          kind: 'manual_command',
+          commandPreview: 'pnpm build',
+          safe: true,
+        },
       );
     }
-    return check('visual-selection', 'Visual Selection', 'recommended', 'warning',
+    return check(
+      'visual-selection',
+      'Visual Selection',
+      'recommended',
+      'warning',
       'Visual Selection partially available',
-      overlayExists ? 'Overlay found but selection engine missing' : 'Selection engine found but overlay missing',
+      overlayExists
+        ? 'Overlay found but selection engine missing'
+        : 'Selection engine found but overlay missing',
     );
   });
 }
 
-function checkUsageSiteSourceHints(projectRoot: string): SetupCheckResult {
+function checkUsageSiteSourceHints(): SetupCheckResult {
   return runCheck(() => {
-    const enginePath = path.join(process.cwd(), 'packages', 'source-hint-engine', 'src', 'index.ts');
-    const classifierPath = path.join(process.cwd(), 'packages', 'source-hint-engine', 'src', 'classifier.ts');
-    const rankingPath = path.join(process.cwd(), 'packages', 'source-hint-engine', 'src', 'ranking.ts');
+    const enginePath = path.join(
+      process.cwd(),
+      'packages',
+      'source-hint-engine',
+      'src',
+      'index.ts',
+    );
+    const classifierPath = path.join(
+      process.cwd(),
+      'packages',
+      'source-hint-engine',
+      'src',
+      'classifier.ts',
+    );
+    const rankingPath = path.join(
+      process.cwd(),
+      'packages',
+      'source-hint-engine',
+      'src',
+      'ranking.ts',
+    );
 
     const engineExists = fs.existsSync(enginePath);
     const classifierExists = fs.existsSync(classifierPath);
     const rankingExists = fs.existsSync(rankingPath);
 
     if (engineExists && classifierExists && rankingExists) {
-      return check('usage-site-hints', 'Usage-site source hints', 'optional', 'pass',
+      return check(
+        'usage-site-hints',
+        'Usage-site source hints',
+        'optional',
+        'pass',
         'Source hint engine with usage-site classification is available',
       );
     }
-    return check('usage-site-hints', 'Usage-site source hints', 'optional', 'skipped',
+    return check(
+      'usage-site-hints',
+      'Usage-site source hints',
+      'optional',
+      'skipped',
       'Source hint engine components not fully available',
     );
   });
@@ -549,11 +833,23 @@ export function validateAppUrl(url: string): AppUrlValidation {
     const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:';
 
     if (!isHttp) {
-      return { valid: false, url, hostname, port, reason: 'URL must use http:// or https:// protocol' };
+      return {
+        valid: false,
+        url,
+        hostname,
+        port,
+        reason: 'URL must use http:// or https:// protocol',
+      };
     }
 
     if (!isLocalhost) {
-      return { valid: false, url, hostname, port, reason: 'URL must point to localhost or 127.0.0.1 for local development' };
+      return {
+        valid: false,
+        url,
+        hostname,
+        port,
+        reason: 'URL must point to localhost or 127.0.0.1 for local development',
+      };
     }
 
     return { valid: true, url, hostname, port };
@@ -577,7 +873,8 @@ async function checkAppReachability(appUrl: string): Promise<SetupCheckResult> {
           actionId: 'fix-app-url',
           label: 'Fix app URL',
           kind: 'manual_command',
-          commandPreview: 'Ensure your dev server is running and the URL is correct (e.g., http://localhost:3000)',
+          commandPreview:
+            'Ensure your dev server is running and the URL is correct (e.g., http://localhost:3000)',
           safe: true,
         },
         durationMs: Date.now() - start,
@@ -617,7 +914,7 @@ async function checkAppReachability(appUrl: string): Promise<SetupCheckResult> {
           actionId: 'start-dev-server',
           label: 'Start dev server',
           kind: 'manual_command',
-          commandPreview: `Start your dev server, then rerun setup`,
+          commandPreview: 'Start your dev server, then rerun setup',
           safe: true,
         },
         durationMs: Date.now() - start,
@@ -634,7 +931,7 @@ async function checkAppReachability(appUrl: string): Promise<SetupCheckResult> {
           actionId: 'start-dev-server',
           label: 'Start dev server',
           kind: 'manual_command',
-          commandPreview: `Start your dev server, then rerun setup`,
+          commandPreview: 'Start your dev server, then rerun setup',
           safe: true,
         },
         durationMs: Date.now() - start,
@@ -651,7 +948,7 @@ async function checkAppReachability(appUrl: string): Promise<SetupCheckResult> {
         actionId: 'start-dev-server',
         label: 'Start dev server',
         kind: 'manual_command',
-        commandPreview: `Start your dev server, then rerun setup`,
+        commandPreview: 'Start your dev server, then rerun setup',
         safe: true,
       },
       durationMs: Date.now() - start,
@@ -682,7 +979,9 @@ export function checkAgentConfigReadiness(projectRoot: string): AgentConfigInfo 
   }
 
   // No config found — check if we can generate one
-  const hasMcpEntry = fs.existsSync(path.join(process.cwd(), 'packages', 'mcp-server', 'src', 'entry.ts'));
+  const hasMcpEntry = fs.existsSync(
+    path.join(process.cwd(), 'packages', 'mcp-server', 'src', 'entry.ts'),
+  );
   if (hasMcpEntry) {
     return {
       detected: false,
@@ -699,7 +998,11 @@ export function checkAgentConfigReadiness(projectRoot: string): AgentConfigInfo 
   };
 }
 
-export async function runSetupChecks(input: { projectRoot: string; includeOptional?: boolean; appUrl?: string }): Promise<SetupCheckResult[]> {
+export async function runSetupChecks(input: {
+  projectRoot: string;
+  includeOptional?: boolean;
+  appUrl?: string;
+}): Promise<SetupCheckResult[]> {
   const checks: SetupCheckResult[] = [];
 
   checks.push(checkNodeVersion());
@@ -727,11 +1030,11 @@ export async function runSetupChecks(input: { projectRoot: string; includeOption
   checks.push(checkVisualIssuePersistence(input.projectRoot));
   checks.push(checkAgentHandoffPersistence(input.projectRoot));
   checks.push(checkVisualReviewPersistence(input.projectRoot));
-  checks.push(checkVisualSelection(input.projectRoot));
+  checks.push(checkVisualSelection());
 
   if (input.includeOptional) {
     checks.push(checkSourceHintEngine());
-    checks.push(checkUsageSiteSourceHints(input.projectRoot));
+    checks.push(checkUsageSiteSourceHints());
   }
 
   return checks;

@@ -1,29 +1,52 @@
 import type { EventBus } from '@viskod/event-bus';
-import { type Result, type ViskodError, ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
-import type {
-  VisualSelection,
-  VisualSelectionMode,
-  VisualSelectionTarget,
-  VisualSelectionSummary,
-  VisualSelectionResolution,
-  VisualSelectionConfig,
-  Rect,
-  PageInfo,
-  ViewportInfo,
-} from './types';
-import { DEFAULT_VISUAL_SELECTION_CONFIG } from './types';
+import {
+  ErrorCategory,
+  ErrorSeverity,
+  type Result,
+  type ViskodError,
+  err,
+  ok,
+} from '@viskod/shared';
+import { boxCandidateToTarget, deduplicateTargets, reduceBoxSelection } from './box-selection';
+import type { BoxCandidate } from './box-selection';
 import { normalizeText } from './redaction';
 import { redactSelectionData } from './redaction';
-import { collectBoxCandidates, reduceBoxSelection, boxCandidateToTarget, deduplicateTargets } from './box-selection';
-import type { BoxCandidate } from './box-selection';
 import type { ResolvedElement, ResolvedTarget } from './resolver';
 import { resolveTarget } from './resolver';
+import type {
+  PageInfo,
+  Rect,
+  VisualSelection,
+  VisualSelectionConfig,
+  VisualSelectionResolution,
+  VisualSelectionSummary,
+  VisualSelectionTarget,
+} from './types';
+import { DEFAULT_VISUAL_SELECTION_CONFIG } from './types';
 
 export interface VisualSelectionService {
   enterSelectionMode(pageId: string): Promise<Result<void>>;
   exitSelectionMode(pageId: string): Promise<Result<void>>;
   getActiveSelection(pageId: string): Promise<Result<VisualSelection | null>>;
   clearSelection(pageId: string): Promise<Result<void>>;
+  createSingleSelection(
+    pageId: string,
+    target: VisualSelectionTarget,
+    pageInfo: PageInfo,
+    regionRect: Rect,
+  ): Result<VisualSelection>;
+  createMultiSelection(
+    pageId: string,
+    targets: VisualSelectionTarget[],
+    pageInfo: PageInfo,
+    regionRect: Rect,
+  ): Result<VisualSelection>;
+  createBoxSelection(
+    pageId: string,
+    candidates: BoxCandidate[],
+    dragRect: Rect,
+    pageInfo: PageInfo,
+  ): Result<VisualSelection>;
   resolveSelection(pageId: string, selectionId: string): Promise<Result<ResolvedTarget>>;
   health(): VisualSelectionServiceHealth;
 }
@@ -159,6 +182,15 @@ export class VisualSelectionServiceImpl implements VisualSelectionService {
     pageInfo: PageInfo,
     regionRect: Rect,
   ): Result<VisualSelection> {
+    return this.createMultiSelection(pageId, [target], pageInfo, regionRect);
+  }
+
+  createMultiSelection(
+    pageId: string,
+    targets: VisualSelectionTarget[],
+    pageInfo: PageInfo,
+    regionRect: Rect,
+  ): Result<VisualSelection> {
     const session = this.sessions.get(pageId);
     if (!session) {
       return err(this.seError('NO_ACTIVE_PAGE', 'No active page session'));
@@ -166,23 +198,26 @@ export class VisualSelectionServiceImpl implements VisualSelectionService {
     if (!session.selectionMode) {
       return err(this.seError('SELECTION_MODE_NOT_ACTIVE', 'Selection mode is not active'));
     }
+    if (targets.length === 0) {
+      return err(this.seError('TARGET_MISSING', 'No targets in selection'));
+    }
 
     const now = new Date().toISOString();
     const selectionId = crypto.randomUUID();
-
-    const textPreview = normalizeText(target.semantics.textPreview ?? '', this.config.textPreviewMaxLength);
+    const firstTarget = targets[0];
+    const textPreview =
+      targets.length === 1
+        ? normalizeText(firstTarget?.semantics.textPreview ?? '', this.config.textPreviewMaxLength)
+        : undefined;
 
     const summary: VisualSelectionSummary = {
-      label: textPreview || target.semantics.accessibleName || target.semantics.tagName,
-      role: target.semantics.role,
-      textPreview: textPreview || undefined,
-      targetCount: 1,
-    };
-
-    const resolution: VisualSelectionResolution = {
-      status: 'resolved',
-      confidence: 0.9,
-      resolvedAt: now,
+      label:
+        targets.length === 1
+          ? textPreview || firstTarget?.semantics.accessibleName || firstTarget?.semantics.tagName
+          : `${targets.length} elements selected`,
+      role: targets.length === 1 ? firstTarget?.semantics.role : undefined,
+      textPreview,
+      targetCount: targets.length,
     };
 
     const selection: VisualSelection = {
@@ -197,9 +232,13 @@ export class VisualSelectionServiceImpl implements VisualSelectionService {
       region: {
         viewportRect: regionRect,
       },
-      targets: [target],
+      targets,
       summary,
-      resolution,
+      resolution: {
+        status: 'resolved',
+        confidence: targets.length === 1 ? 0.9 : 0.85,
+        resolvedAt: now,
+      },
     };
 
     const redacted = redactSelectionData(selection);
@@ -213,7 +252,7 @@ export class VisualSelectionServiceImpl implements VisualSelectionService {
       version: '1.0.0',
       source: 'visual-selection',
       correlationId: selectionId,
-      payload: { pageId, selectionId, mode: 'single', targetCount: 1 },
+      payload: { pageId, selectionId, mode: 'single', targetCount: targets.length },
     });
 
     return ok(redacted.selection);
@@ -238,10 +277,15 @@ export class VisualSelectionServiceImpl implements VisualSelectionService {
     const deduplicated = deduplicateTargets(targets);
 
     if (deduplicated.length > this.config.maxSelectedTargets) {
-      return err(this.seError('SELECTION_TARGET_LIMIT_EXCEEDED', 'This region contains too many elements. Select a smaller area.'));
+      return err(
+        this.seError(
+          'SELECTION_TARGET_LIMIT_EXCEEDED',
+          'This region contains too many elements. Select a smaller area.',
+        ),
+      );
     }
 
-    let targetCount = deduplicated.length;
+    const targetCount = deduplicated.length;
     let truncated = false;
     let finalTargets = deduplicated;
 

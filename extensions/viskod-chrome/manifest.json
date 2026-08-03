@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Viskod",
+  "version": "0.1.0",
+  "description": "AI agent chat overlay for visual debugging",
+  "permissions": ["activeTab", "scripting", "sidePanel", "clipboardWrite"],
+  "host_permissions": [
+    "http://localhost:*/*",
+    "https://localhost:*/*",
+    "http://127.0.0.1:*/*",
+    "https://127.0.0.1:*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open Viskod"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://localhost:3001 http://localhost:3001"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:*/*",
+        "https://localhost:*/*",
+        "http://127.0.0.1:*/*",
+        "https://127.0.0.1:*/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

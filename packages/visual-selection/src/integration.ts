@@ -1,8 +1,8 @@
 import type { Result } from '@viskod/shared';
-import { err, ok } from '@viskod/shared';
-import type { VisualSelectionService } from './service';
-import type { VisualSelection, VisualSelectionTarget, PageInfo, Rect } from './types';
+import { ok } from '@viskod/shared';
 import { normalizeText } from './redaction';
+import type { VisualSelectionService } from './service';
+import type { PageInfo, Rect, VisualSelection, VisualSelectionTarget } from './types';
 
 export interface OverlayEvent {
   type: string;
@@ -18,8 +18,16 @@ export interface BrowserIntegration {
   pollOverlayEvent(): Promise<Result<unknown>>;
   getPageUrl(): Promise<string>;
   getPageTitle(): Promise<string>;
-  getViewport(): Promise<{ width: number; height: number; deviceScaleFactor: number; scrollX: number; scrollY: number }>;
+  getViewport(): Promise<{
+    width: number;
+    height: number;
+    deviceScaleFactor: number;
+    scrollX: number;
+    scrollY: number;
+  }>;
   getElementInfoAtPoint(x: number, y: number): Promise<Result<Record<string, unknown>>>;
+  /** Evaluate arbitrary JS in the page context. Returns serializable result. */
+  evaluate<T>(fn: (arg: unknown) => T, arg: unknown): Promise<T>;
 }
 
 export interface OverlayIntegrationOptions {
@@ -32,7 +40,6 @@ export interface OverlayIntegrationOptions {
 
 export class SelectionOverlayController {
   private pageId: string;
-  private sessionId: string;
   private browser: BrowserIntegration;
   private service: VisualSelectionService;
   private overlayScript: string;
@@ -41,7 +48,6 @@ export class SelectionOverlayController {
 
   constructor(options: OverlayIntegrationOptions) {
     this.pageId = options.pageId;
-    this.sessionId = options.sessionId;
     this.browser = options.browser;
     this.service = options.service;
     this.overlayScript = options.overlayScript;
@@ -97,11 +103,49 @@ export class SelectionOverlayController {
         const data = event.data as Record<string, unknown> | undefined;
         if (!data) return;
 
-        const pageInfo = await this.buildPageInfo();
-        const target = this.buildTargetFromEvent(data);
-        if (!target) return;
+        const targets = this.selectedEventInfos(data)
+          .map((info) => this.buildTargetFromEvent(info))
+          .filter((target): target is VisualSelectionTarget => target !== null);
+        if (targets.length === 0) return;
 
-        this.service.createSingleSelection(this.pageId, target, pageInfo, target.geometry.viewportRect);
+        const pageInfo = await this.buildPageInfo();
+        if (targets.length === 1 && data.multi !== true) {
+          this.service.createSingleSelection(
+            this.pageId,
+            targets[0]!,
+            pageInfo,
+            targets[0]!.geometry.viewportRect,
+          );
+        } else {
+          this.service.createMultiSelection(
+            this.pageId,
+            targets,
+            pageInfo,
+            targets[0]!.geometry.viewportRect,
+          );
+        }
+        break;
+      }
+
+      case 'overlay:element-deselected': {
+        const data = event.data as Record<string, unknown> | undefined;
+        if (!data) return;
+
+        const targets = this.selectedEventInfos(data)
+          .map((info) => this.buildTargetFromEvent(info))
+          .filter((target): target is VisualSelectionTarget => target !== null);
+        if (targets.length === 0) {
+          await this.service.clearSelection(this.pageId);
+          break;
+        }
+
+        const pageInfo = await this.buildPageInfo();
+        this.service.createMultiSelection(
+          this.pageId,
+          targets,
+          pageInfo,
+          targets[0]!.geometry.viewportRect,
+        );
         break;
       }
 
@@ -114,7 +158,33 @@ export class SelectionOverlayController {
         if (!dragRect) return;
 
         const targets = await this.collectBoxTargets(dragRect);
-        this.service.createBoxSelection(this.pageId, targets, dragRect, pageInfo);
+        const selectionResult = this.service.createBoxSelection(
+          this.pageId,
+          targets,
+          dragRect,
+          pageInfo,
+        );
+        if (selectionResult.ok) {
+          const overlayTargets = selectionResult.value.targets.map((target) => ({
+            boundingBox: target.geometry.viewportRect,
+            tagName: target.semantics.tagName,
+            documentOrder: target.documentOrder,
+            role: target.semantics.role,
+            accessibleName: target.semantics.accessibleName,
+            textPreview: target.semantics.textPreview,
+          }));
+          await this.browser.evaluate((rawTargets: unknown) => {
+            window.postMessage(
+              {
+                source: '__viskod_browser',
+                command: 'overlay:set-selection-targets',
+                targets: rawTargets,
+              },
+              '*',
+            );
+            return undefined;
+          }, overlayTargets);
+        }
         break;
       }
 
@@ -128,6 +198,14 @@ export class SelectionOverlayController {
         break;
       }
     }
+  }
+
+  private selectedEventInfos(data: Record<string, unknown>): Record<string, unknown>[] {
+    const selected = data.selectedElements;
+    if (!Array.isArray(selected)) return [data];
+    return selected.filter(
+      (value): value is Record<string, unknown> => typeof value === 'object' && value !== null,
+    );
   }
 
   private startPolling(): void {
@@ -192,7 +270,71 @@ export class SelectionOverlayController {
     };
   }
 
-  private async collectBoxTargets(dragRect: Rect): Promise<import('./box-selection').BoxCandidate[]> {
-    return [];
+  // ponytail: real DOM query — finds all elements whose bounding rects intersect the drag rectangle
+  private async collectBoxTargets(
+    dragRect: Rect,
+  ): Promise<import('./box-selection').BoxCandidate[]> {
+    try {
+      const elements = await this.browser.evaluate((rawRect: unknown) => {
+        const rect = rawRect as Rect;
+        const results: Array<import('./box-selection').BoxCandidate> = [];
+        let order = 0;
+        const walk = (node: Element, ancestorDepth = 0) => {
+          const r = node.getBoundingClientRect();
+          const intersects =
+            r.width > 0 &&
+            r.height > 0 &&
+            r.left < rect.x + rect.width &&
+            r.right > rect.x &&
+            r.top < rect.y + rect.height &&
+            r.bottom > rect.y;
+          const isViskodOwned = Boolean(
+            node.closest?.('[data-viskod-overlay]') || node.closest?.('#__viskod_overlay_root'),
+          );
+          const tagName = node.tagName.toLowerCase();
+          const computed = window.getComputedStyle(node);
+          const isHidden = computed.display === 'none' || computed.visibility === 'hidden';
+          const isTechnical = ['script', 'style', 'noscript', 'template'].includes(tagName);
+          const isInteractive =
+            ['button', 'a', 'input', 'select', 'textarea'].includes(tagName) ||
+            node.getAttribute('role') === 'button' ||
+            (node as HTMLElement).tabIndex >= 0;
+
+          if (intersects && !isViskodOwned) {
+            const left = Math.max(r.left, rect.x);
+            const right = Math.min(r.right, rect.x + rect.width);
+            const top = Math.max(r.top, rect.y);
+            const bottom = Math.min(r.bottom, rect.y + rect.height);
+            const intersectionArea = Math.max(0, right - left) * Math.max(0, bottom - top);
+            const area = r.width * r.height;
+            const el = node as HTMLElement;
+            results.push({
+              tagName,
+              boundingRect: { x: r.x, y: r.y, width: r.width, height: r.height },
+              targetId: el.id || el.getAttribute('data-testid') || crypto.randomUUID(),
+              documentOrder: order,
+              ancestorDepth,
+              isInteractive,
+              isTechnical,
+              isViskodOwned,
+              isHidden,
+              intersectionArea,
+              visibleRatio: area > 0 ? intersectionArea / area : 0,
+            });
+          }
+
+          order++;
+          for (let i = 0; i < node.children.length; i++) {
+            const child = node.children[i];
+            if (child) walk(child, ancestorDepth + 1);
+          }
+        };
+        walk(document.body);
+        return results;
+      }, dragRect);
+      return elements;
+    } catch {
+      return [];
+    }
   }
 }

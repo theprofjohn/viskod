@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EventBus } from '@viskod/event-bus';
-import { IssueServiceImpl, IssuePersistence } from '@viskod/visual-issue';
-import { ReviewServiceImpl, ReviewPersistence } from '@viskod/visual-review';
+import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
+import { ReviewPersistence, ReviewServiceImpl } from '@viskod/visual-review';
+import type { RecaptureAdapter, RecaptureOptions, RecaptureResult } from '@viskod/visual-review';
 import type { VisualSelection } from '@viskod/visual-selection';
-import type { RecaptureAdapter, RecaptureResult } from '@viskod/visual-review';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const TEST_DIR = path.join(process.cwd(), '.viskod-test-mcp-review');
 const ISSUE_STORAGE = path.join(TEST_DIR, 'issues');
@@ -26,14 +26,22 @@ function makeSelection(): VisualSelection {
       viewport: { width: 1440, height: 900, scrollX: 0, scrollY: 0 },
     },
     region: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
-    targets: [{
-      targetId: 'tgt_mcp',
-      documentOrder: 0,
-      geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
-      semantics: { tagName: 'button', role: 'button', accessibleName: 'Save', textPreview: 'Save changes', isInteractive: true },
-      fingerprints: {},
-      resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
-    }],
+    targets: [
+      {
+        targetId: 'tgt_mcp',
+        documentOrder: 0,
+        geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
+        semantics: {
+          tagName: 'button',
+          role: 'button',
+          accessibleName: 'Save',
+          textPreview: 'Save changes',
+          isInteractive: true,
+        },
+        fingerprints: {},
+        resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
+      },
+    ],
     summary: { label: 'Save changes', role: 'button', textPreview: 'Save changes', targetCount: 1 },
     resolution: { status: 'resolved', confidence: 0.9, resolvedAt: new Date().toISOString() },
   };
@@ -45,7 +53,9 @@ let reviewService: ReviewServiceImpl;
 let testIssueId: string;
 
 beforeAll(async () => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {}
   fs.mkdirSync(ISSUE_STORAGE, { recursive: true });
   fs.mkdirSync(REVIEW_STORAGE, { recursive: true });
 
@@ -55,12 +65,19 @@ beforeAll(async () => {
   const reviewPersistence = new ReviewPersistence(REVIEW_STORAGE);
   reviewService = new ReviewServiceImpl(eventBus, issueService, undefined, reviewPersistence);
 
-  const result = await issueService.createIssue(makeSelection(), 'mcp-session', 'mcp-page', 'MCP test issue');
+  const result = await issueService.createIssue(
+    makeSelection(),
+    'mcp-session',
+    'mcp-page',
+    'MCP test issue',
+  );
   if (result.ok) testIssueId = result.value.issueId;
 });
 
 afterAll(() => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {}
 });
 
 function makeServices() {
@@ -87,7 +104,11 @@ describe('tools/list includes review tools', () => {
 describe('create_visual_review', () => {
   it('creates review from valid issue', async () => {
     const { reviewService } = makeServices();
-    const result = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const result = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.reviewId).toMatch(/^review_/);
@@ -98,16 +119,29 @@ describe('create_visual_review', () => {
 
   it('rejects missing issue', async () => {
     const { reviewService } = makeServices();
-    const result = await reviewService.createReview({ issueId: 'nonexistent' }, 'mcp-session', 'mcp-page');
+    const result = await reviewService.createReview(
+      { issueId: 'nonexistent' },
+      'mcp-session',
+      'mcp-page',
+    );
     expect(result.ok).toBe(false);
   });
 
   it('rejects deleted issue', async () => {
     const { issueService, reviewService } = makeServices();
-    const issue = await issueService.createIssue(makeSelection(), 'mcp-session', 'mcp-page', 'Delete me');
+    const issue = await issueService.createIssue(
+      makeSelection(),
+      'mcp-session',
+      'mcp-page',
+      'Delete me',
+    );
     if (issue.ok) {
       await issueService.deleteIssue(issue.value.issueId);
-      const result = await reviewService.createReview({ issueId: issue.value.issueId }, 'mcp-session', 'mcp-page');
+      const result = await reviewService.createReview(
+        { issueId: issue.value.issueId },
+        'mcp-session',
+        'mcp-page',
+      );
       expect(result.ok).toBe(false);
     }
   });
@@ -116,7 +150,11 @@ describe('create_visual_review', () => {
 describe('get_visual_review', () => {
   it('returns safe review data', async () => {
     const { reviewService } = makeServices();
-    const create = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     expect(create.ok).toBe(true);
     if (!create.ok) return;
 
@@ -150,7 +188,11 @@ describe('list_visual_reviews', () => {
 describe('recapture_visual_review', () => {
   it('sets after snapshot with resolved status', async () => {
     const { reviewService } = makeServices();
-    const create = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     if (!create.ok) return;
 
     const after = {
@@ -168,20 +210,29 @@ describe('recapture_visual_review', () => {
         confidence: 0.9,
         resolutionStatus: 'resolved' as const,
       },
-      evidenceSummary: { hasSelection: true, hasContextPacket: false, hasScreenshot: false, hasSourceHints: false },
+      evidenceSummary: {
+        hasSelection: true,
+        hasContextPacket: false,
+        hasScreenshot: false,
+        hasSourceHints: false,
+      },
     };
 
     const result = await reviewService.setAfterSnapshot(create.value.reviewId, after);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.comparison).toBeDefined();
-      expect(result.value.comparison!.status).toBe('unchanged');
+      expect(result.value.comparison?.status).toBe('unchanged');
     }
   });
 
   it('handles missing after status', async () => {
     const { reviewService } = makeServices();
-    const create = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     if (!create.ok) return;
 
     const after = {
@@ -196,13 +247,18 @@ describe('recapture_visual_review', () => {
         confidence: 0,
         resolutionStatus: 'missing' as const,
       },
-      evidenceSummary: { hasSelection: false, hasContextPacket: false, hasScreenshot: false, hasSourceHints: false },
+      evidenceSummary: {
+        hasSelection: false,
+        hasContextPacket: false,
+        hasScreenshot: false,
+        hasSourceHints: false,
+      },
     };
 
     const result = await reviewService.setAfterSnapshot(create.value.reviewId, after);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.comparison!.status).toBe('missing_after');
+      expect(result.value.comparison?.status).toBe('missing_after');
     }
   });
 });
@@ -210,37 +266,56 @@ describe('recapture_visual_review', () => {
 describe('record_visual_review_decision', () => {
   it('records accepted decision', async () => {
     const { reviewService } = makeServices();
-    const create = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     if (!create.ok) return;
 
-    const result = await reviewService.recordDecision(create.value.reviewId, { decision: 'accepted' });
+    const result = await reviewService.recordDecision(create.value.reviewId, {
+      decision: 'accepted',
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('accepted');
-      expect(result.value.decision!.decision).toBe('accepted');
+      expect(result.value.decision?.decision).toBe('accepted');
     }
   });
 
   it('records rejected decision', async () => {
     const { reviewService } = makeServices();
-    const create = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     if (!create.ok) return;
 
-    const result = await reviewService.recordDecision(create.value.reviewId, { decision: 'rejected', note: 'Still broken' });
+    const result = await reviewService.recordDecision(create.value.reviewId, {
+      decision: 'rejected',
+      note: 'Still broken',
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('rejected');
-      expect(result.value.decision!.note).toBe('Still broken');
+      expect(result.value.decision?.note).toBe('Still broken');
     }
   });
 
   it('rejects decision on already-decided review', async () => {
     const { reviewService } = makeServices();
-    const create = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     if (!create.ok) return;
 
     await reviewService.recordDecision(create.value.reviewId, { decision: 'accepted' });
-    const result = await reviewService.recordDecision(create.value.reviewId, { decision: 'rejected' });
+    const result = await reviewService.recordDecision(create.value.reviewId, {
+      decision: 'rejected',
+    });
     expect(result.ok).toBe(false);
   });
 });
@@ -248,7 +323,11 @@ describe('record_visual_review_decision', () => {
 describe('output safety', () => {
   it('no packet paths in review output', async () => {
     const { reviewService } = makeServices();
-    const create = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     if (!create.ok) return;
 
     const get = await reviewService.getReview(create.value.reviewId);
@@ -264,7 +343,11 @@ describe('output safety', () => {
 
   it('no raw JSON in review output', async () => {
     const { reviewService } = makeServices();
-    const create = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     if (!create.ok) return;
 
     const get = await reviewService.getReview(create.value.reviewId);
@@ -276,7 +359,11 @@ describe('output safety', () => {
 
   it('no selectors in review output', async () => {
     const { reviewService } = makeServices();
-    const create = await reviewService.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: testIssueId },
+      'mcp-session',
+      'mcp-page',
+    );
     if (!create.ok) return;
 
     const get = await reviewService.getReview(create.value.reviewId);
@@ -297,7 +384,11 @@ describe('output safety', () => {
     );
     if (!issue.ok) return;
 
-    const create = await reviewService.createReview({ issueId: issue.value.issueId }, 'mcp-session', 'mcp-page');
+    const create = await reviewService.createReview(
+      { issueId: issue.value.issueId },
+      'mcp-session',
+      'mcp-page',
+    );
     if (!create.ok) return;
 
     const get = await reviewService.getReview(create.value.reviewId);
@@ -325,7 +416,9 @@ describe('recaptureReview (live adapter)', () => {
 
   function makeAdapterService(adapter: RecaptureAdapter) {
     return new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       adapter,
     );
@@ -345,14 +438,16 @@ describe('recaptureReview (live adapter)', () => {
     if (result.ok) {
       expect(result.value.status).toBe('ready');
       expect(result.value.after).toBeDefined();
-      expect(result.value.after!.source.recapturePacketId).toBe('pkt_mcp_recapture_001');
+      expect(result.value.after?.source.recapturePacketId).toBe('pkt_mcp_recapture_001');
       expect(result.value.comparison).toBeDefined();
     }
   });
 
   it('fails without adapter', async () => {
     const service = new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
     );
 
@@ -371,7 +466,7 @@ describe('recaptureReview (live adapter)', () => {
   });
 
   it('passes reload and cacheBust to adapter', async () => {
-    let capturedOptions: any = {};
+    let capturedOptions: RecaptureOptions | undefined;
     const service = makeAdapterService(async (opts) => {
       capturedOptions = opts;
       return makeRecaptureResult();
@@ -387,8 +482,8 @@ describe('recaptureReview (live adapter)', () => {
       cacheBust: true,
     });
 
-    expect(capturedOptions.reload).toBe(true);
-    expect(capturedOptions.cacheBust).toBe(true);
+    expect(capturedOptions?.reload).toBe(true);
+    expect(capturedOptions?.cacheBust).toBe(true);
   });
 
   it('returns opaque snapshot IDs, not paths', async () => {
@@ -404,8 +499,8 @@ describe('recaptureReview (live adapter)', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.before.snapshotId).toBeTruthy();
-      expect(result.value.after!.snapshotId).toBeTruthy();
-      expect(result.value.after!.source.recapturePacketId).toBe('pkt_mcp_recapture_001');
+      expect(result.value.after?.snapshotId).toBeTruthy();
+      expect(result.value.after?.source.recapturePacketId).toBe('pkt_mcp_recapture_001');
       const json = JSON.stringify(result.value);
       expect(json).not.toContain('.viskod');
       expect(json).not.toContain('captures/');
@@ -447,10 +542,11 @@ describe('recaptureReview (live adapter)', () => {
   });
 
   it('duplicate target returns ambiguous after recapture', async () => {
-    const ambiguousAdapter: RecaptureAdapter = async () => makeRecaptureResult({
-      text: 'Settings',
-      boundingBox: { x: 100, y: 200, width: 120, height: 40 },
-    });
+    const ambiguousAdapter: RecaptureAdapter = async () =>
+      makeRecaptureResult({
+        text: 'Settings',
+        boundingBox: { x: 100, y: 200, width: 120, height: 40 },
+      });
     const service = makeAdapterService(ambiguousAdapter);
 
     const create = await service.createReview({ issueId: testIssueId }, 'mcp-session', 'mcp-page');

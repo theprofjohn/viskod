@@ -11,7 +11,12 @@ export function normalizeRect(a: Rect): Rect {
 export function rectsIntersect(a: Rect, b: Rect): boolean {
   const an = normalizeRect(a);
   const bn = normalizeRect(b);
-  return !(an.x + an.width <= bn.x || bn.x + bn.width <= an.x || an.y + an.height <= bn.y || bn.y + bn.height <= an.y);
+  return !(
+    an.x + an.width <= bn.x ||
+    bn.x + bn.width <= an.x ||
+    an.y + an.height <= bn.y ||
+    bn.y + bn.height <= an.y
+  );
 }
 
 export function intersectionRect(a: Rect, b: Rect): Rect | null {

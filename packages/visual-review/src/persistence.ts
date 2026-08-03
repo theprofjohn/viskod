@@ -1,9 +1,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { VISKOD_STORAGE_DIR, REVIEWS_DIR } from '@viskod/shared';
-import { type Result, type ViskodError, ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
-import type { VisualReview } from './types';
+import { REVIEWS_DIR, VISKOD_STORAGE_DIR } from '@viskod/shared';
+import {
+  ErrorCategory,
+  ErrorSeverity,
+  type Result,
+  type ViskodError,
+  err,
+  ok,
+} from '@viskod/shared';
 import { VisualReviewSchema } from './schemas';
+import type { VisualReview } from './types';
 
 const REVIEW_FILE = 'review.json';
 const INDEX_FILE = 'index.json';
@@ -27,7 +34,11 @@ export class ReviewPersistence {
 
   constructor(baseDir?: string) {
     this.baseDir = baseDir ?? path.join(process.cwd(), VISKOD_STORAGE_DIR, REVIEWS_DIR);
-    try { fs.mkdirSync(this.baseDir, { recursive: true }); } catch { /* best effort */ }
+    try {
+      fs.mkdirSync(this.baseDir, { recursive: true });
+    } catch {
+      /* best effort */
+    }
   }
 
   getBaseDir(): string {
@@ -49,14 +60,24 @@ export class ReviewPersistence {
   async saveReview(review: VisualReview): Promise<Result<void>> {
     const parsed = VisualReviewSchema.safeParse(review);
     if (!parsed.success) {
-      return err(this.peError('SCHEMA_VALIDATION_FAILED', `Schema validation failed: ${parsed.error.message}`));
+      return err(
+        this.peError(
+          'SCHEMA_VALIDATION_FAILED',
+          `Schema validation failed: ${parsed.error.message}`,
+        ),
+      );
     }
 
     const dir = this.reviewDir(review.reviewId);
     try {
       fs.mkdirSync(dir, { recursive: true });
     } catch (error) {
-      return err(this.peError('PERSISTENCE_WRITE_FAILED', `Cannot create review directory: ${String(error)}`));
+      return err(
+        this.peError(
+          'PERSISTENCE_WRITE_FAILED',
+          `Cannot create review directory: ${String(error)}`,
+        ),
+      );
     }
 
     const filePath = this.reviewFilePath(review.reviewId);
@@ -65,9 +86,15 @@ export class ReviewPersistence {
       const content = JSON.stringify(review, null, 2);
       fs.writeFileSync(tempPath, content, 'utf-8');
       fs.renameSync(tempPath, filePath);
-      try { if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true }); } catch { /* best effort */ }
+      try {
+        if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+      } catch {
+        /* best effort */
+      }
     } catch (error) {
-      return err(this.peError('PERSISTENCE_WRITE_FAILED', `Failed to write review file: ${String(error)}`));
+      return err(
+        this.peError('PERSISTENCE_WRITE_FAILED', `Failed to write review file: ${String(error)}`),
+      );
     }
 
     await this.updateIndex();
@@ -85,14 +112,26 @@ export class ReviewPersistence {
       const parsed = JSON.parse(raw);
       const validated = VisualReviewSchema.safeParse(parsed);
       if (!validated.success) {
-        return err(this.peError('SCHEMA_VALIDATION_FAILED', `Corrupt review file: ${validated.error.message}`));
+        return err(
+          this.peError(
+            'SCHEMA_VALIDATION_FAILED',
+            `Corrupt review file: ${validated.error.message}`,
+          ),
+        );
       }
       return ok(validated.data as VisualReview);
     } catch (error) {
       if (error instanceof SyntaxError) {
-        return err(this.peError('CORRUPT_REVIEW_FILE', `Review file is corrupt for '${reviewId}': ${String(error)}`));
+        return err(
+          this.peError(
+            'CORRUPT_REVIEW_FILE',
+            `Review file is corrupt for '${reviewId}': ${String(error)}`,
+          ),
+        );
       }
-      return err(this.peError('PERSISTENCE_READ_FAILED', `Failed to read review: ${String(error)}`));
+      return err(
+        this.peError('PERSISTENCE_READ_FAILED', `Failed to read review: ${String(error)}`),
+      );
     }
   }
 
@@ -105,7 +144,9 @@ export class ReviewPersistence {
       await this.updateIndex();
       return ok(undefined);
     } catch (error) {
-      return err(this.peError('PERSISTENCE_WRITE_FAILED', `Failed to delete review: ${String(error)}`));
+      return err(
+        this.peError('PERSISTENCE_WRITE_FAILED', `Failed to delete review: ${String(error)}`),
+      );
     }
   }
 
@@ -168,7 +209,9 @@ export class ReviewPersistence {
   }
 
   private async updateIndex(): Promise<void> {
-    await this.rebuildIndex().catch(() => { /* index is optional */ });
+    await this.rebuildIndex().catch(() => {
+      /* index is optional */
+    });
   }
 
   reviewExists(reviewId: string): boolean {

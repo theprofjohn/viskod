@@ -1,6 +1,4 @@
-export {
-  VisualSelectionServiceImpl,
-} from './service';
+export { VisualSelectionServiceImpl } from './service';
 export type {
   VisualSelectionService,
   VisualSelectionServiceHealth,
@@ -24,9 +22,7 @@ export type {
   SelectionErrorCode,
 } from './types';
 
-export {
-  DEFAULT_VISUAL_SELECTION_CONFIG,
-} from './types';
+export { DEFAULT_VISUAL_SELECTION_CONFIG } from './types';
 
 export {
   normalizeRect,
@@ -63,9 +59,7 @@ export type {
   BoxSelectionResult,
 } from './box-selection';
 
-export {
-  resolveTarget,
-} from './resolver';
+export { resolveTarget } from './resolver';
 export type {
   ResolvedTarget,
   ResolvedElement,
@@ -76,9 +70,7 @@ export {
   normalizeText,
   truncateText,
 } from './redaction';
-export type {
-  SelectionRedactionResult,
-} from './redaction';
+export type { SelectionRedactionResult } from './redaction';
 
 export {
   VisualSelectionSchema,
@@ -86,9 +78,7 @@ export {
   RectSchema,
 } from './schemas';
 
-export {
-  SelectionOverlayController,
-} from './integration';
+export { SelectionOverlayController } from './integration';
 export type {
   OverlayIntegrationOptions,
   BrowserIntegration,

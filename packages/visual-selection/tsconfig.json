@@ -5,8 +5,5 @@
     "outDir": "./dist"
   },
   "extends": "../../tsconfig.json",
-  "references": [
-    { "path": "../shared" },
-    { "path": "../event-bus" }
-  ]
+  "references": [{ "path": "../shared" }, { "path": "../event-bus" }]
 }

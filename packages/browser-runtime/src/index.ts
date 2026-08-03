@@ -62,10 +62,34 @@ export interface Screenshot {
   buffer: Buffer;
 }
 export interface ElementHierarchy {
-  selectedNode: { tagName: string; depth: number; text?: string };
-  parents: Array<{ tagName: string; depth: number; text?: string }>;
-  siblings: Array<{ tagName: string; depth: number; text?: string }>;
-  children: Array<{ tagName: string; depth: number; text?: string }>;
+  selectedNode: {
+    tagName: string;
+    depth: number;
+    attributes?: Record<string, string>;
+    childCount?: number;
+    text?: string;
+  };
+  parents: Array<{
+    tagName: string;
+    depth: number;
+    attributes?: Record<string, string>;
+    childCount?: number;
+    text?: string;
+  }>;
+  siblings: Array<{
+    tagName: string;
+    depth: number;
+    attributes?: Record<string, string>;
+    childCount?: number;
+    text?: string;
+  }>;
+  children: Array<{
+    tagName: string;
+    depth: number;
+    attributes?: Record<string, string>;
+    childCount?: number;
+    text?: string;
+  }>;
   landmarks: Array<{ tagName: string; role?: string; label?: string; depth: number }>;
 }
 export interface BrowserDiagnostics {
@@ -530,7 +554,10 @@ export class BrowserRuntime {
     }
   }
 
-  async showOverlaySelectionMode(handle: BrowserHandle, overlayScript: string): Promise<Result<void>> {
+  async showOverlaySelectionMode(
+    handle: BrowserHandle,
+    overlayScript: string,
+  ): Promise<Result<void>> {
     const entry = this.handles.get(handle.contextId);
     if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
 
@@ -542,7 +569,10 @@ export class BrowserRuntime {
       return ok(undefined);
     } catch (error) {
       return err(
-        this.brError('BR_OVERLAY_SELECTION_FAILED', `Selection mode overlay failed: ${String(error)}`),
+        this.brError(
+          'BR_OVERLAY_SELECTION_FAILED',
+          `Selection mode overlay failed: ${String(error)}`,
+        ),
       );
     }
   }
@@ -563,7 +593,7 @@ export class BrowserRuntime {
 
   async setupOverlayMessageListener(
     handle: BrowserHandle,
-    eventBus: EventBus,
+    _eventBus: EventBus,
   ): Promise<Result<void>> {
     const entry = this.handles.get(handle.contextId);
     if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
@@ -603,7 +633,11 @@ export class BrowserRuntime {
     }
   }
 
-  async getElementInfoAtPoint(handle: BrowserHandle, x: number, y: number): Promise<Result<Record<string, unknown>>> {
+  async getElementInfoAtPoint(
+    handle: BrowserHandle,
+    x: number,
+    y: number,
+  ): Promise<Result<Record<string, unknown>>> {
     const entry = this.handles.get(handle.contextId);
     if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Handle not found'));
 
@@ -616,11 +650,26 @@ export class BrowserRuntime {
           const tagName = el.tagName.toLowerCase();
           const role = el.getAttribute('role') || undefined;
           const accessibleName = el.getAttribute('aria-label') || undefined;
-          const textPreview = (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 120) || undefined;
-          const isInteractive = tagName === 'button' || tagName === 'a' || tagName === 'input' ||
-            tagName === 'select' || tagName === 'textarea' || el.tabIndex >= 0;
-          const stableKeys = ['data-testid', 'data-test-id', 'data-id', 'data-cy', 'data-test', 'id', 'name', 'aria-label'];
-          const attrs = {};
+          const textPreview =
+            (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 120) || undefined;
+          const isInteractive =
+            tagName === 'button' ||
+            tagName === 'a' ||
+            tagName === 'input' ||
+            tagName === 'select' ||
+            tagName === 'textarea' ||
+            (el as HTMLElement).tabIndex >= 0;
+          const stableKeys = [
+            'data-testid',
+            'data-test-id',
+            'data-id',
+            'data-cy',
+            'data-test',
+            'id',
+            'name',
+            'aria-label',
+          ];
+          const attrs: Record<string, string> = {};
           for (const key of stableKeys) {
             const v = el.getAttribute(key);
             if (v) attrs[key] = v;
@@ -637,7 +686,7 @@ export class BrowserRuntime {
         },
         { px: x, py: y },
       );
-      return ok(result as Record<string, unknown> ?? {});
+      return ok((result as Record<string, unknown>) ?? {});
     } catch (error) {
       return err(this.brError('BR_ELEMENT_INFO_FAILED', `Element info failed: ${String(error)}`));
     }

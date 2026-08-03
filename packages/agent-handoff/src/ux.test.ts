@@ -1,11 +1,11 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { EventBus } from '@viskod/event-bus';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { IssueServiceImpl, IssuePersistence } from '@viskod/visual-issue';
-import { HandoffServiceImpl, HandoffPersistence } from './index';
-import { UserFacingHandoff } from './ux';
+import { EventBus } from '@viskod/event-bus';
+import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
 import type { VisualSelection } from '@viskod/visual-selection';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { HandoffPersistence, HandoffServiceImpl } from './index';
+import { type SendToAgentResult, UserFacingHandoff } from './ux';
 
 const TEST_DIR = path.join(process.cwd(), '.viskod-test-ux-handoff');
 const TEST_SESSION_ID = 'ux-test-session';
@@ -29,7 +29,7 @@ function makeServices() {
   return { eventBus, issueService, handoffService, ux };
 }
 
-function makeSelection(overrides: Partial<any> = {}): any {
+function makeSelection(overrides: Partial<VisualSelection> = {}): VisualSelection {
   return {
     schemaVersion: 1,
     selectionId: crypto.randomUUID(),
@@ -38,28 +38,54 @@ function makeSelection(overrides: Partial<any> = {}): any {
     mode: 'single',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    page: { url: 'https://example.com/settings', title: 'Settings', viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 } },
+    page: {
+      url: 'https://example.com/settings',
+      title: 'Settings',
+      viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
+    },
     region: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-    targets: [{
-      targetId: crypto.randomUUID(),
-      documentOrder: 0,
-      geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
-      semantics: { tagName: 'button', role: 'button', accessibleName: 'Save', textPreview: 'Save changes', isInteractive: true },
-      fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
-      resolutionCandidates: [{ strategy: 'stable-attribute' as const, value: 'save-btn', confidence: 0.9 }],
-    }],
+    targets: [
+      {
+        targetId: crypto.randomUUID(),
+        documentOrder: 0,
+        geometry: { viewportRect: { x: 0, y: 0, width: 100, height: 40 } },
+        semantics: {
+          tagName: 'button',
+          role: 'button',
+          accessibleName: 'Save',
+          textPreview: 'Save changes',
+          isInteractive: true,
+        },
+        fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
+        resolutionCandidates: [
+          { strategy: 'stable-attribute' as const, value: 'save-btn', confidence: 0.9 },
+        ],
+      },
+    ],
     summary: { label: 'Save changes', role: 'button', textPreview: 'Save changes', targetCount: 1 },
-    resolution: { status: 'resolved' as const, confidence: 0.9, resolvedAt: new Date().toISOString() },
+    resolution: {
+      status: 'resolved' as const,
+      confidence: 0.9,
+      resolvedAt: new Date().toISOString(),
+    },
     ...overrides,
   };
 }
 
 beforeEach(() => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 afterEach(() => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 // =============================================================================
@@ -85,11 +111,7 @@ describe('User Flow: Issue → Send to Agent', () => {
 
   it('returns user-friendly error for missing issue', async () => {
     const { ux } = makeServices();
-    const result = await ux.sendToAgent(
-      { issueId: 'nonexistent' },
-      TEST_SESSION_ID,
-      TEST_PAGE_ID,
-    );
+    const result = await ux.sendToAgent({ issueId: 'nonexistent' }, TEST_SESSION_ID, TEST_PAGE_ID);
 
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
@@ -243,7 +265,7 @@ describe('Handoff Confirmation', () => {
     expect(confirmation.handoffId).toMatch(/^handoff_/);
     expect(confirmation.message).toBe('Handoff ready');
     expect(confirmation.nextSteps.length).toBeGreaterThan(0);
-    expect(confirmation.nextSteps.some(s => s.includes('MCP'))).toBe(true);
+    expect(confirmation.nextSteps.some((s) => s.includes('MCP'))).toBe(true);
   });
 
   it('formatCreatedConfirmation produces safe copy', async () => {
@@ -269,8 +291,8 @@ describe('Handoff Confirmation', () => {
 
   it('formatCreatedConfirmation handles failure', async () => {
     const { ux } = makeServices();
-    const result = { ok: false, error: 'Issue not found' };
-    const text = ux.formatCreatedConfirmation(result as any);
+    const result: SendToAgentResult = { ok: false, error: 'Issue not found' };
+    const text = ux.formatCreatedConfirmation(result);
     expect(text).toContain('Failed');
     expect(text).toContain('Issue not found');
   });
@@ -289,7 +311,7 @@ describe('UX List and Cancel', () => {
     await ux.sendToAgent({ issueId: issue.value.issueId }, TEST_SESSION_ID, TEST_PAGE_ID);
     const list = await ux.listHandoffs();
     expect(list.length).toBe(1);
-    expect(list[0]!.handoffId).toMatch(/^handoff_/);
+    expect(list[0]?.handoffId).toMatch(/^handoff_/);
   });
 
   it('cancels handoff via UX', async () => {
@@ -352,7 +374,7 @@ describe('No manual packet path inspection', () => {
     if (!confirmation) return;
 
     expect(confirmation.handoffId).toBe(sendResult.handoffId);
-    expect(confirmation.nextSteps.some(s => s.includes('.viskod'))).toBe(false);
-    expect(confirmation.nextSteps.some(s => s.includes('captures'))).toBe(false);
+    expect(confirmation.nextSteps.some((s) => s.includes('.viskod'))).toBe(false);
+    expect(confirmation.nextSteps.some((s) => s.includes('captures'))).toBe(false);
   });
 });

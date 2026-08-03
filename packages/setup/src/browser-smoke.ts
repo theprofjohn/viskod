@@ -1,5 +1,5 @@
 import type { Result } from '@viskod/shared';
-import { ok, err, ErrorCategory, ErrorSeverity } from '@viskod/shared';
+import { ok } from '@viskod/shared';
 import type { SetupSmokeResult } from './types';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -21,8 +21,12 @@ export async function runBrowserSmoke(input: {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const page = await context.newPage();
 
-    const targetUrl = input.url ?? 'data:text/html,<html><body><h1>Viskod Setup</h1><p>Test page</p></body></html>';
-    await page.setContent(targetUrl.startsWith('data:') ? targetUrl : '<html><body><h1>Viskod Setup</h1></body></html>', { timeout: 5000 });
+    const targetUrl =
+      input.url ?? 'data:text/html,<html><body><h1>Viskod Setup</h1><p>Test page</p></body></html>';
+    await page.setContent(
+      targetUrl.startsWith('data:') ? targetUrl : '<html><body><h1>Viskod Setup</h1></body></html>',
+      { timeout: 5000 },
+    );
     await page.waitForSelector('body', { timeout: 5000 });
 
     await page.close();
@@ -90,7 +94,9 @@ export async function runCaptureSmoke(input: {
       }
     } else {
       // Data URI fallback
-      const dataUri = targetUrl ?? 'data:text/html,<html><body><button id="test-btn">Test</button><p>Setup smoke</p></body></html>';
+      const dataUri =
+        targetUrl ??
+        'data:text/html,<html><body><button id="test-btn">Test</button><p>Setup smoke</p></body></html>';
       const navResult = await vce.navigate(dataUri);
       if (!navResult.ok) {
         warnings.push(`Navigation: ${navResult.error.message}`);
@@ -132,7 +138,6 @@ export async function runCaptureSmoke(input: {
     }
 
     // Step 7: Return only opaque packetId (truncated for display)
-    const truncatedId = packet.packetId.slice(0, 8) + '…';
     return ok({
       lastRunAt: now,
       status: 'pass',

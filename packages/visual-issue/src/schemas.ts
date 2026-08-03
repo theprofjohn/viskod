@@ -1,26 +1,39 @@
 import { z } from 'zod';
 
 export const VisualIssueStatusSchema = z.enum([
-  'draft', 'open', 'in_progress', 'blocked', 'resolved', 'archived',
+  'draft',
+  'open',
+  'in_progress',
+  'blocked',
+  'resolved',
+  'archived',
 ]);
 
-export const VisualIssueSeveritySchema = z.enum([
-  'low', 'medium', 'high', 'critical',
-]);
+export const VisualIssueSeveritySchema = z.enum(['low', 'medium', 'high', 'critical']);
 
 export const VisualIssueEventSchema = z.object({
   eventId: z.string().min(1),
   type: z.enum([
-    'created', 'updated', 'status_changed', 'severity_changed',
-    'selection_refreshed', 'archived', 'reopened', 'deleted',
+    'created',
+    'updated',
+    'status_changed',
+    'severity_changed',
+    'selection_refreshed',
+    'archived',
+    'reopened',
+    'deleted',
   ]),
   createdAt: z.string(),
   actor: z.enum(['local-user', 'system']),
   summary: z.string().min(1),
-  changes: z.record(z.object({
-    before: z.unknown().optional(),
-    after: z.unknown().optional(),
-  })).optional(),
+  changes: z
+    .record(
+      z.object({
+        before: z.unknown().optional(),
+        after: z.unknown().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const RedactedTargetSummarySchema = z.object({

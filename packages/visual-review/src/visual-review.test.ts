@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EventBus } from '@viskod/event-bus';
-import { IssueServiceImpl, IssuePersistence } from '@viskod/visual-issue';
-import { ReviewServiceImpl, ReviewPersistence } from './index';
+import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
 import type { VisualSelection } from '@viskod/visual-selection';
-import type { ReviewSnapshotRef, RecaptureAdapter, RecaptureResult } from './types';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ReviewPersistence, ReviewServiceImpl } from './index';
 import { resolveRecaptureTarget } from './targetResolver';
+import type { RecaptureAdapter, RecaptureResult, ReviewSnapshotRef } from './types';
 
 const TEST_DIR = path.join(process.cwd(), '.viskod-test-visual-review');
 const ISSUE_STORAGE = path.join(TEST_DIR, 'issues');
@@ -27,14 +27,22 @@ function makeSelection(overrides?: Partial<VisualSelection>): VisualSelection {
       viewport: { width: 1440, height: 900, scrollX: 0, scrollY: 0 },
     },
     region: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
-    targets: [{
-      targetId: 'tgt_001',
-      documentOrder: 0,
-      geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
-      semantics: { tagName: 'button', role: 'button', accessibleName: 'Save', textPreview: 'Save changes', isInteractive: true },
-      fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
-      resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
-    }],
+    targets: [
+      {
+        targetId: 'tgt_001',
+        documentOrder: 0,
+        geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
+        semantics: {
+          tagName: 'button',
+          role: 'button',
+          accessibleName: 'Save',
+          textPreview: 'Save changes',
+          isInteractive: true,
+        },
+        fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
+        resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
+      },
+    ],
     summary: { label: 'Save changes', role: 'button', textPreview: 'Save changes', targetCount: 1 },
     resolution: { status: 'resolved', confidence: 0.9, resolvedAt: '2026-07-30T10:00:00.000Z' },
     ...overrides,
@@ -90,7 +98,9 @@ let reviewService: ReviewServiceImpl;
 let testIssueId: string;
 
 beforeAll(async () => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {}
   fs.mkdirSync(ISSUE_STORAGE, { recursive: true });
   fs.mkdirSync(REVIEW_STORAGE, { recursive: true });
 
@@ -100,12 +110,19 @@ beforeAll(async () => {
   const reviewPersistence = new ReviewPersistence(REVIEW_STORAGE);
   reviewService = new ReviewServiceImpl(eventBus, issueService, undefined, reviewPersistence);
 
-  const result = await issueService.createIssue(makeSelection(), 'test-session', 'test-page', 'Button issue');
+  const result = await issueService.createIssue(
+    makeSelection(),
+    'test-session',
+    'test-page',
+    'Button issue',
+  );
   if (result.ok) testIssueId = result.value.issueId;
 });
 
 afterAll(() => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {}
 });
 
 describe('VisualReview schema validation', () => {
@@ -125,8 +142,18 @@ describe('VisualReview schema validation', () => {
         capturedAt: new Date().toISOString(),
         source: {},
         page: { viewport: { width: 100, height: 100 } },
-        targetSummary: { mode: 'single', targetCount: 1, confidence: 0.9, resolutionStatus: 'resolved' },
-        evidenceSummary: { hasSelection: true, hasContextPacket: false, hasScreenshot: false, hasSourceHints: false },
+        targetSummary: {
+          mode: 'single',
+          targetCount: 1,
+          confidence: 0.9,
+          resolutionStatus: 'resolved',
+        },
+        evidenceSummary: {
+          hasSelection: true,
+          hasContextPacket: false,
+          hasScreenshot: false,
+          hasSourceHints: false,
+        },
       },
       lifecycle: [],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
@@ -160,7 +187,8 @@ describe('Create review', () => {
   it('creates review from issue + handoff', async () => {
     const result = await reviewService.createReview(
       { issueId: testIssueId, handoffId: 'handoff_test123' },
-      's', 'p',
+      's',
+      'p',
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -187,7 +215,9 @@ describe('Create review', () => {
       makeSelection({
         resolution: { status: 'stale', confidence: 0.3, resolvedAt: new Date().toISOString() },
       }),
-      's', 'p', 'Stale issue',
+      's',
+      'p',
+      'Stale issue',
     );
     if (issue.ok) {
       const result = await reviewService.createReview({ issueId: issue.value.issueId }, 's', 'p');
@@ -211,7 +241,7 @@ describe('After snapshot', () => {
     if (result.ok) {
       expect(result.value.after).toBeDefined();
       expect(result.value.comparison).toBeDefined();
-      expect(result.value.comparison!.status).toBe('unchanged');
+      expect(result.value.comparison?.status).toBe('unchanged');
     }
   });
 
@@ -233,7 +263,7 @@ describe('After snapshot', () => {
     const result = await reviewService.setAfterSnapshot(create.value.reviewId, after);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.comparison!.status).toBe('changed');
+      expect(result.value.comparison?.status).toBe('changed');
     }
   });
 
@@ -252,7 +282,7 @@ describe('After snapshot', () => {
     const result = await reviewService.setAfterSnapshot(create.value.reviewId, after);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.comparison!.status).toBe('missing_after');
+      expect(result.value.comparison?.status).toBe('missing_after');
     }
   });
 
@@ -274,7 +304,7 @@ describe('After snapshot', () => {
     const result = await reviewService.setAfterSnapshot(create.value.reviewId, after);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.comparison!.status).toBe('ambiguous_after');
+      expect(result.value.comparison?.status).toBe('ambiguous_after');
     }
   });
 });
@@ -284,12 +314,14 @@ describe('Decision recording', () => {
     const create = await reviewService.createReview({ issueId: testIssueId }, 's', 'p');
     if (!create.ok) return;
 
-    const result = await reviewService.recordDecision(create.value.reviewId, { decision: 'accepted' });
+    const result = await reviewService.recordDecision(create.value.reviewId, {
+      decision: 'accepted',
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('accepted');
       expect(result.value.decision).toBeDefined();
-      expect(result.value.decision!.decision).toBe('accepted');
+      expect(result.value.decision?.decision).toBe('accepted');
     }
   });
 
@@ -297,7 +329,9 @@ describe('Decision recording', () => {
     const create = await reviewService.createReview({ issueId: testIssueId }, 's', 'p');
     if (!create.ok) return;
 
-    const result = await reviewService.recordDecision(create.value.reviewId, { decision: 'rejected' });
+    const result = await reviewService.recordDecision(create.value.reviewId, {
+      decision: 'rejected',
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('rejected');
@@ -308,14 +342,14 @@ describe('Decision recording', () => {
     const create = await reviewService.createReview({ issueId: testIssueId }, 's', 'p');
     if (!create.ok) return;
 
-    const result = await reviewService.recordDecision(
-      create.value.reviewId,
-      { decision: 'needs_follow_up', note: 'Need to check edge cases' },
-    );
+    const result = await reviewService.recordDecision(create.value.reviewId, {
+      decision: 'needs_follow_up',
+      note: 'Need to check edge cases',
+    });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('needs_follow_up');
-      expect(result.value.decision!.note).toBe('Need to check edge cases');
+      expect(result.value.decision?.note).toBe('Need to check edge cases');
     }
   });
 
@@ -324,7 +358,9 @@ describe('Decision recording', () => {
     if (!create.ok) return;
 
     await reviewService.recordDecision(create.value.reviewId, { decision: 'accepted' });
-    const result = await reviewService.recordDecision(create.value.reviewId, { decision: 'rejected' });
+    const result = await reviewService.recordDecision(create.value.reviewId, {
+      decision: 'rejected',
+    });
     expect(result.ok).toBe(false);
   });
 });
@@ -351,18 +387,19 @@ describe('Recapture', () => {
     const result = await reviewService.setAfterSnapshot(create.value.reviewId, after2);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.after!.targetSummary.label).toBe('Updated');
+      expect(result.value.after?.targetSummary.label).toBe('Updated');
     }
   });
 });
 
 describe('RecaptureReview (live adapter)', () => {
-
   it('recaptures with mock adapter and produces real after snapshot', async () => {
     const mockAdapter: RecaptureAdapter = async () => makeRecaptureResult();
 
     const serviceWithAdapter = new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       mockAdapter,
     );
@@ -379,16 +416,23 @@ describe('RecaptureReview (live adapter)', () => {
     if (result.ok) {
       expect(result.value.status).toBe('ready');
       expect(result.value.after).toBeDefined();
-      expect(result.value.after!.source.recapturePacketId).toBe('pkt_recapture_001');
-      expect(result.value.after!.page.url).toBe('http://localhost:5173/settings');
-      expect(result.value.after!.visualEvidence?.cropRect).toEqual({ x: 100, y: 200, width: 120, height: 40 });
+      expect(result.value.after?.source.recapturePacketId).toBe('pkt_recapture_001');
+      expect(result.value.after?.page.url).toBe('http://localhost:5173/settings');
+      expect(result.value.after?.visualEvidence?.cropRect).toEqual({
+        x: 100,
+        y: 200,
+        width: 120,
+        height: 40,
+      });
       expect(result.value.comparison).toBeDefined();
     }
   });
 
   it('fails with RECAPTURE_ADAPTER_MISSING when no adapter configured', async () => {
     const serviceNoAdapter = new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
     );
 
@@ -410,7 +454,9 @@ describe('RecaptureReview (live adapter)', () => {
     const nullAdapter: RecaptureAdapter = async () => null;
 
     const serviceNullAdapter = new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       nullAdapter,
     );
@@ -433,7 +479,9 @@ describe('RecaptureReview (live adapter)', () => {
     const mockAdapter: RecaptureAdapter = async () => makeRecaptureResult();
 
     const serviceWithAdapter = new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       mockAdapter,
     );
@@ -462,7 +510,9 @@ describe('RecaptureReview (live adapter)', () => {
     };
 
     const serviceSpy = new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       spyAdapter,
     );
@@ -483,12 +533,16 @@ describe('RecaptureReview (live adapter)', () => {
 
   it('emits VR_EVENT:RECAPTURED on successful recapture', async () => {
     const events: unknown[] = [];
-    eventBus.subscribe('VR_EVENT:RECAPTURED', (e) => { events.push(e); });
+    eventBus.subscribe('VR_EVENT:RECAPTURED', (e) => {
+      events.push(e);
+    });
 
     const mockAdapter: RecaptureAdapter = async () => makeRecaptureResult();
 
     const serviceWithAdapter = new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       mockAdapter,
     );
@@ -502,21 +556,25 @@ describe('RecaptureReview (live adapter)', () => {
     });
 
     const recapturedEvent = events.find(
-      (e: any) => e.eventType === 'VR_EVENT:RECAPTURED',
+      (e): e is { eventType: string; payload: Record<string, unknown> } =>
+        (e as { eventType?: string }).eventType === 'VR_EVENT:RECAPTURED',
     );
     expect(recapturedEvent).toBeDefined();
-    expect((recapturedEvent as any).payload.reload).toBeUndefined();
-    expect((recapturedEvent as any).payload.cacheBust).toBeUndefined();
+    expect(recapturedEvent?.payload.reload).toBeUndefined();
+    expect(recapturedEvent?.payload.cacheBust).toBeUndefined();
   });
 
   it('detects changed target after recapture with different text', async () => {
-    const changedAdapter: RecaptureAdapter = async () => makeRecaptureResult({
-      text: 'Save all changes',
-      boundingBox: { x: 100, y: 200, width: 150, height: 40 },
-    });
+    const changedAdapter: RecaptureAdapter = async () =>
+      makeRecaptureResult({
+        text: 'Save all changes',
+        boundingBox: { x: 100, y: 200, width: 150, height: 40 },
+      });
 
     const serviceChanged = new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       changedAdapter,
     );
@@ -543,7 +601,7 @@ describe('List reviews', () => {
     if (list.ok) {
       expect(list.value.length).toBeGreaterThan(0);
       for (let i = 1; i < list.value.length; i++) {
-        expect(list.value[i - 1].updatedAt >= list.value[i].updatedAt).toBe(true);
+        expect(list.value[i - 1]!.updatedAt >= list.value[i]!.updatedAt).toBe(true);
       }
     }
   });
@@ -579,7 +637,9 @@ describe('Redaction', () => {
       makeSelection({
         summary: { label: 'sk_test_abc123def456 button', targetCount: 1 },
       }),
-      's', 'p', 'API key issue: sk_test_abc123def456',
+      's',
+      'p',
+      'API key issue: sk_test_abc123def456',
     );
     if (!issue.ok) return;
 
@@ -651,25 +711,37 @@ describe('Target resolution', () => {
         issueId: 'issue_test',
         selectionId: 'sel_test',
         selectionSnapshot: {
-          targets: [{
-            targetId: 'tgt_001',
-            geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
-            semantics: { tagName: 'button', role: 'button', isInteractive: true },
-            fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
-            resolutionCandidates: [],
-          }],
+          targets: [
+            {
+              targetId: 'tgt_001',
+              geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
+              semantics: { tagName: 'button', role: 'button', isInteractive: true },
+              fingerprints: { stableAttributes: { 'data-testid': 'save-btn' } },
+              resolutionCandidates: [],
+            },
+          ],
         },
       },
       page: { viewport: { width: 1440, height: 900 } },
-      targetSummary: { mode: 'single', targetCount: 1, confidence: 0.9, resolutionStatus: 'resolved' },
-      evidenceSummary: { hasSelection: true, hasContextPacket: false, hasScreenshot: false, hasSourceHints: false },
+      targetSummary: {
+        mode: 'single',
+        targetCount: 1,
+        confidence: 0.9,
+        resolutionStatus: 'resolved',
+      },
+      evidenceSummary: {
+        hasSelection: true,
+        hasContextPacket: false,
+        hasScreenshot: false,
+        hasSourceHints: false,
+      },
     };
 
     const result = resolveRecaptureTarget(snapshot);
     expect(result).not.toBeNull();
-    expect(result!.selector).toBe('[data-testid="save-btn"]');
-    expect(result!.resolvedFrom).toBe('stable-attribute');
-    expect(result!.confidence).toBe(0.9);
+    expect(result?.selector).toBe('[data-testid="save-btn"]');
+    expect(result?.resolvedFrom).toBe('stable-attribute');
+    expect(result?.confidence).toBe(0.9);
   });
 
   it('resolves target from ancestor fingerprint', () => {
@@ -680,25 +752,37 @@ describe('Target resolution', () => {
       source: {
         issueId: 'issue_test',
         selectionSnapshot: {
-          targets: [{
-            targetId: 'tgt_001',
-            geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
-            semantics: { tagName: 'a', isInteractive: true },
-            fingerprints: { ancestorFingerprint: ['div', 'nav', 'header'] },
-            resolutionCandidates: [],
-          }],
+          targets: [
+            {
+              targetId: 'tgt_001',
+              geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
+              semantics: { tagName: 'a', isInteractive: true },
+              fingerprints: { ancestorFingerprint: ['div', 'nav', 'header'] },
+              resolutionCandidates: [],
+            },
+          ],
         },
       },
       page: { viewport: { width: 1440, height: 900 } },
-      targetSummary: { mode: 'single', targetCount: 1, confidence: 0.7, resolutionStatus: 'resolved' },
-      evidenceSummary: { hasSelection: true, hasContextPacket: false, hasScreenshot: false, hasSourceHints: false },
+      targetSummary: {
+        mode: 'single',
+        targetCount: 1,
+        confidence: 0.7,
+        resolutionStatus: 'resolved',
+      },
+      evidenceSummary: {
+        hasSelection: true,
+        hasContextPacket: false,
+        hasScreenshot: false,
+        hasSourceHints: false,
+      },
     };
 
     const result = resolveRecaptureTarget(snapshot);
     expect(result).not.toBeNull();
-    expect(result!.selector).toContain('a');
-    expect(result!.resolvedFrom).toBe('ancestor-path');
-    expect(result!.confidence).toBe(0.7);
+    expect(result?.selector).toContain('a');
+    expect(result?.resolvedFrom).toBe('ancestor-path');
+    expect(result?.confidence).toBe(0.7);
   });
 
   it('resolves target from geometry fallback', () => {
@@ -709,25 +793,35 @@ describe('Target resolution', () => {
       source: {
         issueId: 'issue_test',
         selectionSnapshot: {
-          targets: [{
-            targetId: 'tgt_001',
-            semantics: { tagName: 'div', isInteractive: false },
-            fingerprints: {},
-            resolutionCandidates: [],
-          }],
+          targets: [
+            {
+              targetId: 'tgt_001',
+              semantics: { tagName: 'div', isInteractive: false },
+              fingerprints: {},
+              resolutionCandidates: [],
+            },
+          ],
         },
       },
       page: { viewport: { width: 1440, height: 900 } },
       targetSummary: { mode: 'single', targetCount: 1, confidence: 0.3, resolutionStatus: 'stale' },
-      evidenceSummary: { hasSelection: true, hasContextPacket: false, hasScreenshot: false, hasSourceHints: false },
-      visualEvidence: { cropRect: { x: 50, y: 60, width: 200, height: 80 }, overlayExcluded: false },
+      evidenceSummary: {
+        hasSelection: true,
+        hasContextPacket: false,
+        hasScreenshot: false,
+        hasSourceHints: false,
+      },
+      visualEvidence: {
+        cropRect: { x: 50, y: 60, width: 200, height: 80 },
+        overlayExcluded: false,
+      },
     };
 
     const result = resolveRecaptureTarget(snapshot);
     expect(result).not.toBeNull();
-    expect(result!.resolvedFrom).toBe('geometry-fallback');
-    expect(result!.confidence).toBe(0.3);
-    expect(result!.boundingBox).toEqual({ x: 50, y: 60, width: 200, height: 80 });
+    expect(result?.resolvedFrom).toBe('geometry-fallback');
+    expect(result?.confidence).toBe(0.3);
+    expect(result?.boundingBox).toEqual({ x: 50, y: 60, width: 200, height: 80 });
   });
 
   it('returns null when no target data available', () => {
@@ -738,7 +832,12 @@ describe('Target resolution', () => {
       source: { issueId: 'issue_test' },
       page: { viewport: { width: 1440, height: 900 } },
       targetSummary: { mode: 'single', targetCount: 0, confidence: 0, resolutionStatus: 'missing' },
-      evidenceSummary: { hasSelection: false, hasContextPacket: false, hasScreenshot: false, hasSourceHints: false },
+      evidenceSummary: {
+        hasSelection: false,
+        hasContextPacket: false,
+        hasScreenshot: false,
+        hasSourceHints: false,
+      },
     };
 
     const result = resolveRecaptureTarget(snapshot);
@@ -762,7 +861,9 @@ describe('Target resolution', () => {
     const mockAdapter: RecaptureAdapter = async () => makeRecaptureResult();
 
     const serviceWithAdapter = new ReviewServiceImpl(
-      eventBus, issueService, undefined,
+      eventBus,
+      issueService,
+      undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       mockAdapter,
     );

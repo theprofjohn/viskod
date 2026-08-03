@@ -1,5 +1,5 @@
-import type { HandoffService, HandoffServiceHealth } from './service';
-import type { AgentHandoffCreateInput, AgentHandoffCreateOutput, AgentHandoffGetOutput, AgentHandoffListItem } from './types';
+import type { HandoffService } from './service';
+import type { AgentHandoffListItem } from './types';
 
 export interface SendToAgentInput {
   issueId: string;
@@ -48,7 +48,11 @@ export class UserFacingHandoff {
     this.handoffService = handoffService;
   }
 
-  async sendToAgent(input: SendToAgentInput, sessionId: string, pageId: string): Promise<SendToAgentResult> {
+  async sendToAgent(
+    input: SendToAgentInput,
+    sessionId: string,
+    pageId: string,
+  ): Promise<SendToAgentResult> {
     const result = await this.handoffService.createHandoff(
       { issueId: input.issueId, userInstruction: input.userInstruction },
       sessionId,
@@ -124,7 +128,7 @@ export class UserFacingHandoff {
     return {
       handoffId: result.handoffId,
       title: result.title ?? '',
-      message: `Handoff ready`,
+      message: 'Handoff ready',
       nextSteps: [
         `Give this handoff ID to your coding agent: ${result.handoffId}`,
         'The agent can fetch the issue context through Viskod MCP.',
@@ -139,7 +143,7 @@ export class UserFacingHandoff {
     }
 
     const lines = [
-      `Handoff ready`,
+      'Handoff ready',
       '',
       `Issue: ${result.title}`,
       `Agent context ID: ${result.handoffId}`,
@@ -171,13 +175,13 @@ export class UserFacingHandoff {
 
   private userFacingError(code: string): string {
     const errors: Record<string, string> = {
-      'ISSUE_NOT_FOUND': 'This issue was deleted and cannot be sent.',
-      'ISSUE_DELETED': 'This issue was deleted and cannot be sent.',
-      'ISSUE_STALE': 'The page context is missing. Create a fresh capture before sending this issue.',
-      'INVALID_ISSUE_ID': 'Invalid issue ID.',
-      'HANDOFF_NOT_FOUND': 'Handoff not found.',
-      'HANDOFF_ALREADY_CANCELLED': 'This handoff has been cancelled.',
-      'INVALID_HANDOFF_TRANSITION': 'Cannot update handoff to that status.',
+      ISSUE_NOT_FOUND: 'This issue was deleted and cannot be sent.',
+      ISSUE_DELETED: 'This issue was deleted and cannot be sent.',
+      ISSUE_STALE: 'The page context is missing. Create a fresh capture before sending this issue.',
+      INVALID_ISSUE_ID: 'Invalid issue ID.',
+      HANDOFF_NOT_FOUND: 'Handoff not found.',
+      HANDOFF_ALREADY_CANCELLED: 'This handoff has been cancelled.',
+      INVALID_HANDOFF_TRANSITION: 'Cannot update handoff to that status.',
     };
     return errors[code] ?? 'An unexpected error occurred.';
   }

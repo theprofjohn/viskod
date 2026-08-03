@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { EventBus } from '@viskod/event-bus';
-import { IssueServiceImpl, IssuePersistence } from '@viskod/visual-issue';
-import { ReviewServiceImpl, ReviewPersistence, UserFacingReview } from './index';
+import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
 import type { VisualSelection } from '@viskod/visual-selection';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ReviewPersistence, ReviewServiceImpl, UserFacingReview } from './index';
 import type { ReviewSnapshotRef } from './types';
 
 const TEST_DIR = path.join(process.cwd(), '.viskod-test-visual-review-ux');
@@ -28,14 +28,22 @@ function makeSelection(): VisualSelection {
       viewport: { width: 1440, height: 900, scrollX: 0, scrollY: 0 },
     },
     region: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
-    targets: [{
-      targetId: 'tgt_ux',
-      documentOrder: 0,
-      geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
-      semantics: { tagName: 'button', role: 'button', accessibleName: 'Save', textPreview: 'Save changes', isInteractive: true },
-      fingerprints: {},
-      resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
-    }],
+    targets: [
+      {
+        targetId: 'tgt_ux',
+        documentOrder: 0,
+        geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
+        semantics: {
+          tagName: 'button',
+          role: 'button',
+          accessibleName: 'Save',
+          textPreview: 'Save changes',
+          isInteractive: true,
+        },
+        fingerprints: {},
+        resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
+      },
+    ],
     summary: { label: 'Save changes', role: 'button', textPreview: 'Save changes', targetCount: 1 },
     resolution: { status: 'resolved', confidence: 0.9, resolvedAt: new Date().toISOString() },
   };
@@ -47,12 +55,26 @@ function makeAfterSnapshot(): ReviewSnapshotRef {
     kind: 'after',
     capturedAt: new Date().toISOString(),
     source: { issueId: 'ux-issue' },
-    page: { url: 'http://localhost:5173/settings', title: 'Settings', viewport: { width: 1440, height: 900 } },
-    targetSummary: {
-      mode: 'single', label: 'Save changes', role: 'button', textPreview: 'Save changes',
-      targetCount: 1, confidence: 0.9, resolutionStatus: 'resolved',
+    page: {
+      url: 'http://localhost:5173/settings',
+      title: 'Settings',
+      viewport: { width: 1440, height: 900 },
     },
-    evidenceSummary: { hasSelection: true, hasContextPacket: false, hasScreenshot: false, hasSourceHints: false },
+    targetSummary: {
+      mode: 'single',
+      label: 'Save changes',
+      role: 'button',
+      textPreview: 'Save changes',
+      targetCount: 1,
+      confidence: 0.9,
+      resolutionStatus: 'resolved',
+    },
+    evidenceSummary: {
+      hasSelection: true,
+      hasContextPacket: false,
+      hasScreenshot: false,
+      hasSourceHints: false,
+    },
   };
 }
 
@@ -63,7 +85,9 @@ let ux: UserFacingReview;
 let testIssueId: string;
 
 beforeAll(async () => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {}
   fs.mkdirSync(ISSUE_STORAGE, { recursive: true });
   fs.mkdirSync(REVIEW_STORAGE, { recursive: true });
 
@@ -74,12 +98,19 @@ beforeAll(async () => {
   reviewService = new ReviewServiceImpl(eventBus, issueService, undefined, reviewPersistence);
   ux = new UserFacingReview(reviewService);
 
-  const result = await issueService.createIssue(makeSelection(), TEST_SESSION_ID, TEST_PAGE_ID, 'UX test issue');
+  const result = await issueService.createIssue(
+    makeSelection(),
+    TEST_SESSION_ID,
+    TEST_PAGE_ID,
+    'UX test issue',
+  );
   if (result.ok) testIssueId = result.value.issueId;
 });
 
 afterAll(() => {
-  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {}
 });
 
 describe('User Flow: Issue → Review fix → Decision', () => {
@@ -91,17 +122,17 @@ describe('User Flow: Issue → Review fix → Decision', () => {
 
     const preview = await ux.getPreview(start.reviewId!);
     expect(preview).not.toBeNull();
-    expect(preview!.reviewId).toBe(start.reviewId);
-    expect(preview!.before.targetSummary.label).toBe('Save changes');
-    expect(preview!.status).toBe('ready');
+    expect(preview?.reviewId).toBe(start.reviewId);
+    expect(preview?.before.targetSummary.label).toBe('Save changes');
+    expect(preview?.status).toBe('ready');
 
     const accepted = await ux.acceptReview(start.reviewId!);
     expect(accepted).toBe(true);
 
     const afterDecision = await ux.getPreview(start.reviewId!);
-    expect(afterDecision!.status).toBe('accepted');
-    expect(afterDecision!.decision).toBeDefined();
-    expect(afterDecision!.decision!.decision).toBe('accepted');
+    expect(afterDecision?.status).toBe('accepted');
+    expect(afterDecision?.decision).toBeDefined();
+    expect(afterDecision?.decision?.decision).toBe('accepted');
   });
 
   it('full flow: start review → set after → reject', async () => {
@@ -114,8 +145,8 @@ describe('User Flow: Issue → Review fix → Decision', () => {
     expect(rejected).toBe(true);
 
     const afterDecision = await ux.getPreview(start.reviewId);
-    expect(afterDecision!.status).toBe('rejected');
-    expect(afterDecision!.decision!.note).toBe('Still broken');
+    expect(afterDecision?.status).toBe('rejected');
+    expect(afterDecision?.decision?.note).toBe('Still broken');
   });
 
   it('full flow: start review → needs follow-up with note', async () => {
@@ -126,8 +157,8 @@ describe('User Flow: Issue → Review fix → Decision', () => {
     expect(followedUp).toBe(true);
 
     const afterDecision = await ux.getPreview(start.reviewId);
-    expect(afterDecision!.status).toBe('needs_follow_up');
-    expect(afterDecision!.decision!.note).toBe('Partial fix, needs more work');
+    expect(afterDecision?.status).toBe('needs_follow_up');
+    expect(afterDecision?.decision?.note).toBe('Partial fix, needs more work');
   });
 });
 

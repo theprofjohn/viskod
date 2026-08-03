@@ -1,4 +1,4 @@
-import type { UsageSiteSourceHint, HintSafety } from './types';
+import type { HintSafety, UsageSiteSourceHint } from './types';
 
 const ABSOLUTE_PATH_PATTERNS = [
   /^[A-Z]:\\/,
@@ -10,12 +10,7 @@ const ABSOLUTE_PATH_PATTERNS = [
   /^\/root\//,
 ];
 
-const PACKET_PATH_PATTERNS = [
-  /\.viskod/,
-  /packets\//,
-  /captures\//,
-  /\.viskod\//,
-];
+const PACKET_PATH_PATTERNS = [/\.viskod/, /packets\//, /captures\//, /\.viskod\//];
 
 const SECRET_PATTERNS = [
   /sk[_-]test[_-][A-Za-z0-9]{3,}/,

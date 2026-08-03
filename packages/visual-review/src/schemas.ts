@@ -1,28 +1,50 @@
 import { z } from 'zod';
 
 export const VisualReviewStatusSchema = z.enum([
-  'draft', 'capturing_after', 'ready', 'accepted', 'rejected',
-  'needs_follow_up', 'failed', 'cancelled',
+  'draft',
+  'capturing_after',
+  'ready',
+  'accepted',
+  'rejected',
+  'needs_follow_up',
+  'failed',
+  'cancelled',
 ]);
 
 export const VisualComparisonStatusSchema = z.enum([
-  'changed', 'unchanged', 'missing_after', 'ambiguous_after',
-  'stale_before', 'capture_failed', 'comparison_failed',
+  'changed',
+  'unchanged',
+  'missing_after',
+  'ambiguous_after',
+  'stale_before',
+  'capture_failed',
+  'comparison_failed',
 ]);
 
 export const VisualReviewEventSchema = z.object({
   eventId: z.string().min(1),
   type: z.enum([
-    'created', 'before_loaded', 'after_capture_started', 'after_capture_completed',
-    'comparison_completed', 'decision_recorded', 'recaptured', 'failed', 'cancelled',
+    'created',
+    'before_loaded',
+    'after_capture_started',
+    'after_capture_completed',
+    'comparison_completed',
+    'decision_recorded',
+    'recaptured',
+    'failed',
+    'cancelled',
   ]),
   createdAt: z.string(),
   actor: z.enum(['local-user', 'system', 'agent']),
   summary: z.string().min(1),
-  changes: z.record(z.object({
-    before: z.unknown().optional(),
-    after: z.unknown().optional(),
-  })).optional(),
+  changes: z
+    .record(
+      z.object({
+        before: z.unknown().optional(),
+        after: z.unknown().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const RectSchema = z.object({
@@ -69,12 +91,14 @@ export const ReviewSnapshotRefSchema = z.object({
     confidence: z.number().min(0).max(1),
     resolutionStatus: z.enum(['resolved', 'ambiguous', 'stale', 'missing']),
   }),
-  visualEvidence: z.object({
-    screenshotId: z.string().optional(),
-    thumbnailId: z.string().optional(),
-    cropRect: RectSchema.optional(),
-    overlayExcluded: z.boolean(),
-  }).optional(),
+  visualEvidence: z
+    .object({
+      screenshotId: z.string().optional(),
+      thumbnailId: z.string().optional(),
+      cropRect: RectSchema.optional(),
+      overlayExcluded: z.boolean(),
+    })
+    .optional(),
   evidenceSummary: z.object({
     hasSelection: z.boolean(),
     hasContextPacket: z.boolean(),
@@ -95,17 +119,21 @@ export const VisualComparisonSchema = z.object({
     sameTargetLikely: z.boolean(),
     warnings: z.array(z.string()),
   }),
-  visual: z.object({
-    changedPixelRatio: z.number().min(0).max(1).optional(),
-    boundingBoxDelta: RectDeltaSchema.optional(),
-    screenshotDiffId: z.string().optional(),
-    diffThumbnailId: z.string().optional(),
-  }).optional(),
-  evidence: z.object({
-    sourceHintDelta: z.string().optional(),
-    consoleDelta: z.string().optional(),
-    networkDelta: z.string().optional(),
-  }).optional(),
+  visual: z
+    .object({
+      changedPixelRatio: z.number().min(0).max(1).optional(),
+      boundingBoxDelta: RectDeltaSchema.optional(),
+      screenshotDiffId: z.string().optional(),
+      diffThumbnailId: z.string().optional(),
+    })
+    .optional(),
+  evidence: z
+    .object({
+      sourceHintDelta: z.string().optional(),
+      consoleDelta: z.string().optional(),
+      networkDelta: z.string().optional(),
+    })
+    .optional(),
   warnings: z.array(z.string()),
 });
 

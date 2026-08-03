@@ -1,9 +1,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { VISKOD_STORAGE_DIR } from '@viskod/shared';
-import { type Result, type ViskodError, ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
-import type { AgentHandoff } from './types';
+import {
+  ErrorCategory,
+  ErrorSeverity,
+  type Result,
+  type ViskodError,
+  err,
+  ok,
+} from '@viskod/shared';
 import { AgentHandoffSchema } from './schemas';
+import type { AgentHandoff } from './types';
 
 const HANDOFFS_DIR = 'handoffs';
 const HANDOFF_FILE = 'handoff.json';
@@ -27,7 +34,11 @@ export class HandoffPersistence {
 
   constructor(baseDir?: string) {
     this.baseDir = baseDir ?? path.join(process.cwd(), VISKOD_STORAGE_DIR, HANDOFFS_DIR);
-    try { fs.mkdirSync(this.baseDir, { recursive: true }); } catch { /* best effort */ }
+    try {
+      fs.mkdirSync(this.baseDir, { recursive: true });
+    } catch {
+      /* best effort */
+    }
   }
 
   getBaseDir(): string {
@@ -49,14 +60,24 @@ export class HandoffPersistence {
   async saveHandoff(handoff: AgentHandoff): Promise<Result<void>> {
     const parsed = AgentHandoffSchema.safeParse(handoff);
     if (!parsed.success) {
-      return err(this.heError('SCHEMA_VALIDATION_FAILED', `Schema validation failed: ${parsed.error.message}`));
+      return err(
+        this.heError(
+          'SCHEMA_VALIDATION_FAILED',
+          `Schema validation failed: ${parsed.error.message}`,
+        ),
+      );
     }
 
     const dir = this.handoffDir(handoff.handoffId);
     try {
       fs.mkdirSync(dir, { recursive: true });
     } catch (error) {
-      return err(this.heError('PERSISTENCE_WRITE_FAILED', `Cannot create handoff directory: ${String(error)}`));
+      return err(
+        this.heError(
+          'PERSISTENCE_WRITE_FAILED',
+          `Cannot create handoff directory: ${String(error)}`,
+        ),
+      );
     }
 
     const filePath = this.handoffFilePath(handoff.handoffId);
@@ -65,9 +86,15 @@ export class HandoffPersistence {
       const content = JSON.stringify(handoff, null, 2);
       fs.writeFileSync(tempPath, content, 'utf-8');
       fs.renameSync(tempPath, filePath);
-      try { if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true }); } catch { /* best effort */ }
+      try {
+        if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+      } catch {
+        /* best effort */
+      }
     } catch (error) {
-      return err(this.heError('PERSISTENCE_WRITE_FAILED', `Failed to write handoff file: ${String(error)}`));
+      return err(
+        this.heError('PERSISTENCE_WRITE_FAILED', `Failed to write handoff file: ${String(error)}`),
+      );
     }
 
     await this.updateIndex();
@@ -85,14 +112,26 @@ export class HandoffPersistence {
       const parsed = JSON.parse(raw);
       const validated = AgentHandoffSchema.safeParse(parsed);
       if (!validated.success) {
-        return err(this.heError('SCHEMA_VALIDATION_FAILED', `Corrupt handoff file: ${validated.error.message}`));
+        return err(
+          this.heError(
+            'SCHEMA_VALIDATION_FAILED',
+            `Corrupt handoff file: ${validated.error.message}`,
+          ),
+        );
       }
       return ok(validated.data as AgentHandoff);
     } catch (error) {
       if (error instanceof SyntaxError) {
-        return err(this.heError('CORRUPT_HANDOFF_FILE', `Handoff file is corrupt for '${handoffId}': ${String(error)}`));
+        return err(
+          this.heError(
+            'CORRUPT_HANDOFF_FILE',
+            `Handoff file is corrupt for '${handoffId}': ${String(error)}`,
+          ),
+        );
       }
-      return err(this.heError('PERSISTENCE_READ_FAILED', `Failed to read handoff: ${String(error)}`));
+      return err(
+        this.heError('PERSISTENCE_READ_FAILED', `Failed to read handoff: ${String(error)}`),
+      );
     }
   }
 
@@ -105,7 +144,9 @@ export class HandoffPersistence {
       await this.updateIndex();
       return ok(undefined);
     } catch (error) {
-      return err(this.heError('PERSISTENCE_WRITE_FAILED', `Failed to delete handoff: ${String(error)}`));
+      return err(
+        this.heError('PERSISTENCE_WRITE_FAILED', `Failed to delete handoff: ${String(error)}`),
+      );
     }
   }
 
@@ -167,7 +208,9 @@ export class HandoffPersistence {
   }
 
   private async updateIndex(): Promise<void> {
-    await this.rebuildIndex().catch(() => { /* index is optional */ });
+    await this.rebuildIndex().catch(() => {
+      /* index is optional */
+    });
   }
 
   handoffExists(handoffId: string): boolean {

@@ -4,20 +4,27 @@ import type { EventBus } from '@viskod/event-bus';
 import type { Result, ViskodError } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 
+import type { ImportGraphEntry } from './classifier';
+import { buildImportGraph } from './import-graph';
+import { rankHints } from './ranking';
 import type {
   DiscoveryMethod,
+  HintEngineHealth,
+  HintEvidence,
+  HintInput,
+  RankingResult,
+  SourceHint,
+  UsageSiteSourceHint,
+} from './types';
+
+export type {
   HintEngineHealth,
   HintEvidence,
   HintInput,
   SourceHint,
   UsageSiteSourceHint,
   RankingResult,
-} from './types';
-import { classifyHint, detectLanguage } from './classifier';
-import { rankHints } from './ranking';
-import { buildImportGraph, type ImportGraphEntry } from './import-graph';
-
-export type { HintEngineHealth, HintEvidence, HintInput, SourceHint, UsageSiteSourceHint, RankingResult };
+};
 export * from './types';
 export { classifyHint, detectLanguage } from './classifier';
 export { rankHints } from './ranking';
@@ -588,7 +595,11 @@ export class SourceHintEngine {
     this.eventBus = eventBus;
   }
 
-  async resolveUsageSiteHints(input: HintInput, maxHints?: number): Promise<Result<RankingResult>> {
+  async resolveUsageSiteHints(
+    input: HintInput,
+    maxHints?: number,
+    options?: { useImportGraph?: boolean },
+  ): Promise<Result<RankingResult>> {
     const startTime = performance.now();
 
     try {
@@ -604,8 +615,9 @@ export class SourceHintEngine {
       const rootPath = input.project.metadata.rootPath;
       const dirs = input.project.componentIndex?.directories ?? [];
       const graphKey = rootPath;
-      let importGraph = this.importGraphCache.get(graphKey);
-      if (!importGraph && rootPath && dirs.length > 0) {
+      let importGraph =
+        options?.useImportGraph === false ? undefined : this.importGraphCache.get(graphKey);
+      if (!importGraph && options?.useImportGraph !== false && rootPath && dirs.length > 0) {
         importGraph = buildImportGraph(rootPath, dirs);
         this.importGraphCache.set(graphKey, importGraph);
       }
@@ -724,12 +736,11 @@ export class SourceHintEngine {
       const usageSiteCandidates = findUsageSiteCandidates(input);
 
       // Merge existence-aware candidates with legacy evidence and usage-site candidates
-      // Priority: usage-site > exact existing > case-insensitive > style-adjacent > existing with legacy > generated non-existing
+      // Priority: usage-site > exact existing > case-insensitive > style-adjacent > generated (legacy evidence only fills paths missed by existence checks)
       const existingPaths = new Set(
         resolvedCandidates.filter((c) => c.exists).map((c) => c.filePath.toLowerCase()),
       );
 
-      // Boost existing resolved candidates with any matching legacy evidence
       const scoredMap = new Map<string, ResolvedCandidate>();
 
       // Insert usage-site candidates FIRST (highest priority)

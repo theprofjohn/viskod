@@ -33,14 +33,8 @@ describe('import-graph', () => {
     const srcDir = join(tmpDir, 'src');
     mkdirSync(srcDir, { recursive: true });
 
-    writeFileSync(
-      join(srcDir, 'page.tsx'),
-      'import { Button } from "@/components/ui/button";',
-    );
-    writeFileSync(
-      join(srcDir, 'form.tsx'),
-      'import { Button } from "@/components/ui/button";',
-    );
+    writeFileSync(join(srcDir, 'page.tsx'), 'import { Button } from "@/components/ui/button";');
+    writeFileSync(join(srcDir, 'form.tsx'), 'import { Button } from "@/components/ui/button";');
     writeFileSync(join(srcDir, 'other.tsx'), 'import { Card } from "@/components/card";');
 
     const graph = buildImportGraph(tmpDir, ['src']);
@@ -74,10 +68,7 @@ describe('import-graph', () => {
     const srcDir = join(tmpDir, 'src');
     mkdirSync(srcDir, { recursive: true });
 
-    writeFileSync(
-      join(srcDir, 'page.tsx'),
-      'import { Button, Input, Select } from "ui-lib";',
-    );
+    writeFileSync(join(srcDir, 'page.tsx'), 'import { Button, Input, Select } from "ui-lib";');
 
     const graph = buildImportGraph(tmpDir, ['src']);
     const pageImports = findImports(graph, 'src/page.tsx');

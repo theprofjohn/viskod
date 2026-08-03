@@ -1,3 +1,4 @@
+import type { BrowserHandle, BrowserRuntime } from '@viskod/browser-runtime';
 import type { EventBus } from '@viskod/event-bus';
 import type { Result, ViskodError } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
@@ -12,19 +13,21 @@ import type {
   VisibilityReport,
 } from './types';
 
-const SCHEMA_VERSION = '1.0.0';
-
 export type { SelectionTarget, SelectionSnapshot, SelectionEngineHealth } from './types';
+
+const SCHEMA_VERSION = '1.0.0';
 
 export class SelectionEngine {
   private eventBus: EventBus;
+  private browserRuntime?: BrowserRuntime;
   private selectionsProcessed = 0;
   private selectionsFailed = 0;
   private processingTimes: number[] = [];
   private activeSelection: SelectionTarget | null = null;
 
-  constructor(eventBus: EventBus) {
+  constructor(eventBus: EventBus, browserRuntime?: BrowserRuntime) {
     this.eventBus = eventBus;
+    this.browserRuntime = browserRuntime;
   }
 
   async resolveTarget(event: {
@@ -72,21 +75,24 @@ export class SelectionEngine {
     return ok(target);
   }
 
-  async validateSelection(target: SelectionTarget): Promise<Result<SelectionSnapshot>> {
+  async validateSelection(
+    target: SelectionTarget,
+    browserHandle?: BrowserHandle,
+  ): Promise<Result<SelectionSnapshot>> {
     const startTime = Date.now();
     const correlationId = crypto.randomUUID();
 
     try {
-      const hierarchyResult = await this.buildHierarchy(target);
+      const hierarchyResult = await this.buildHierarchy(target, browserHandle);
       if (!hierarchyResult.ok) {
         this.selectionsFailed++;
         this.processingTimes.push(Date.now() - startTime);
         return err(hierarchyResult.error);
       }
 
-      const geometry = this.computeGeometry(target);
-      const visibility = this.computeVisibility();
-      const accessibility = this.computeAccessibility();
+      const geometry = await this.computeGeometry(target, browserHandle);
+      const visibility = await this.computeVisibility(target, browserHandle);
+      const accessibility = await this.computeAccessibility(target, browserHandle);
       const selectionId = this.selectionId(target.selector, target.boundingBox);
 
       const snapshot: SelectionSnapshot = {
@@ -137,7 +143,54 @@ export class SelectionEngine {
     }
   }
 
-  async buildHierarchy(target: SelectionTarget): Promise<Result<HierarchyRoot>> {
+  async buildHierarchy(
+    target: SelectionTarget,
+    handle?: BrowserHandle,
+  ): Promise<Result<HierarchyRoot>> {
+    // Use real browser hierarchy when available
+    if (handle && this.browserRuntime) {
+      try {
+        const result = await this.browserRuntime.getElementHierarchy(handle, target.selector);
+        if (result.ok && result.value) {
+          const h = result.value;
+          return ok({
+            selectedNode: {
+              tagName: h.selectedNode.tagName,
+              depth: h.selectedNode.depth,
+              attributes: h.selectedNode.attributes ?? {},
+              childCount: h.selectedNode.childCount ?? 0,
+              text: h.selectedNode.text,
+            },
+            parents: (h.parents ?? []).map((p) => ({
+              tagName: p.tagName,
+              depth: p.depth,
+              attributes: p.attributes ?? {},
+              childCount: p.childCount ?? 0,
+              text: p.text,
+            })),
+            siblings: (h.siblings ?? []).map((s) => ({
+              tagName: s.tagName,
+              depth: s.depth,
+              attributes: s.attributes ?? {},
+              childCount: s.childCount ?? 0,
+              text: s.text,
+            })),
+            children: (h.children ?? []).map((c) => ({
+              tagName: c.tagName,
+              depth: c.depth,
+              attributes: c.attributes ?? {},
+              childCount: c.childCount ?? 0,
+              text: c.text,
+            })),
+            landmarks: h.landmarks ?? [],
+          });
+        }
+      } catch {
+        // Fall through to stub
+      }
+    }
+
+    // Fallback stub
     try {
       const selectedNode: HierarchyNode = {
         tagName: 'element',
@@ -209,36 +262,209 @@ export class SelectionEngine {
 
   // ---- Private helpers ----
 
-  private computeGeometry(target: SelectionTarget): SelectionGeometry {
-    return {
-      boundingBox: target.boundingBox,
-      visibleRegion: target.boundingBox,
-      clipState: 'visible',
-      viewportIntersectionRatio: 1.0,
-    };
+  // ponytail: real implementations using BrowserRuntime when available, fallback to stubs
+  private async computeGeometry(
+    target: SelectionTarget,
+    handle?: BrowserHandle,
+  ): Promise<SelectionGeometry> {
+    if (!handle || !this.browserRuntime) {
+      return {
+        boundingBox: target.boundingBox,
+        visibleRegion: target.boundingBox,
+        clipState: 'visible',
+        viewportIntersectionRatio: 1.0,
+      };
+    }
+
+    try {
+      const info = await this.browserRuntime.getElementInfoAtPoint(
+        handle,
+        target.boundingBox.x + target.boundingBox.width / 2,
+        target.boundingBox.y + target.boundingBox.height / 2,
+      );
+      if (!info.ok || !info.value) {
+        return {
+          boundingBox: target.boundingBox,
+          visibleRegion: target.boundingBox,
+          clipState: 'visible',
+          viewportIntersectionRatio: 1.0,
+        };
+      }
+
+      const bb = info.value.boundingBox as
+        | { x: number; y: number; width: number; height: number }
+        | undefined;
+      const box = bb ?? target.boundingBox;
+
+      // Compute viewport intersection
+      const viewport = { width: 1280, height: 720 }; // fallback, could be passed in
+      const ix = Math.max(0, Math.min(box.x + box.width, viewport.width) - Math.max(box.x, 0));
+      const iy = Math.max(0, Math.min(box.y + box.height, viewport.height) - Math.max(box.y, 0));
+      const intersectionArea = ix * iy;
+      const elementArea = box.width * box.height;
+      const ratio = elementArea > 0 ? intersectionArea / elementArea : 0;
+
+      let clipState: SelectionGeometry['clipState'] = 'visible';
+      if (ratio < 0.01) clipState = 'fully-clipped';
+      else if (ratio < 0.99) clipState = 'partially-clipped';
+
+      return {
+        boundingBox: box,
+        visibleRegion: { x: Math.max(box.x, 0), y: Math.max(box.y, 0), width: ix, height: iy },
+        clipState,
+        viewportIntersectionRatio: Math.round(ratio * 100) / 100,
+      };
+    } catch {
+      return {
+        boundingBox: target.boundingBox,
+        visibleRegion: target.boundingBox,
+        clipState: 'visible',
+        viewportIntersectionRatio: 1.0,
+      };
+    }
   }
 
-  private computeVisibility(): VisibilityReport {
-    return {
-      display: 'block',
-      visible: true,
-      opacity: 1.0,
-      isClipped: false,
-      viewportVisible: true,
-      stackingContext: 'root',
-      reasons: [],
-    };
+  private async computeVisibility(
+    target: SelectionTarget,
+    handle?: BrowserHandle,
+  ): Promise<VisibilityReport> {
+    if (!handle || !this.browserRuntime) {
+      return {
+        display: 'block',
+        visible: true,
+        opacity: 1.0,
+        isClipped: false,
+        viewportVisible: true,
+        stackingContext: 'root',
+        reasons: [],
+      };
+    }
+
+    try {
+      const styles = await this.browserRuntime.getComputedStyles(handle, target.selector);
+      if (!styles.ok) {
+        return {
+          display: 'block',
+          visible: true,
+          opacity: 1.0,
+          isClipped: false,
+          viewportVisible: true,
+          stackingContext: 'root',
+          reasons: [],
+        };
+      }
+
+      const c = styles.value.computed;
+      const display = c.display ?? 'block';
+      const visibility = c.visibility ?? 'visible';
+      const opacity = Number.parseFloat(c.opacity ?? '1');
+      const overflow = c.overflow ?? 'visible';
+      const position = c.position ?? 'static';
+      const zIndex = c.zIndex ?? 'auto';
+
+      const isVisible = display !== 'none' && visibility !== 'hidden' && opacity > 0;
+      const isClipped = overflow === 'hidden' || overflow === 'scroll' || overflow === 'auto';
+      const reasons: string[] = [];
+      if (display === 'none') reasons.push('display:none');
+      if (visibility === 'hidden') reasons.push('visibility:hidden');
+      if (opacity === 0) reasons.push('opacity:0');
+      if (isClipped) reasons.push(`overflow:${overflow}`);
+
+      let stackingContext = 'root';
+      if (position === 'fixed' || position === 'absolute') stackingContext = 'positioned';
+      else if (zIndex !== 'auto') stackingContext = 'z-index';
+
+      return {
+        display,
+        visible: isVisible,
+        opacity,
+        isClipped,
+        viewportVisible: isVisible && !isClipped,
+        stackingContext,
+        reasons,
+      };
+    } catch {
+      return {
+        display: 'block',
+        visible: true,
+        opacity: 1.0,
+        isClipped: false,
+        viewportVisible: true,
+        stackingContext: 'root',
+        reasons: [],
+      };
+    }
   }
 
-  private computeAccessibility(): AccessibilityInfo {
-    return {
-      role: null,
-      name: null,
-      landmark: null,
-      headingLevel: null,
-      hasFocus: false,
-      tabIndex: null,
-    };
+  private async computeAccessibility(
+    target: SelectionTarget,
+    handle?: BrowserHandle,
+  ): Promise<AccessibilityInfo> {
+    if (!handle || !this.browserRuntime) {
+      return {
+        role: null,
+        name: null,
+        landmark: null,
+        headingLevel: null,
+        hasFocus: false,
+        tabIndex: null,
+      };
+    }
+
+    try {
+      const info = await this.browserRuntime.getElementInfoAtPoint(
+        handle,
+        target.boundingBox.x + target.boundingBox.width / 2,
+        target.boundingBox.y + target.boundingBox.height / 2,
+      );
+      if (!info.ok || !info.value) {
+        return {
+          role: null,
+          name: null,
+          landmark: null,
+          headingLevel: null,
+          hasFocus: false,
+          tabIndex: null,
+        };
+      }
+
+      const role = (info.value.role as string) ?? null;
+      const name = (info.value.accessibleName as string) ?? null;
+      const tagName = (info.value.tagName as string) ?? '';
+      const landmark = ['main', 'nav', 'header', 'footer', 'aside', 'section', 'article'].includes(
+        tagName,
+      )
+        ? tagName
+        : role === 'navigation'
+          ? 'nav'
+          : role === 'main'
+            ? 'main'
+            : role === 'banner'
+              ? 'header'
+              : role === 'contentinfo'
+                ? 'footer'
+                : null;
+      const headingMatch = tagName.match(/^h([1-6])$/);
+      const headingLevel = headingMatch ? Number.parseInt(headingMatch[1] ?? '', 10) : null;
+
+      return {
+        role,
+        name,
+        landmark,
+        headingLevel,
+        hasFocus: false,
+        tabIndex: null,
+      };
+    } catch {
+      return {
+        role: null,
+        name: null,
+        landmark: null,
+        headingLevel: null,
+        hasFocus: false,
+        tabIndex: null,
+      };
+    }
   }
 
   private selectionId(

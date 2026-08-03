@@ -1,4 +1,4 @@
-import type { ReviewSnapshotRef, ResolvedRecaptureTarget } from './types';
+import type { ResolvedRecaptureTarget, ReviewSnapshotRef } from './types';
 
 interface StoredVisualSelectionTarget {
   targetId?: string;
@@ -59,9 +59,7 @@ function escapeCssSelector(value: string): string {
   return value.replace(/([^\w-])/g, '\\$1');
 }
 
-function buildSelectorFromStableAttributes(
-  attrs: Record<string, string>,
-): string | null {
+function buildSelectorFromStableAttributes(attrs: Record<string, string>): string | null {
   for (const key of STABLE_ATTR_KEYS) {
     const val = attrs[key];
     if (val && typeof val === 'string' && val.length > 0) {
@@ -71,10 +69,7 @@ function buildSelectorFromStableAttributes(
   return null;
 }
 
-function buildSelectorFromAncestors(
-  ancestorFingerprint: string[],
-  tagName: string,
-): string | null {
+function buildSelectorFromAncestors(ancestorFingerprint: string[], tagName: string): string | null {
   if (ancestorFingerprint.length === 0 || !tagName) return null;
 
   const parts: string[] = [tagName.toLowerCase()];
@@ -122,7 +117,7 @@ export function resolveRecaptureTarget(
   if (!storedTarget) {
     if (geometry && geometry.width > 0 && geometry.height > 0) {
       return {
-        selector: `body`,
+        selector: 'body',
         boundingBox: geometry,
         source: 'review-recapture',
         resolvedFrom: 'geometry-fallback',
@@ -138,7 +133,8 @@ export function resolveRecaptureTarget(
     if (selector) {
       return {
         selector,
-        boundingBox: geometry ?? storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
+        boundingBox: geometry ??
+          storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
         source: 'review-recapture',
         resolvedFrom: 'stable-attribute',
         confidence: 0.9,
@@ -153,7 +149,8 @@ export function resolveRecaptureTarget(
     if (selector) {
       return {
         selector,
-        boundingBox: geometry ?? storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
+        boundingBox: geometry ??
+          storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
         source: 'review-recapture',
         resolvedFrom: 'ancestor-path',
         confidence: 0.7,
@@ -165,7 +162,8 @@ export function resolveRecaptureTarget(
   if (semanticSelector) {
     return {
       selector: semanticSelector,
-      boundingBox: geometry ?? storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
+      boundingBox: geometry ??
+        storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
       source: 'review-recapture',
       resolvedFrom: 'stable-attribute',
       confidence: 0.6,
@@ -192,7 +190,7 @@ function extractStoredTarget(
   const selectionSnapshot = source?.selectionSnapshot as StoredVisualSelection | undefined;
 
   if (selectionSnapshot?.targets && selectionSnapshot.targets.length > 0) {
-    return selectionSnapshot.targets[0];
+    return selectionSnapshot.targets[0] ?? null;
   }
 
   return null;

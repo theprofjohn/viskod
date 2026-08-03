@@ -1,7 +1,15 @@
-import type { AgentHandoff, AgentIssueBrief } from './types';
+import type { AgentHandoff } from './types';
 
-const REDACTION_RULES: Array<{ pattern: RegExp; replacement: string; label: string }> = [
-  { pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, replacement: '[EMAIL_REDACTED]', label: 'email' },
+const REDACTION_RULES: Array<{
+  pattern: RegExp;
+  replacement: string | ((match: string) => string);
+  label: string;
+}> = [
+  {
+    pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+    replacement: '[EMAIL_REDACTED]',
+    label: 'email',
+  },
   { pattern: /\b(?:\d{4}[- ]?){3}\d{4}\b/g, replacement: '[CARD_REDACTED]', label: 'card-number' },
   {
     pattern: /\bBearer\s+[A-Za-z0-9_\-\.]{4,}/gi,
@@ -9,21 +17,30 @@ const REDACTION_RULES: Array<{ pattern: RegExp; replacement: string; label: stri
     label: 'bearer-token',
   },
   {
-    pattern: /(?:[?&])(token|access_token|refresh_token|id_token|api_key|apikey|key|secret|password|session|csrf|auth|authorization)=[^&\s]{4,}/gi,
-    replacement: (match: string) => { const eq = match.indexOf('='); return `${match.slice(0, eq + 1)}[REDACTED]`; },
+    pattern:
+      /(?:[?&])(token|access_token|refresh_token|id_token|api_key|apikey|key|secret|password|session|csrf|auth|authorization)=[^&\s]{4,}/gi,
+    replacement: (match: string) => {
+      const eq = match.indexOf('=');
+      return `${match.slice(0, eq + 1)}[REDACTED]`;
+    },
     label: 'query-param-sensitive',
   },
   {
-    pattern: /\b(?:sk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|pk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|sk-[A-Za-z0-9]{6,}|pk-[A-Za-z0-9]{6,})/gi,
-    replacement: '[API_KEY_REDACTED]', label: 'api-key',
+    pattern:
+      /\b(?:sk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|pk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|sk-[A-Za-z0-9]{6,}|pk-[A-Za-z0-9]{6,})/gi,
+    replacement: '[API_KEY_REDACTED]',
+    label: 'api-key',
   },
   {
-    pattern: /(?<![?&_\w])\b(?:secret|password|passwd|pwd|token|access_token|refresh_token|id_token|api_key|apikey)\s*[:=]\s*['"]?(?:[A-Za-z0-9_\-./]{4,})/gi,
-    replacement: '[SECRET_REDACTED]', label: 'assign-secret',
+    pattern:
+      /(?<![?&_\w])\b(?:secret|password|passwd|pwd|token|access_token|refresh_token|id_token|api_key|apikey)\s*[:=]\s*['"]?(?:[A-Za-z0-9_\-./]{4,})/gi,
+    replacement: '[SECRET_REDACTED]',
+    label: 'assign-secret',
   },
   {
     pattern: /\b(?:[A-Za-z0-9+/]{16,})(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})\b/g,
-    replacement: '[TOKEN_REDACTED]', label: 'base64-token',
+    replacement: '[TOKEN_REDACTED]',
+    label: 'base64-token',
   },
 ];
 
@@ -31,9 +48,10 @@ function applyTextRedaction(text: string): { text: string; redactions: string[] 
   const applied: string[] = [];
   let result = text;
   for (const rule of REDACTION_RULES) {
-    const replacement = typeof rule.replacement === 'function'
-      ? result.replace(rule.pattern, rule.replacement as (match: string) => string)
-      : result.replace(rule.pattern, rule.replacement);
+    const replacement =
+      typeof rule.replacement === 'function'
+        ? result.replace(rule.pattern, rule.replacement as (match: string) => string)
+        : result.replace(rule.pattern, rule.replacement);
     if (replacement !== result) {
       if (!applied.includes(rule.label)) applied.push(rule.label);
       result = replacement;
@@ -42,7 +60,7 @@ function applyTextRedaction(text: string): { text: string; redactions: string[] 
   return { text: result, redactions: applied };
 }
 
-export function deepRedactValue(value: unknown, depth: number = 0): unknown {
+export function deepRedactValue(value: unknown, depth = 0): unknown {
   if (depth > 20) return value;
   if (value === null || value === undefined) return value;
   if (typeof value === 'string') {
@@ -62,7 +80,11 @@ export function deepRedactValue(value: unknown, depth: number = 0): unknown {
   return value;
 }
 
-export function redactAgentHandoff(handoff: AgentHandoff): { handoff: AgentHandoff; rules: string[]; strippedFields: string[] } {
+export function redactAgentHandoff(handoff: AgentHandoff): {
+  handoff: AgentHandoff;
+  rules: string[];
+  strippedFields: string[];
+} {
   const allRules = new Set<string>();
   const strippedFields: string[] = [];
 
@@ -97,7 +119,7 @@ export function redactAgentHandoff(handoff: AgentHandoff): { handoff: AgentHando
     : null;
   if (redactedPageUrl) for (const r of redactedPageUrl.redactions) allRules.add(r);
 
-  const redactedSourceHints = handoff.brief.sourceHints?.topHints.map(h => {
+  const redactedSourceHints = handoff.brief.sourceHints?.topHints.map((h) => {
     const r = applyTextRedaction(h.displayName);
     for (const label of r.redactions) allRules.add(label);
     return { ...h, displayName: r.text };
