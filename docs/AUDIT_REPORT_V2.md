@@ -2,7 +2,7 @@
 
 > **Audit Scope:** Full `/docs` directory (50 documents)
 > **Audit Date:** 2026-07-28
-> **Standard:** `CLAUDE.md`, `MEMORY.md`, `glossary.md`, `design-principles.md`, `governance.md`
+> **Standard:** `MEMORY.md`, `glossary.md`, `design-principles.md`, `governance.md`
 > **Baseline:** `AUDIT_REPORT.md` V1
 
 ---

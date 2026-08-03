@@ -31,7 +31,7 @@
 | `studio-navigation.md` | Merged into `studio.md` | Same rationale. Navigation is an internal Studio concern. |
 | `studio-state.md` | Merged into `studio.md` | Same rationale. State is internal to Studio per `docs/architecture.md` §State Store. |
 | `diagnostics-ui.md` | Merged into `diagnostics.md` | Diagnostics is a canonical subsystem (`docs/ARCHITECTURE_BASELINE.md`). UI rendering is one interface of that subsystem, not a separate architectural boundary. |
-| `workspace-tooling.md` | Removed | No canonical "Workspace Tooling" subsystem exists in the architecture. Developer workspace setup (pnpm, Vite, Biome) is tooling configuration, not a product subsystem. Belongs in repository README or CLAUDE.md, not a specification. |
+| `workspace-tooling.md` | Removed | No canonical "Workspace Tooling" subsystem exists in the architecture. Developer workspace setup (pnpm, Vite, Biome) is tooling configuration, not a product subsystem. Belongs in repository README or AGENTS.md, not a specification. |
 | `desktop-host.md` | Removed | No canonical "Desktop Host" boundary exists in the architecture. The architecture defines Studio, CLI, and Browser Runtime as separate subsystems. Host process management is an implementation concern of each subsystem's spec, not a standalone specification. |
 
 ---

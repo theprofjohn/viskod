@@ -3,7 +3,7 @@
 > **Audit Scope:** Full `/docs` directory (50 documents)
 > **Audit Date:** 2026-07-28
 > **Audited By:** Automated architecture consistency review
-> **Standard:** `CLAUDE.md`, `MEMORY.md`, `glossary.md`, `design-principles.md`, `governance.md`
+> **Standard:** `MEMORY.md`, `glossary.md`, `design-principles.md`, `governance.md`
 
 ---
 
@@ -341,7 +341,7 @@ Multiple documents have `Version: 1.0` and `Status: Locked`. There's no document
 `architecture.md` §779-784 shows "Design System Engine → Project Scanner" as a future extension. `project-scanner.md` §177 mentions "Design System Discovery" as a future feature. But there's no specification document for this future capability. Either remove it from the architecture extension points until it's planned, or create a placeholder spec.
 
 ### NH8 — GitHub-Branded Sections in Architecture
-`architecture.md` uses sections like "Monorepo Architecture" (§180) that reference pnpm specifically. This is implementation detail leaking into an architecture document. The architecture should say "monorepo with workspace separation," not "pnpm workspace." `CLAUDE.md` already specifies pnpm as the tool choice.
+`architecture.md` uses sections like "Monorepo Architecture" (§180) that reference pnpm specifically. This is implementation detail leaking into an architecture document. The architecture should say "monorepo with workspace separation," not "pnpm workspace." `AGENTS.md` already specifies pnpm as the tool choice.
 
 ### NH9 — FAQ Should Cross-Reference Troubleshooting
 `faq.md` covers architecture and philosophy. It has zero mentions of `troubleshooting.md`. Users encountering problems are split between two documents with no navigation between them.

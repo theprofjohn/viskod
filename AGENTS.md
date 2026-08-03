@@ -119,6 +119,13 @@ There is **no `test:e2e` script** (vitest `include` only covers `packages/*/src`
 - Implementation order: contracts → types → implementation → tests → documentation → optimisation.
 - Keep docs in sync with implementation — stale docs are a defect (this file included).
 
+## Quality Bar
+
+- Git: small commits, meaningful commit messages, never commit unrelated work together.
+- Anti-patterns to avoid: giant classes, giant React components, hidden state, circular dependencies, duplicated/copy-paste logic, premature optimisation, excessive abstraction, magic strings, magic numbers.
+- Definition of done: implementation works, lint passes, typecheck passes, tests pass, documentation updated, no known regressions introduced.
+- Agent workflow before implementing: read this file and `MEMORY.md`, understand existing architecture, search for similar implementations, avoid duplication, plan, implement incrementally, run validation, fix failures, update documentation. Never skip validation.
+
 ## Gotchas
 
 - `viskod serve --url <URL>` **hard-crashes at startup** if nothing is listening on `<URL>` (`ERR_CONNECTION_REFUSED` at `MCPServer.startup`). Start the target app first, or the MCP server dies with `-32000: Connection closed`.
