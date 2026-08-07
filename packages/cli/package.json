@@ -1,6 +1,6 @@
 {
   "name": "@viskod/cli",
-  "version": "0.2.1-alpha",
+  "version": "0.2.2-alpha",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
