@@ -14,6 +14,7 @@
   },
   "private": true,
   "dependencies": {
+    "@viskod/agent-handoff": "workspace:*",
     "@viskod/browser-runtime": "workspace:*",
     "@viskod/capture-pipeline": "workspace:*",
     "@viskod/config": "workspace:*",
@@ -22,7 +23,11 @@
     "@viskod/overlay-system": "workspace:*",
     "@viskod/selection-engine": "workspace:*",
     "@viskod/shared": "workspace:*",
-    "ws": "^8.21.1"
+    "@viskod/visual-issue": "workspace:*",
+    "@viskod/visual-review": "workspace:*",
+    "@viskod/visual-selection": "workspace:*",
+    "ws": "^8.21.1",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1"

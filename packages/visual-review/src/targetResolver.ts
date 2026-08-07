@@ -3,6 +3,8 @@ import type { ResolvedRecaptureTarget, ReviewSnapshotRef } from './types';
 interface StoredVisualSelectionTarget {
   targetId?: string;
   documentOrder?: number;
+  /** Stable recapture locator produced by the overlay (internal, not UI identity). */
+  selector?: string;
   geometry?: {
     viewportRect?: { x: number; y: number; width: number; height: number };
     documentRect?: { x: number; y: number; width: number; height: number };
@@ -125,6 +127,18 @@ export function resolveRecaptureTarget(
       };
     }
     return null;
+  }
+
+  // Prefer the overlay-produced stable selector when the snapshot carries one.
+  if (storedTarget.selector && storedTarget.selector.length > 0) {
+    return {
+      selector: storedTarget.selector,
+      boundingBox: geometry ??
+        storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
+      source: 'review-recapture',
+      resolvedFrom: 'stable-attribute',
+      confidence: 0.95,
+    };
   }
 
   const stableAttrs = storedTarget.fingerprints?.stableAttributes;

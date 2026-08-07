@@ -1,6 +1,6 @@
 import type { VisualSelection } from '@viskod/visual-selection';
 import type { IssueService, IssueUpdate } from './service';
-import type { VisualIssue, VisualIssueSeverity } from './types';
+import type { IssueEvidenceSummary, VisualIssue, VisualIssueSeverity } from './types';
 
 export interface IssueIntegration {
   createIssueFromSelection(
@@ -10,6 +10,7 @@ export interface IssueIntegration {
     title?: string,
     description?: string,
     severity?: VisualIssueSeverity,
+    evidence?: IssueEvidenceSummary,
   ): Promise<{ ok: true; issue: VisualIssue } | { ok: false; error: string }>;
 
   listIssues(): Promise<{ ok: true; issues: VisualIssue[] } | { ok: false; error: string }>;
@@ -38,7 +39,15 @@ export interface IssueIntegration {
 
 export function createIssueIntegration(service: IssueService): IssueIntegration {
   return {
-    async createIssueFromSelection(selection, sessionId, pageId, title, description, severity) {
+    async createIssueFromSelection(
+      selection,
+      sessionId,
+      pageId,
+      title,
+      description,
+      severity,
+      evidence,
+    ) {
       const result = await service.createIssue(
         selection,
         sessionId,
@@ -46,6 +55,7 @@ export function createIssueIntegration(service: IssueService): IssueIntegration 
         title,
         description,
         severity,
+        evidence,
       );
       if (!result.ok) return { ok: false, error: result.error.message };
       return { ok: true, issue: result.value };

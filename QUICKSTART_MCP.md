@@ -1,12 +1,14 @@
-# Quickstart: Viskod MCP Agent Workflow
+# Quickstart: From UI Issue to Verified Fix
 
-This guide walks through the complete Viskod MCP workflow: capturing UI context, fixing a visual issue, and verifying the fix — all without restarting the MCP server.
+The recommended Viskod workflow runs through **Studio**: report a UI defect by
+pointing at it, prepare an agent handoff, then verify the rendered fix.
 
 ## Prerequisites
 
 - Node.js 22+
 - pnpm 9+
 - Git
+- Playwright Chromium (`pnpm exec playwright install chromium`)
 
 ## 1. Install Dependencies
 
@@ -15,30 +17,88 @@ cd <REPO_PATH>
 pnpm install
 ```
 
-The fixture server uses Node's built-in `http` module. No additional install is needed to run it.
+The fixture server uses Node's built-in `http` module. No additional install
+is needed to run it.
 
-## 2. Start the Fixture Server
+## 2. Open a Local App
+
+Start your local app (or the included fixture):
 
 ```bash
 node examples/phase12-source-hint-app/server.cjs
 ```
 
-Leave this running in a terminal. It serves the test page at `http://localhost:3000`.
+Leave this running in a terminal. It serves the test page at
+`http://localhost:3000`.
 
-## 3. Start Viskod MCP Server
+## 3. Start Studio
 
 In a second terminal:
+
+```bash
+cd <REPO_PATH>
+pnpm exec tsx apps/studio/src/index.ts
+```
+
+Studio starts a browser, serves its UI on `http://localhost:3001`, and waits
+for you to open an app.
+
+## 4. Report a UI Issue
+
+Open `http://localhost:3001` in your browser:
+
+1. Enter your app URL and click `Open app`.
+2. Click `Report UI issue`.
+3. **Hover over the problem and click it.** Studio shows a plain-language
+   summary of the selected element — you never need to write a CSS selector.
+4. Fill in `What is wrong?` and `What should happen?`, then click
+   `Prepare agent handoff`.
+5. Studio shows `Handoff ready` with a copyable prompt/ID. Give it to your
+   coding agent (Claude Code, OpenCode, Cursor, ...).
+
+## 5. Verify the Fix
+
+After the agent changes the code:
+
+1. Click `Verify fix`. Studio reloads the page (cache-bust) and recaptures
+   the same element.
+2. Review the before/after evidence and choose `Accept fix`, `Issue persists`,
+   or `Needs follow-up`.
+
+> A changed screenshot is **evidence, not truth**. "The rendered result
+> changed" means review whether it matches the expected result — Studio never
+> auto-accepts a fix based on pixels alone.
+
+## Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Studio exits at startup | Port 3001 already in use | Stop the other process on 3001 |
+| Browser does not open | Playwright browsers missing | `pnpm exec playwright install chromium` |
+| `Open app` fails | Target URL not listening | Start the app first, then open it in Studio |
+| Handoff/verification fails after the agent edits files | Browser cache | `Verify fix` always reloads with a cache-busting query parameter |
+
+---
+
+# Advanced: MCP Agent Integration
+
+For agent integrations and advanced users, Viskod also exposes an MCP server.
+This section documents the exact machine-facing call order.
+
+## Start the MCP Server
 
 ```bash
 cd <REPO_PATH>
 pnpm viskod serve --url http://localhost:3000
 ```
 
-The server starts the browser, verifies the target URL, and waits for JSON-RPC messages on stdin.
+The server starts the browser, verifies the target URL, and waits for JSON-RPC
+messages on stdin.
 
-> **Note:** `viskod serve` exits at startup if nothing is listening on the target URL (`ERR_CONNECTION_REFUSED`). Start the fixture (or your app) first.
+> **Note:** `viskod serve` exits at startup if nothing is listening on the
+> target URL (`ERR_CONNECTION_REFUSED`). Start the fixture (or your app) first.
 
-## 4. Configure Your MCP Client
+## Configure Your MCP Client
 
 ### OpenCode
 
@@ -65,89 +125,51 @@ Create or edit `~/.config/opencode/opencode.json`:
 
 ### Cursor
 
-Create `.cursor/mcp.json` in your project root with the same structure (see `examples/mcp-configs/`).
+Create `.cursor/mcp.json` in your project root with the same structure (see
+`examples/mcp-configs/`).
 
 ### Claude Desktop
 
 Add the server entry to your `claude_desktop_config.json`.
 
-> **Windows PowerShell users:** If `pnpm` is not available globally, replace `pnpm` with the full path or use `npx tsx packages/cli/src/index.ts` from the repo directory.
+> **Windows PowerShell users:** If `pnpm` is not available globally, replace
+> `pnpm` with the full path or use `npx tsx packages/cli/src/index.ts` from
+> the repo directory.
 
-## 5. Verify the Connection
+## Verify the Connection
 
-The MCP client will send a `tools/list` request on startup. The response should include:
+The MCP client will send a `tools/list` request on startup. The response
+should include:
 
 - `viskod_select_element`
 - `viskod_capture_context`
 - `viskod_navigate`
+- `create_agent_handoff`
+- `create_visual_review`
+- `recapture_visual_review`
+- `get_visual_review`
 
-You can also verify manually by sending a JSON-RPC initialize:
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-```
-
-Expected response includes `protocolVersion: "2024-11-05"` and capabilities listing the tools.
-
-## 6. Run Your First Capture
+## MCP Capture
 
 Ask your agent (or send a JSON-RPC request):
 
 ```
-viskod_capture_context(
-  selector: ".target-card"
-)
+viskod_navigate(url: "http://localhost:3000")
+viskod_capture_context(selector: ".target-card")
 ```
 
-The response includes:
+The response includes `packetId`, `selection`, `dom`, `styles`,
+`screenshots`, `hierarchy`, `confidence`, and `evidenceSources`.
 
-| Field | What It Contains |
-|-------|-----------------|
-| `ok` | Whether the capture succeeded |
-| `packetId` | Unique ID of the captured context packet |
-| `selection` | Selector, tag name, bounding box, and text of the captured element |
-| `dom` | Tag name, attributes, and child count |
-| `styles` | Computed styles of the element |
-| `screenshots` | Screenshot metadata (capture ID, type, format, dimensions) |
-| `hierarchy` | Selected node, parents, sibling and child counts |
-| `confidence` | Source mapping, semantic labeling, layout analysis, framework detection |
-| `evidenceSources` | Which subsystems produced evidence |
-| `processingTimeMs` | Capture duration |
+## MCP Handoff and Review Sequence
 
-For a page-level capture, use `viskod_select_element(selector)` first (after navigating with `viskod_navigate`), or pass an explicit `selector` to `viskod_capture_context`.
+1. `create_agent_handoff(issueId: "<issue_id>")` — prepare a handoff for the
+   connected agent.
+2. `create_visual_review(issueId: "<issue_id>")` — create a before/after
+   review.
+3. `recapture_visual_review(reviewId: "<review_id>", reload: true,
+   cacheBust: true)` — re-capture after a fix.
+4. `get_visual_review(reviewId: "<review_id>")` — retrieve the comparison.
 
-## 7. Fix a Visual Issue
-
-Edit the CSS file identified in the source hints. For the fixture:
-
-`examples/phase12-source-hint-app/src/components/TargetCard.css`
-
-Make a change (e.g., add or remove a style rule) that affects the element's bounding box.
-
-## 8. Re-Capture and Compare
-
-Navigate back to the page and capture again:
-
-```
-viskod_navigate(
-  url: "http://localhost:3000"
-)
-
-viskod_capture_context(
-  selector: ".target-card"
-)
-```
-
-Compare the `selection.boundingBox` and `styles` fields between the two captures to verify the fix.
-
-**No server restart needed.** Use `viskod_navigate` (or the daemon capture protocol's `reload`/`cacheBust` options) to refresh the page between captures.
-
-## Troubleshooting
-
-| Symptom | Likely Cause | Fix |
-|---------|-------------|-----|
-| `tools/list` returns empty | MCP server not running | Check the server terminal for errors |
-| Server exits at startup | Target URL not listening | Start the app first, then `viskod serve` (`ERR_CONNECTION_REFUSED`) |
-| `viskod_capture_context` hangs | Playwright browser launch issue | Ensure Playwright browsers are installed (`pnpm exec playwright install chromium`) |
-| Source hints are empty | No project scan was run | Run `pnpm viskod scan` in the project, or use the CLI capture with `--project-path` |
-| Element not found | Selector doesn't match | Use browser DevTools to verify the selector works |
+**Recommended after any local code/CSS change:** pass `reload: true` and
+`cacheBust: true` to `recapture_visual_review`.

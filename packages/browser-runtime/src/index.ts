@@ -633,6 +633,61 @@ export class BrowserRuntime {
     }
   }
 
+  async getPageUrl(handle: BrowserHandle): Promise<string> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return '';
+    try {
+      return entry.page.url();
+    } catch {
+      return '';
+    }
+  }
+
+  async getPageTitle(handle: BrowserHandle): Promise<string> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) return '';
+    try {
+      return await entry.page.title();
+    } catch {
+      return '';
+    }
+  }
+
+  async getViewport(handle: BrowserHandle): Promise<{
+    width: number;
+    height: number;
+    deviceScaleFactor: number;
+    scrollX: number;
+    scrollY: number;
+  }> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) {
+      return { width: 0, height: 0, deviceScaleFactor: 1, scrollX: 0, scrollY: 0 };
+    }
+    try {
+      const vp = entry.page.viewportSize();
+      const scroll = await entry.page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+      return {
+        width: vp?.width ?? 0,
+        height: vp?.height ?? 0,
+        deviceScaleFactor: this.config.viewport.deviceScaleFactor ?? 1,
+        scrollX: scroll.x,
+        scrollY: scroll.y,
+      };
+    } catch {
+      return { width: 0, height: 0, deviceScaleFactor: 1, scrollX: 0, scrollY: 0 };
+    }
+  }
+
+  /** Evaluate arbitrary JS in the page context. Returns the serializable result. */
+  async evaluate<T>(handle: BrowserHandle, fn: (arg: unknown) => T, arg: unknown): Promise<T> {
+    const entry = this.handles.get(handle.contextId);
+    if (!entry) {
+      throw new Error('BR_HANDLE_INVALID: Handle not found');
+    }
+    return entry.page.evaluate(fn, arg) as Promise<T>;
+  }
+
   async getElementInfoAtPoint(
     handle: BrowserHandle,
     x: number,

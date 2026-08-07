@@ -263,6 +263,9 @@ export class SelectionOverlayController {
         stableAttributes: (data.stableAttributes as Record<string, string>) || undefined,
         ancestorFingerprint: (data.ancestorTags as string[]) || undefined,
       },
+      // Internal recapture/capture locator produced in page context; never
+      // fabricated here from transient class names.
+      selector: (data.selector as string) || undefined,
       resolutionCandidates: [
         { strategy: 'runtime-node', value: 'live', confidence: 0.9 },
         { strategy: 'geometry', value: boundingBox, confidence: 0.7 },

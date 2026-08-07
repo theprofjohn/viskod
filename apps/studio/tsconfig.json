@@ -11,6 +11,11 @@
     { "path": "../../packages/browser-runtime" },
     { "path": "../../packages/capture-pipeline" },
     { "path": "../../packages/context-engine" },
-    { "path": "../../packages/selection-engine" }
+    { "path": "../../packages/selection-engine" },
+    { "path": "../../packages/visual-selection" },
+    { "path": "../../packages/visual-issue" },
+    { "path": "../../packages/agent-handoff" },
+    { "path": "../../packages/visual-review" },
+    { "path": "../../packages/overlay-system" }
   ]
 }

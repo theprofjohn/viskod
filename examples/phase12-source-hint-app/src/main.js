@@ -31,4 +31,47 @@
     console.error('VISKOD_SOURCE_HINT_ERROR: fake api key sk_test_sourcehint_abc123');
     addLog(`Submit clicked at ${new Date().toLocaleTimeString()}`);
   });
+
+  // Test-only deterministic selection: ?viskodSimulate=<data-testid> dispatches
+  // an overlay:element-clicked event once the Viskod overlay is ready. Used by
+  // the smoke script and e2e Studio flow to select the fixture target through
+  // the overlay event without a physical pointer. Guarded by sessionStorage so
+  // recapture reloads do not re-dispatch.
+  const simulateTarget = new URLSearchParams(location.search).get('viskodSimulate');
+  if (simulateTarget) {
+    window.addEventListener('message', (event) => {
+      const data = event.data || {};
+      if (data.source !== '__viskod_overlay' || data.type !== 'overlay:ready') return;
+      if (sessionStorage.getItem('viskodSimulated')) return;
+      sessionStorage.setItem('viskodSimulated', '1');
+      setTimeout(() => {
+        const el =
+          document.querySelector(`[data-testid="${simulateTarget}"]`) ||
+          document.getElementById(simulateTarget);
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const tagName = el.tagName.toLowerCase();
+        const textPreview =
+          (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120) || undefined;
+        window.postMessage(
+          {
+            source: '__viskod_overlay',
+            type: 'overlay:element-clicked',
+            data: {
+              tagName,
+              boundingBox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+              role: el.getAttribute('role') || undefined,
+              accessibleName: el.getAttribute('aria-label') || undefined,
+              textPreview,
+              isInteractive: false,
+              selector: `[data-testid="${simulateTarget}"]`,
+              documentOrder: 1,
+              selectionNumber: 1,
+            },
+          },
+          '*',
+        );
+      }, 1500);
+    });
+  }
 })();

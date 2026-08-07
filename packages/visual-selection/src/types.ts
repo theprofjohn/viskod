@@ -82,6 +82,12 @@ export interface VisualSelectionTarget {
   fingerprints: Fingerprints;
   frameworkHints?: FrameworkHints;
   resolutionCandidates: ResolutionCandidate[];
+  /**
+   * Internal recapture/capture locator produced in page context (stable
+   * attribute first, bounded ancestor path fallback). Never rendered as the
+   * primary UI label; omitted when no safe unique locator can be produced.
+   */
+  selector?: string;
 }
 
 export interface VisualSelectionSummary {

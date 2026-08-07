@@ -1,82 +1,135 @@
 {
-  "workflow": "viskod-capture-fix-verify",
-  "version": "1.0.0",
-  "description": "Capture UI context, fix a visual issue, and verify via a visual review recapture",
-  "requiredTools": ["viskod_capture_context", "create_visual_review", "recapture_visual_review"],
-  "recommendedCallSequence": [
+  "workflow": "viskod-ui-issue-to-verified-fix",
+  "version": "1.1.0",
+  "description": "Report a UI issue by pointing at it, prepare an agent handoff, and verify the rendered fix",
+  "humanFlow": [
     {
       "step": 1,
-      "tool": "viskod_capture_context",
-      "purpose": "Capture the current visual state of the target element",
-      "inputExample": {
-        "selector": ".target-card"
-      },
-      "outputFieldsToInspect": [
-        "packetId",
-        "selection",
-        "styles",
-        "screenshots",
-        "confidence",
-        "evidenceSources"
-      ]
+      "action": "open-app",
+      "purpose": "Open the local app in Studio and click 'Report UI issue'"
     },
     {
       "step": 2,
-      "action": "edit-source",
-      "purpose": "Edit the source file identified by the highest-confidence existing source hint"
+      "action": "point-at-problem",
+      "purpose": "Hover over the broken element and click it; Studio shows a plain-language summary"
     },
     {
       "step": 3,
-      "tool": "create_visual_review",
-      "purpose": "Create a before/after visual review from the captured issue",
-      "inputExample": {
-        "issueId": "<issue_id>"
-      },
-      "outputFieldsToInspect": ["reviewId"]
+      "action": "what-is-wrong",
+      "purpose": "Describe the problem in the 'What is wrong?' field"
     },
     {
       "step": 4,
-      "tool": "recapture_visual_review",
-      "purpose": "Re-capture the same element after the fix and compare against the before snapshot",
-      "inputExample": {
-        "reviewId": "<review_id from step 3>",
-        "reload": true,
-        "cacheBust": true
-      },
-      "outputFieldsToInspect": [
-        "comparisonStatus",
-        "summary",
-        "afterSnapshotId",
-        "warningCount"
-      ]
+      "action": "what-should-happen",
+      "purpose": "Describe the expected result in the 'What should happen?' field"
     },
     {
       "step": 5,
-      "tool": "get_visual_review",
-      "purpose": "Retrieve the full comparison (pixel ratio, bounding box delta, evidence deltas) to verify the fix",
-      "inputExample": {
-        "reviewId": "<review_id from step 3>"
-      },
-      "outputFieldsToInspect": [
-        "comparison.status",
-        "comparison.summary",
-        "comparison.visual.changedPixelRatio",
-        "comparison.visual.boundingBoxDelta",
-        "comparison.evidence.consoleDelta",
-        "comparison.evidence.networkDelta"
-      ]
+      "action": "prepare-agent-handoff",
+      "purpose": "Click 'Prepare agent handoff'; Studio shows 'Handoff ready' with a copyable agent prompt/ID for the user's coding agent"
+    },
+    {
+      "step": 6,
+      "action": "verify-fix",
+      "purpose": "After the agent changes code, click 'Verify fix'; Studio reloads (cache-bust) and recaptures the element"
+    },
+    {
+      "step": 7,
+      "action": "decide",
+      "purpose": "Review before/after evidence and choose 'Accept fix', 'Issue persists', or 'Needs follow-up'. A changed screenshot is evidence, not truth — Studio never auto-accepts"
     }
   ],
+  "technicalSection": {
+    "description": "Exact machine-facing MCP call order for agent integrations (advanced)",
+    "requiredTools": [
+      "viskod_navigate",
+      "viskod_capture_context",
+      "create_agent_handoff",
+      "create_visual_review",
+      "recapture_visual_review",
+      "get_visual_review"
+    ],
+    "recommendedCallSequence": [
+      {
+        "step": 1,
+        "tool": "viskod_navigate",
+        "purpose": "Navigate the browser to the target URL",
+        "inputExample": {
+          "url": "http://localhost:3000"
+        }
+      },
+      {
+        "step": 2,
+        "tool": "viskod_capture_context",
+        "purpose": "Capture the current visual state of the target element",
+        "inputExample": {
+          "selector": ".target-card"
+        },
+        "outputFieldsToInspect": [
+          "packetId",
+          "selection",
+          "styles",
+          "screenshots",
+          "confidence",
+          "evidenceSources"
+        ]
+      },
+      {
+        "step": 3,
+        "action": "edit-source",
+        "purpose": "Edit the source file identified by the highest-confidence existing source hint"
+      },
+      {
+        "step": 4,
+        "tool": "create_visual_review",
+        "purpose": "Create a before/after visual review from the captured issue",
+        "inputExample": {
+          "issueId": "<issue_id>"
+        },
+        "outputFieldsToInspect": ["reviewId"]
+      },
+      {
+        "step": 5,
+        "tool": "recapture_visual_review",
+        "purpose": "Re-capture the same element after the fix and compare against the before snapshot",
+        "inputExample": {
+          "reviewId": "<review_id from step 4>",
+          "reload": true,
+          "cacheBust": true
+        },
+        "outputFieldsToInspect": ["comparisonStatus", "summary", "afterSnapshotId", "warningCount"]
+      },
+      {
+        "step": 6,
+        "tool": "get_visual_review",
+        "purpose": "Retrieve the full comparison (pixel ratio, bounding box delta, evidence deltas) to verify the fix",
+        "inputExample": {
+          "reviewId": "<review_id from step 4>"
+        },
+        "outputFieldsToInspect": [
+          "comparison.status",
+          "comparison.summary",
+          "comparison.visual.changedPixelRatio",
+          "comparison.visual.boundingBoxDelta",
+          "comparison.evidence.consoleDelta",
+          "comparison.evidence.networkDelta"
+        ]
+      }
+    ]
+  },
   "safetyNotes": [
     "Never output redacted values. If a value appears as [REDACTED] or [TOKEN_REDACTED], treat it as sensitive.",
     "Do not modify files outside the project scope (node_modules, .git, system files).",
     "Pass reload:true and cacheBust:true to recapture_visual_review after local file edits.",
     "The reviewId from create_visual_review must be reused for recapture_visual_review and get_visual_review.",
-    "Before capturing, navigate the browser to the target URL with viskod_navigate if the session was not already started there."
+    "Before capturing, navigate the browser to the target URL with viskod_navigate if the session was not already started there.",
+    "A changed screenshot does not prove correctness: always let the human accept or reject the fix."
   ],
   "validationChecklist": [
+    "Studio shows a redacted target summary after clicking the element",
+    "Studio requires non-empty 'What is wrong?' and 'What should happen?' fields",
+    "Studio shows 'Handoff ready' with a copyable handoff ID",
     "viskod_capture_context returned packetId (non-empty string)",
-    "viskod_capture_context returned confidence with source hint data",
     "create_visual_review returned reviewId (non-empty string)",
     "recapture_visual_review returned comparisonStatus (non-null value)",
     "get_visual_review returned comparison (non-null object)",

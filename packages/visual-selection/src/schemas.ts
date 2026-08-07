@@ -85,6 +85,7 @@ export const VisualSelectionTargetSchema = z.object({
   fingerprints: FingerprintsSchema,
   frameworkHints: FrameworkHintsSchema.optional(),
   resolutionCandidates: z.array(ResolutionCandidateSchema),
+  selector: z.string().min(1).optional(),
 });
 
 export const VisualSelectionSummarySchema = z.object({

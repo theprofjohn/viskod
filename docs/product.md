@@ -209,15 +209,21 @@ The objective is fewer prompts.
 
 ## Primary
 
-Professional software engineers using AI coding assistants daily.
+Frontend and product engineers who use AI coding agents on **local web apps**
+and need a reliable loop from "this UI is broken" to "the rendered result is
+fixed and verified".
 
 Examples:
 
 * Frontend engineers
+* Product engineers
 * Full-stack engineers
 * Indie hackers
 * Startup founders
-* Product engineers
+
+The primary job Viskod completes for this ICP:
+
+> Fix an existing UI defect and verify the rendered result.
 
 ---
 
@@ -241,6 +247,9 @@ Engineering teams adopting AI-assisted development.
 
 Developers hire Viskod to:
 
+* report a UI defect by pointing at the element instead of describing it
+* hand the issue to a coding agent with enough context to fix it
+* verify the rendered result after a fix
 * show AI exactly which UI they mean
 * reduce prompt ambiguity
 * inspect responsive layouts
@@ -249,6 +258,8 @@ Developers hire Viskod to:
 * validate UI changes
 * improve AI accuracy
 * reduce iteration cycles
+
+The first complete workflow is **UI issue → agent handoff → verified fix**.
 
 ---
 
@@ -330,45 +341,43 @@ Viskod focuses exclusively on visual understanding.
 
 # Core Workflow
 
+The user-visible workflow in Phase 1:
+
 ```text
 Developer
 
 ↓
 
-Start Viskod
+Open local app in Studio
 
 ↓
 
-Running Application
+Report UI issue (point at the problem)
 
 ↓
 
-Visual Selection
+What is wrong? What should happen?
 
 ↓
 
-Visual Context Engine
+Prepare agent handoff
 
 ↓
 
-Context Packet
+Coding agent fixes the code
 
 ↓
 
-MCP
+Verify fix (refresh + recapture)
 
 ↓
 
-AI Coding Agent
-
-↓
-
-Code Change
-
-↓
-
-Developer Review
+Accept fix / Issue persists / Needs follow-up
 ```
+
+Underneath, Studio prepares the agent handoff from a visual selection and a
+context packet; the MCP server exposes the handoff to the connected coding
+agent. Selectors, packets, and IDs stay behind the scenes.
 
 ---
 
@@ -402,11 +411,11 @@ Developer Review
 
 ## Phase 1
 
-### Visual Context Engine
+### UI Issue to Verified Fix
 
 Deliver:
 
-* Studio
+* Studio (Report → Prepare agent handoff → Verify fix)
 * Browser Runtime
 * Selection Overlay
 * Screenshots
@@ -418,7 +427,11 @@ Deliver:
 
 Goal:
 
-Reliable visual understanding.
+A developer can report a UI defect by pointing at it, hand it to a coding
+agent, and verify the rendered result. Capture, selection, and packets are
+supporting infrastructure behind that user-visible outcome, not the product
+outcome itself. The broader visual-context vision (below) remains the
+long-term direction.
 
 ---
 
@@ -608,6 +621,8 @@ As these capabilities improve, the value of Viskod compounds.
 * Reliable element selection
 * Accurate context packets
 * Successful MCP integrations
+* A developer can go from "report a UI issue" to "verified fix" without
+  operating selectors, packets, or handoff IDs
 
 ---
 

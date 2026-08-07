@@ -98,10 +98,21 @@ export class HandoffServiceImpl implements HandoffService {
     const brief = generateAgentBrief(
       issue,
       input.userInstruction,
-      input.sourceHints,
-      input.sourceHintStatus,
+      input.includeSourceHints === false ? undefined : input.sourceHints,
+      input.includeSourceHints === false ? undefined : input.sourceHintStatus,
     );
     const constraints = getDefaultConstraints();
+
+    // Persisted issue evidence populates the handoff context; raw packet
+    // paths are never exposed here.
+    const packetRefs: AgentHandoff['context']['packetRefs'] = [];
+    if (issue.evidence?.contextPacketId) {
+      packetRefs.push({
+        packetId: issue.evidence.contextPacketId,
+        type: 'capture',
+        label: 'issue capture',
+      });
+    }
 
     const handoff: AgentHandoff = {
       schemaVersion: 1,
@@ -116,15 +127,19 @@ export class HandoffServiceImpl implements HandoffService {
       context: {
         contextId: crypto.randomUUID(),
         issueRef: { issueId: input.issueId },
-        packetRefs: [],
+        packetRefs,
         selectionRef: {
           selectionId: issue.source.selectionId,
           snapshotIncluded: false,
         },
         evidenceSummary: {
           hasSelection: true,
-          hasSourceHints: false,
-          hasContextPacket: false,
+          hasSourceHints:
+            (issue.evidence?.sourceHintCount ?? 0) > 0 || (input.sourceHints?.length ?? 0) > 0,
+          hasContextPacket:
+            !!issue.evidence?.contextPacketId || input.includeContextPacket === true,
+          hasConsoleEvidence: issue.evidence?.hasConsoleEvidence,
+          hasNetworkEvidence: issue.evidence?.hasNetworkEvidence,
         },
       },
       constraints,

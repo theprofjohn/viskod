@@ -4,6 +4,20 @@ import type { AgentHandoffListItem } from './types';
 export interface SendToAgentInput {
   issueId: string;
   userInstruction?: string;
+  /** Include the persisted context packet reference in the handoff context. */
+  includeContextPacket?: boolean;
+  /** Include the persisted source hints in the agent brief. */
+  includeSourceHints?: boolean;
+  /** Source hints from the capture packet, passed through to the handoff brief. */
+  sourceHints?: Array<{
+    displayName: string;
+    confidence?: number;
+    kind?: string;
+    score?: number;
+    reasons?: string[];
+    warnings?: string[];
+  }>;
+  sourceHintStatus?: 'ranked' | 'ambiguous' | 'low_confidence' | 'missing';
 }
 
 export interface SendToAgentResult {
@@ -54,7 +68,14 @@ export class UserFacingHandoff {
     pageId: string,
   ): Promise<SendToAgentResult> {
     const result = await this.handoffService.createHandoff(
-      { issueId: input.issueId, userInstruction: input.userInstruction },
+      {
+        issueId: input.issueId,
+        userInstruction: input.userInstruction,
+        includeContextPacket: input.includeContextPacket,
+        includeSourceHints: input.includeSourceHints,
+        sourceHints: input.sourceHints,
+        sourceHintStatus: input.sourceHintStatus,
+      },
       sessionId,
       pageId,
     );

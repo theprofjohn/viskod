@@ -22,6 +22,7 @@ import { IssuePersistence } from './persistence';
 import { generateDefaultTitle, redactIssue } from './redaction';
 import type {
   IssueErrorCode,
+  IssueEvidenceSummary,
   RedactedTargetSummary,
   VisualIssue,
   VisualIssueEvent,
@@ -37,6 +38,7 @@ export interface IssueService {
     title?: string,
     description?: string,
     severity?: VisualIssueSeverity,
+    evidence?: IssueEvidenceSummary,
   ): Promise<Result<VisualIssue>>;
 
   getIssue(issueId: string): Promise<Result<VisualIssue>>;
@@ -78,6 +80,7 @@ export class IssueServiceImpl implements IssueService {
     title?: string,
     description?: string,
     severity?: VisualIssueSeverity,
+    evidence?: IssueEvidenceSummary,
   ): Promise<Result<VisualIssue>> {
     if (selection.resolution.status === 'missing' || selection.resolution.status === 'stale') {
       return err(
@@ -140,6 +143,7 @@ export class IssueServiceImpl implements IssueService {
         },
       },
       targetSummary,
+      evidence,
       tags: [],
       lifecycle: [makeCreatedEvent()],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },

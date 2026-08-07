@@ -1,9 +1,7 @@
 {
   "mcpServers": {
     "gortex": {
-      "args": [
-        "mcp"
-      ],
+      "args": ["mcp"],
       "command": "gortex",
       "env": {
         "GORTEX_INDEX_WORKERS": "8"

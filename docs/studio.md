@@ -11,7 +11,9 @@
 
 Studio is the graphical interface for Viskod.
 
-It provides a visual workspace for inspecting browser state, exploring Context Packets and interacting with the Visual Context Platform.
+It walks the user through the first product workflow — **Report UI issue →
+Prepare agent handoff → Verify fix** — by pointing at elements in a running
+local app instead of operating selectors, packets, or IDs.
 
 Studio is not an IDE.
 
@@ -19,7 +21,8 @@ Studio is not a code editor.
 
 Studio is not an AI coding assistant.
 
-It is an inspection and context exploration environment.
+The primary user journey is the three-stage workflow below. Context Explorer,
+Diagnostics, and raw evidence remain available as secondary expandable views.
 
 ---
 
@@ -37,10 +40,11 @@ Every screen should help users understand what the browser is actually rendering
 
 Studio is responsible for:
 
-* displaying Context Packets
+* driving the Report UI issue → Prepare agent handoff → Verify fix workflow
 * managing browser sessions
 * presenting diagnostics
 * visualising selections
+* displaying Context Packets (secondary, expandable)
 * exposing project metadata
 * browsing capture history
 * configuring platform settings
@@ -49,7 +53,9 @@ It is not responsible for:
 
 * editing source code
 * generating code
-* browser automation
+* invoking external coding agents (it prepares handoffs the connected agent
+  can consume)
+* browser automation details
 * AI conversations
 * repository management
 
@@ -88,6 +94,34 @@ Every interface should prioritise clarity over feature density.
 
 ---
 
+# User-Facing Stages
+
+The primary journey has three stages:
+
+## Report
+
+* app URL input and `Open app`
+* one primary `Report UI issue` button
+* "Hover over the problem and click it" while selecting
+* after selection: a redacted target summary and `Continue`
+
+## Prepare for agent
+
+* fields labeled `What is wrong?` and `What should happen?`, severity select
+* one `Prepare agent handoff` button
+* `Handoff ready` with a copyable agent prompt/ID
+* the UI never claims Studio invoked an external coding agent
+
+## Verify
+
+* before/after evidence with a plain-language status
+* `Accept fix`, `Issue persists`, and `Needs follow-up` buttons
+* comparison status is evidence, not truth: a changed screenshot never
+  auto-accepts the fix
+
+Selectors, packet JSON, local paths, and IDs never appear as primary UI
+labels.
+
 # Core Workspace
 
 The primary workspace consists of:
@@ -97,6 +131,9 @@ The primary workspace consists of:
 * Selection Inspector
 * Project Explorer
 * Diagnostics Panel
+
+Context Explorer, Diagnostics, and raw evidence are secondary expandable
+views behind the three user-facing stages.
 
 These areas should remain logically independent.
 
@@ -354,6 +391,10 @@ This document specifies the Studio interface. It is complemented by:
 
 # Studio North Star
 
-Studio exists to make visual context observable, understandable and explorable.
+Studio exists to take a developer from "this UI is broken" to "the fix is
+verified" without exposing selectors, packets, or handoff mechanics.
 
-Its responsibility is to present the state of a running application through a clear, structured and trustworthy interface, enabling developers and AI coding agents to understand what the browser is actually rendering without becoming another IDE or code editor.
+Its responsibility is to present the state of a running application through a
+clear, structured and trustworthy interface, enabling developers to report
+issues by pointing, prepare agent handoffs, and verify rendered results —
+without becoming another IDE or code editor.

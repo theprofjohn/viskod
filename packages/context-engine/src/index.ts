@@ -151,6 +151,12 @@ export class VisualContextEngine {
   private isGeneratingPacket = false;
   private lastPacket: ContextPacket | null = null;
   private overlayPollInterval: ReturnType<typeof setInterval> | null = null;
+  /**
+   * When true, overlay element events are consumed by the workflow's
+   * SelectionOverlayController; the legacy auto-capture poller must not read
+   * (and thereby clear) them.
+   */
+  private overlayEventsDelegated = false;
   private projectScan: {
     projectId: string;
     name: string;
@@ -651,21 +657,26 @@ export class VisualContextEngine {
     if (this.overlayPollInterval) return;
     this.overlayPollInterval = setInterval(async () => {
       if (!this.currentHandle || this.isGeneratingPacket) return;
+      if (this.overlayEventsDelegated) return;
       try {
         const event = await this.browserRuntime.pollOverlayEvent(this.currentHandle);
         if (!event.ok || !event.value) return;
         const data = event.value as Record<string, unknown>;
         if (data.type === 'overlay:element-clicked' && data.data) {
           const info = data.data as Record<string, unknown>;
-          const selector = info.tagName
-            ? `${info.tagName}${
-                info.stableAttributes
-                  ? `[${Object.entries(info.stableAttributes as Record<string, string>)
-                      .map(([k, v]) => `${k}="${v}"`)
-                      .join(' & ')}]`
-                  : ''
-              }`
-            : 'body';
+          // Prefer the overlay-produced stable selector; fall back to the
+          // legacy tag+attribute construction for older extensions.
+          const selector =
+            (info.selector as string | undefined) ??
+            (info.tagName
+              ? `${info.tagName}${
+                  info.stableAttributes
+                    ? `[${Object.entries(info.stableAttributes as Record<string, string>)
+                        .map(([k, v]) => `${k}="${v}"`)
+                        .join(' & ')}]`
+                    : ''
+                }`
+              : 'body');
           const boundingBox = info.boundingBox as
             | { x: number; y: number; width: number; height: number }
             | undefined;
@@ -688,6 +699,11 @@ export class VisualContextEngine {
       clearInterval(this.overlayPollInterval);
       this.overlayPollInterval = null;
     }
+  }
+
+  /** Delegate overlay element events to a SelectionOverlayController. */
+  setOverlayEventsDelegated(delegated: boolean): void {
+    this.overlayEventsDelegated = delegated;
   }
 
   health(): VCEHealth {

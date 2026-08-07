@@ -274,7 +274,7 @@ const OVERLAY_SCRIPT = `
     } catch(e) {}
   }, 100);
 
-  function getElementInfo(el, includeDocumentOrder) {
+  function getElementInfo(el, includeDocumentOrder, includeSelector) {
     var rect = el.getBoundingClientRect();
     var tagName = el.tagName.toLowerCase();
     var role = el.getAttribute('role') || undefined;
@@ -310,8 +310,65 @@ const OVERLAY_SCRIPT = `
       isInteractive: isInteractive,
       stableAttributes: Object.keys(attrs).length > 0 ? attrs : undefined,
       ancestorTags: ancestors.length > 0 ? ancestors : undefined,
+      selector: includeSelector ? buildStableSelector(el) : undefined,
       documentOrder: includeDocumentOrder === false ? -1 : getDocumentOrder(el),
     };
+  }
+
+  // Stable recapture locator: prefer data-testid / data-test-id / id /
+  // aria-label / name, then fall back to a bounded ancestor/tag path with
+  // :nth-of-type. Returns undefined when no safe unique locator exists.
+  function buildStableSelector(el) {
+    if (!el || !el.tagName) return undefined;
+    var pref = ['data-testid', 'data-test-id', 'id', 'aria-label', 'name'];
+    for (var i = 0; i < pref.length; i++) {
+      var v = el.getAttribute(pref[i]);
+      if (v) {
+        var sel = '[' + pref[i] + '="' + cssEscapeValue(v) + '"]';
+        if (selectorMatchesExactly(sel, el)) return sel;
+      }
+    }
+    var parts = [];
+    var node = el;
+    var depth = 0;
+    while (
+      node && node.tagName &&
+      node !== document.body && node !== document.documentElement &&
+      depth < 10
+    ) {
+      var tag = node.tagName.toLowerCase();
+      var nth = 1;
+      var sibling = node.previousElementSibling;
+      while (sibling) {
+        if (sibling.tagName && sibling.tagName.toLowerCase() === tag) nth++;
+        sibling = sibling.previousElementSibling;
+      }
+      parts.unshift(tag + ':nth-of-type(' + nth + ')');
+      node = node.parentElement;
+      depth++;
+    }
+    if (parts.length === 0) return undefined;
+    var pathSel = parts.join(' > ');
+    if (selectorMatchesExactly(pathSel, el)) return pathSel;
+    return undefined;
+  }
+
+  function cssEscapeValue(value) {
+    if (typeof CSS !== 'undefined' && CSS.escape) {
+      try {
+        return CSS.escape(value);
+      } catch (e) {}
+    }
+    return String(value).replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
+  }
+
+  function selectorMatchesExactly(selector, el) {
+    try {
+      var matches = document.querySelectorAll(selector);
+      return matches.length === 1 && matches[0] === el;
+    } catch (e) {
+      return false;
+    }
   }
 
   function getDocumentOrder(el) {
@@ -399,7 +456,7 @@ const OVERLAY_SCRIPT = `
 
       var info = selected.info;
       if (selected.el && selected.el.isConnected) {
-        info = getElementInfo(selected.el);
+        info = getElementInfo(selected.el, undefined, true);
         selected.info = info;
       }
       active.push(selected);
@@ -634,7 +691,7 @@ const OVERLAY_SCRIPT = `
     var el = getTargetElement(clientX, clientY);
     if (!el) return;
 
-    var info = getElementInfo(el);
+    var info = getElementInfo(el, undefined, true);
     currentElementInfo = info;
     var selectionKey = getSelectionKey(info);
     var existingIdx = -1;

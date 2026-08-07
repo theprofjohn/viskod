@@ -71,6 +71,7 @@ export const ReviewSnapshotRefSchema = z.object({
     contextPacketId: z.string().optional(),
     recapturePacketId: z.string().optional(),
     selectionId: z.string().optional(),
+    selectionSnapshot: z.record(z.unknown()).optional(),
   }),
   page: z.object({
     url: z.string().optional(),

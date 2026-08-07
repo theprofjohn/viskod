@@ -49,3 +49,4 @@ pnpm-lock.yaml.*
 .viskid/session.json
 .viskod/*.tmp
 .viskod/logs/
+.viskod-test-mcp-handoff/

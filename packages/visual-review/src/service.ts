@@ -156,7 +156,7 @@ export class ReviewServiceImpl implements ReviewService {
     const result = await this.persistence.loadReview(reviewId);
     if (!result.ok) return err(result.error);
 
-    const review = result.value;
+    const review = projectReview(result.value);
 
     return ok({
       reviewId: review.reviewId,
@@ -255,7 +255,7 @@ export class ReviewServiceImpl implements ReviewService {
       payload: { reviewId, decision: input.decision },
     });
 
-    return ok(redacted.review);
+    return ok(projectReview(redacted.review));
   }
 
   async cancelReview(reviewId: string): Promise<Result<VisualReview>> {
@@ -289,7 +289,7 @@ export class ReviewServiceImpl implements ReviewService {
     const saveResult = await this.persistence.saveReview(redacted.review);
     if (!saveResult.ok) return err(saveResult.error);
 
-    return ok(redacted.review);
+    return ok(projectReview(redacted.review));
   }
 
   async setAfterSnapshot(
@@ -338,7 +338,7 @@ export class ReviewServiceImpl implements ReviewService {
       payload: { reviewId, comparisonStatus: comparison.status },
     });
 
-    return ok(redacted.review);
+    return ok(projectReview(redacted.review));
   }
 
   async recaptureReview(input: VisualReviewRecaptureInput): Promise<Result<VisualReview>> {
@@ -458,7 +458,7 @@ export class ReviewServiceImpl implements ReviewService {
       },
     });
 
-    return ok(finalRedacted.review);
+    return ok(projectReview(finalRedacted.review));
   }
 
   reviewExists(reviewId: string): boolean {
@@ -476,6 +476,24 @@ export class ReviewServiceImpl implements ReviewService {
       timestamp: new Date().toISOString(),
     };
   }
+}
+
+/**
+ * Consumer projection: the raw selection snapshot is an internal recapture
+ * locator (it can contain stable-attribute selectors) and is persisted for
+ * recapture only — it is never returned to consumers.
+ */
+function projectSnapshot(snapshot: ReviewSnapshotRef): ReviewSnapshotRef {
+  const { selectionSnapshot: _selectionSnapshot, ...source } = snapshot.source;
+  return { ...snapshot, source };
+}
+
+function projectReview(review: VisualReview): VisualReview {
+  return {
+    ...review,
+    before: projectSnapshot(review.before),
+    after: review.after ? projectSnapshot(review.after) : undefined,
+  };
 }
 
 function buildBeforeSnapshot(
