@@ -552,6 +552,82 @@ Negative:
 
 ---
 
+## Decision 009
+
+Date:
+
+2026-08-05
+
+Status:
+
+Accepted
+
+Category:
+
+Product
+
+Title:
+
+UI Issue to Verified Fix is the first product workflow
+
+Context:
+
+Viskod had a technically capable capture/MCP workflow but no understandable
+human surface: Studio was a JSON/WebSocket inspection backend, and the docs
+taught selectors, packets, handoff IDs, and recapture flags as the normal
+path. The reusable user-facing services (VisualSelectionServiceImpl +
+SelectionOverlayController, IssueServiceImpl, UserFacingHandoff,
+UserFacingReview) were not wired together.
+
+Decision:
+
+The first complete product workflow is: open a local app → report a UI issue
+by pointing at the element → describe the problem and expected result →
+prepare an agent handoff → refresh and verify the fix → accept, reject, or
+request follow-up. Studio exposes three stages (Report, Prepare for agent,
+Verify); capture, selection, and packets become supporting infrastructure.
+A changed screenshot is evidence, not truth — the human always decides.
+Studio prepares handoffs; it never claims to invoke an external coding agent
+(the MCP integration only makes the handoff available to the connected
+agent).
+
+Alternatives Considered:
+
+- Generic browser inspection as the product promise — rejected: inspection
+  panels do not complete a user job.
+- In-Studio agent invocation — rejected for this phase: duplicates existing
+  coding agents and exceeds the current MCP integration (Decision 001).
+- Selector-first workflow with a VisualIssue schema migration — rejected:
+  expected result persists in `description` as
+  `Problem:\n<problem>\n\nExpected result:\n<expected>`; no migration.
+
+Reason for Rejection:
+
+See alternatives.
+
+Consequences:
+
+Positive:
+
+- One understandable end-user path (RFC-0001)
+- Selectors/packets/IDs stay behind the scenes
+- Human review boundary preserved
+
+Negative:
+
+- Studio UI work required (framework-free HTML, workflow orchestrator,
+  WebSocket state broadcast)
+
+Future Review:
+
+Automatic agent-launch integration behind a separately verified API.
+
+Supersedes:
+
+None.
+
+---
+
 # Pending Decisions
 
 Use this section only for decisions that require discussion.
@@ -602,6 +678,85 @@ Decision:
 
 Rejected.
 ```
+
+---
+
+## Decision 010
+
+Date:
+
+2026-08-05
+
+Status:
+
+Accepted
+
+Category:
+
+Repository
+
+Title:
+
+Distribute Viskod as a single bundled npm package
+
+Context:
+
+Viskod had no distribution mechanism: the monorepo is private, nothing is
+published, and the MCP server is spawned from a checkout via `npx tsx`. End
+users cannot install via npm, bun, curl, brew, mise, or any package manager.
+The compiled tsc output cannot run on plain Node: source uses
+`moduleResolution: "bundler"` with extensionless relative imports (133 in
+dist), which Node ESM rejects. A bundle is therefore the only minimal path.
+
+Decision:
+
+Publish a single `@viskod/cli` npm package containing an esbuild bundle of
+the CLI plus all `@viskod/*` workspace dependencies and zod. Playwright
+stays an external runtime dependency (native driver + browser downloads);
+`postinstall` runs `playwright install chromium` (opt out via
+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`). A tag-pushed GitHub Actions workflow
+(`v*`) runs the gate, publishes with an `alpha`/`latest` tag derived from
+the version, verifies the published binary over MCP stdio, and creates a
+GitHub release. The tsx-from-source dev flow is unchanged.
+
+Supporting changes: `MCPServer` extracted from `mcp-server/index.ts` into
+`server.ts` (broke an entry.ts ↔ index.ts import cycle that esbuild cannot
+flatten); the standalone bootstrap in `entry.ts` now fires only when the
+module is literally `entry.ts` (the setup package spawns it directly);
+`cmdInstall` gained an installed-mode branch that points MCP clients at the
+bundled entry with the current Node binary; `serve` logs its banner to
+stderr so stdout stays pure JSON-RPC.
+
+Alternatives Considered:
+
+- Publish all 22 packages individually
+- No publishing (status quo)
+
+Reason for Rejection:
+
+The 22-package path requires a repo-wide module-resolution migration (TS
+5.7 `rewriteRelativeImportExtensions` + NodeNext) plus 22× manifest churn;
+worth it only when SDK consumers exist. Status quo blocks every installer.
+
+Consequences:
+
+Positive:
+
+- `npm i -g`, `bun add -g`, `npx`, and `curl <registry tarball>` work
+- MCP client config no longer requires a repo checkout
+- Single artifact, single version to verify
+
+Negative:
+
+- Bundle ships zod and all workspace packages in one file (no granular
+  installs; fine for a dev tool)
+- Consumers accept a Chromium download on install
+- The `@viskod/*` package graph stays unpublished for SDK consumers
+
+Future Review:
+
+When third-party SDK consumers appear, evaluate the NodeNext migration for
+per-package publishing.
 
 ---
 

@@ -305,9 +305,9 @@ async function cmdServe(): Promise<void> {
   const targetUrl = targetUrlIdx >= 0 ? process.argv[targetUrlIdx + 1] : undefined;
 
   if (targetUrl) {
-    console.log(`Starting Viskod MCP server with browser (${targetUrl})...`);
+    console.error(`Starting Viskod MCP server with browser (${targetUrl})...`);
   } else {
-    console.log('Starting Viskod MCP server...');
+    console.error('Starting Viskod MCP server...');
   }
 
   // Use the full MCP tool set (30 tools) registered by @viskod/mcp-server
@@ -448,12 +448,14 @@ async function cmdInstall(subArgs: string[]): Promise<void> {
   }
 
   // Path to Viskod CLI entry (this repo)
-  const viskodEntry = join(repoRoot, 'packages', 'cli', 'src', 'index.ts');
-  const entryExists = existsSync(viskodEntry);
-  if (!entryExists) {
-    console.error(`Could not locate the Viskod CLI entry. Repo root resolved to: ${repoRoot}`);
-    process.exit(1);
-  }
+  const devEntry = join(repoRoot, 'packages', 'cli', 'src', 'index.ts');
+  const devMode = existsSync(devEntry);
+  // Installed mode: running from node_modules (@viskod/cli bundle). The MCP
+  // client must spawn the bundled entry with the current Node binary — no
+  // tsx, no repo checkout required.
+  const serveCommand = devMode
+    ? ['npx', 'tsx', devEntry, 'serve', '--url', 'http://localhost:3000']
+    : [process.execPath, fileURLToPath(import.meta.url), 'serve', '--url', 'http://localhost:3000'];
 
   interface McpConfigFile {
     path: string;
@@ -500,14 +502,14 @@ async function cmdInstall(subArgs: string[]): Promise<void> {
       // opencode uses: mcp: { name: { type: "local", command: [..], enabled: true } }
       (config[target.key] as Record<string, unknown>)[target.serverKey] = {
         type: 'local',
-        command: ['npx', 'tsx', viskodEntry, 'serve', '--url', 'http://localhost:3000'],
+        command: serveCommand,
         enabled: true,
       };
     } else {
       // cursor/claude use mcpServers: { name: { command, args, ... } }
       (config[target.key] as Record<string, unknown>)[target.serverKey] = {
-        command: 'npx',
-        args: ['tsx', viskodEntry, 'serve', '--url', 'http://localhost:3000'],
+        command: serveCommand[0],
+        args: serveCommand.slice(1),
         env: {},
         disabled: false,
         autoApprove: [],

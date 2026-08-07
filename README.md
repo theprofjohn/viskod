@@ -113,12 +113,22 @@ Viskod will:
 * launch the MCP server
 * open the application preview
 
-Next:
+Next — the **UI issue to verified fix** flow:
 
-1. Select an element.
-2. Open your preferred AI coding agent.
-3. Ask it to inspect the current Viskod selection.
-4. Let the coding agent implement the requested change.
+1. **Point at the problem.** In Studio, click `Report UI issue` and click the
+   broken element in your app.
+2. **Describe it.** Fill in `What is wrong?` and `What should happen?`.
+3. **Prepare agent handoff.** Studio shows `Handoff ready` with a copyable
+   prompt/ID for your coding agent (Claude Code, OpenCode, Cursor, ...).
+4. **Verify the fix.** After the agent changes the code, click `Verify fix`,
+   review the before/after evidence, and choose `Accept fix`, `Issue
+   persists`, or `Needs follow-up`.
+
+You never need to write a CSS selector: pointing at the element replaces
+manual selector discovery.
+
+> A changed screenshot is evidence, not truth. Studio never auto-accepts a fix
+> based on pixels alone — the human decides.
 
 ---
 
@@ -132,7 +142,9 @@ Simply write:
 
 > Inspect the current Viskod selection and fix the spacing while preserving the existing design system.
 
-The coding agent already knows which element you selected.
+The coding agent already knows which element you selected. Selectors, packet
+IDs, and handoff mechanics stay behind the scenes — see
+`AGENT_WORKFLOW.md` for the technical MCP call sequence.
 
 ---
 
@@ -140,6 +152,7 @@ The coding agent already knows which element you selected.
 
 ## Phase 1
 
+* UI issue to verified fix workflow (Report → Prepare agent handoff → Verify fix)
 * Local-first execution
 * React support
 * Next.js support
@@ -255,8 +268,21 @@ Additional frameworks will be considered after the core architecture stabilises.
 
 # Installation
 
+## Quick install (published package)
+
+```bash
+npm i -g @viskod/cli
+```
+
+Gives you the `viskod` CLI (MCP server, session, health, IDE install). The
+first run downloads Chromium automatically. Also available via
+`bun add -g @viskod/cli` or `npx @viskod/cli`.
+
+## From source (development)
+
 ```bash
 pnpm install
+pnpm exec playwright install chromium
 ```
 
 ---

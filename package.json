@@ -7,6 +7,7 @@
     "viskod": "tsx packages/cli/src/index.ts",
     "dev": "pnpm -r dev",
     "build": "pnpm -r build",
+    "build:cli": "node scripts/build-cli.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
@@ -16,12 +17,14 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "check": "biome check . && tsc -b && vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "smoke:agent-workflow": "node scripts/smoke-phase18-agent-workflow.mjs",
     "release:check": "biome check . && tsc -b && vitest run && node scripts/smoke-phase18-agent-workflow.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@types/node": "^22.0.0",
+    "esbuild": "^0.28.1",
     "playwright": "^1.46.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0",

@@ -1,0 +1,70 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build:cli
+      - id: version
+        run: echo "version=$(node -p "require('./packages/cli/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Publish to npm
+        run: pnpm --filter @viskod/cli publish --tag "$TAG" --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # pre-release (e.g. 0.2.0-alpha) → `alpha` tag; stable → `latest`
+          TAG: ${{ contains(steps.version.outputs.version, '-') && 'alpha' || 'latest' }}
+
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install published CLI (postinstall downloads Chromium)
+        run: npm install -g @viskod/cli@${{ needs.publish.outputs.version }}
+      - name: Install Chromium system deps
+        run: sudo npx playwright install-deps chromium
+      - name: Health check (no repo, no tsx)
+        run: viskod health
+      - name: Start fixture app
+        run: |
+          node examples/phase12-source-hint-app/server.cjs &
+          for i in $(seq 1 20); do curl -sf http://localhost:3000 >/dev/null && break; sleep 1; done
+      - name: MCP tools/list probe through published binary
+        run: |
+          printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n' \
+            | timeout 30 viskod serve --url http://localhost:3000 2>/dev/null \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const l=d.trim().split('\n').map(JSON.parse);if(l.length!==2)process.exit(1);const tools=l[1].result.tools.map(t=>t.name);if(!tools.includes('viskod_capture_context')||!tools.includes('recapture_visual_review'))process.exit(1);console.log('MCP OK:',tools.length,'tools')})"
+
+  release:
+    needs: [publish, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

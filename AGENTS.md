@@ -10,6 +10,7 @@ The `gortex` MCP server is configured for this repo (`.omp/mcp.json`). It is a d
 |---------|-------------|
 | `pnpm check` | **The gate**: `biome check . && tsc -b && vitest run` — run before claiming completion |
 | `pnpm format` | `biome format --write .` — fixes formatting repo-wide |
+| `pnpm build:cli` | `node scripts/build-cli.mjs` — esbuild bundle of `@viskod/cli` for npm distribution (Decision 010) |
 | `pnpm viskod` | Run the CLI via tsx: `tsx packages/cli/src/index.ts` (start/scan/capture/serve/health/status/stop/export/install) |
 | `pnpm smoke:agent-workflow` | `node scripts/smoke-phase18-agent-workflow.mjs` — MCP workflow smoke test |
 | `pnpm release:check` | Full gate + smoke test, for release readiness |

@@ -1,3 +1,6 @@
+import path from 'node:path';
+// Lazy-loaded: @viskod/setup is imported dynamically in tool handlers
+import { fileURLToPath } from 'node:url';
 import {
   type AgentHandoffStatus,
   HandoffPersistence,
@@ -15,9 +18,8 @@ import { SourceHintEngine } from '@viskod/source-hint-engine';
 import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
 import { ReviewPersistence, ReviewServiceImpl } from '@viskod/visual-review';
 import type { RecaptureAdapter } from '@viskod/visual-review';
-// Lazy-loaded: @viskod/setup is imported dynamically in tool handlers
-import { MCPServer } from './index';
 import type { MCPToolDefinition } from './index';
+import { MCPServer } from './server';
 
 export interface BuildViskodServerOptions {
   targetUrl?: string;
@@ -1443,8 +1445,7 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
 
   const verifyMcpToolsTool: MCPToolDefinition = {
     name: 'verify_mcp_tools',
-    description:
-      'Verify that all required MCP tools are available in the running server.',
+    description: 'Verify that all required MCP tools are available in the running server.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -1722,8 +1723,13 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
 }
 
 // Standalone bootstrap — start the server when this file is run directly
+// (the setup package spawns `tsx entry.ts` for live MCP verification).
+// Guarded on the module name: inside the bundled CLI (dist/index.js) the
+// CLI's `serve` command is the entry point, and starting here too would
+// double-start the server and duplicate every JSON-RPC response.
 if (
   process.argv[1] &&
+  path.basename(fileURLToPath(import.meta.url)) === 'entry.ts' &&
   import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href
 ) {
   const server = buildViskodServer();
