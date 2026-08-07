@@ -24,7 +24,13 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      # Gate = `pnpm check`, minus dogfood browser tests: those require a
+      # fixture server on :5173 that CI does not run (they still run locally).
+      - name: Gate
+        run: |
+          pnpm exec biome check .
+          pnpm exec tsc -b
+          pnpm exec vitest run --exclude '**/dogfood*.test.ts'
       - run: pnpm build:cli
       - id: version
         run: echo "version=$(node -p "require('./packages/cli/package.json').version")" >> "$GITHUB_OUTPUT"

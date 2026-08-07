@@ -123,6 +123,10 @@ importers:
 
   packages/cli:
     dependencies:
+      playwright:
+        specifier: ^1.46.0
+        version: 1.62.0
+    devDependencies:
       '@viskod/browser-runtime':
         specifier: workspace:*
         version: link:../browser-runtime
@@ -156,9 +160,6 @@ importers:
       '@viskod/source-hint-engine':
         specifier: workspace:*
         version: link:../source-hint-engine
-      playwright:
-        specifier: ^1.46.0
-        version: 1.62.0
 
   packages/config:
     dependencies:
