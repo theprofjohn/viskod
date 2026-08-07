@@ -35,7 +35,9 @@ jobs:
       - id: version
         run: echo "version=$(node -p "require('./packages/cli/package.json').version")" >> "$GITHUB_OUTPUT"
       - name: Publish to npm
-        run: pnpm --filter @viskod/cli publish --tag "$TAG" --access public
+        # --no-git-checks: tag checkouts are detached HEAD, which pnpm's
+        # default publish-branch check rejects. The tree is clean at a tag.
+        run: pnpm --filter @viskod/cli publish --tag "$TAG" --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # pre-release (e.g. 0.2.0-alpha) → `alpha` tag; stable → `latest`
