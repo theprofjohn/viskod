@@ -1,49 +1,59 @@
+# Viskod
 
-> **Viskod**
->
 > **AI can read your code. Viskod lets it see your UI.**
 
----
+Viskod is a **visual context engine** for AI coding agents, built for
+frontend and product engineers who use MCP-compatible coding agents (Claude
+Code, OpenCode, Cursor, ...).
 
-# Overview
-
-Viskod is a **Visual Context Engine** for AI coding agents.
-
-Modern coding agents can understand source code extremely well.
-
-What they cannot reliably understand is the **running user interface**.
-
-Developers often end up writing prompts like:
+Coding agents understand source code extremely well. What they cannot
+reliably understand is the **running user interface** — which is why fixing
+visual bugs usually starts with a prompt like:
 
 > "The third button inside the card on the left doesn't align correctly."
 
-That process is slow, ambiguous and error-prone.
-
-Viskod removes that ambiguity.
-
-Select an element in a running application and Viskod captures structured visual context—including screenshots, DOM metadata, computed styles, diagnostics and source hints—then exposes it through **Model Context Protocol (MCP)** so external AI coding agents can reason about what you are seeing.
+Viskod removes that ambiguity. Point at an element in your running
+application and Viskod captures structured visual context — screenshots,
+DOM metadata, computed styles, diagnostics and best-effort source hints —
+then exposes it through **Model Context Protocol (MCP)** so your coding
+agent can reason about what you are actually seeing.
 
 ---
 
-# Vision
+# The Workflow: UI Issue → Agent Handoff → Verified Fix
 
-Make visual software understanding a standard capability for AI-assisted software development.
+```mermaid
+flowchart LR
+    A[Point at the<br/>broken element] --> B[Describe what is<br/>wrong / expected]
+    B --> C[Prepare agent<br/>handoff]
+    C --> D[Coding agent<br/>implements fix]
+    D --> E[Verify fix<br/>before/after evidence]
+    E --> F{Human decides}
+    F -->|Accept fix| G[Done]
+    F -->|Issue persists /<br/>Needs follow-up| D
+```
 
-Instead of describing the interface, developers should simply point at it.
+1. **Point at the problem.** In Studio, click `Report UI issue` and click the
+   broken element in your app. You never write a CSS selector by hand.
+2. **Describe it.** Fill in `What is wrong?` and `What should happen?`.
+3. **Prepare agent handoff.** Studio shows `Handoff ready` with a copyable
+   prompt for your coding agent.
+4. **Verify the fix.** After the agent changes the code, click `Verify fix`,
+   review the before/after evidence, and choose `Accept fix`, `Issue
+   persists`, or `Needs follow-up`.
+
+> A changed screenshot is **evidence, not truth**. Viskod never auto-accepts
+> a fix based on pixels alone — the human decides.
 
 ---
 
 # What Viskod Is
 
-Viskod is:
-
-* A Visual Context Engine
+* A visual context engine
 * A browser inspection system
 * An MCP server
 * A local-first developer tool
 * A bridge between running applications and AI coding agents
-
----
 
 # What Viskod Is Not
 
@@ -57,226 +67,39 @@ Viskod is **not**:
 * a Figma alternative
 * an autonomous software engineer
 
-Viskod observes.
-
-AI coding agents implement.
-
----
-
-# How It Works
-
-```text
-Developer
-      │
-      ▼
-Start Viskod
-      │
-      ▼
-Open Running Application
-      │
-      ▼
-Select UI Element
-      │
-      ▼
-Visual Context Engine
-      │
-      ▼
-Context Packet
-      │
-      ▼
-MCP Server
-      │
-      ▼
-Claude Code
-OpenCode
-Codex
-Gemini CLI
-Cursor
-VS Code Extensions
-```
-
----
-
-# Example Workflow
-
-```bash
-cd viskod
-
-pnpm viskod
-```
-
-Viskod will:
-
-* detect the project
-* start or connect to the development server
-* launch the Studio
-* launch the MCP server
-* open the application preview
-
-Next — the **UI issue to verified fix** flow:
-
-1. **Point at the problem.** In Studio, click `Report UI issue` and click the
-   broken element in your app.
-2. **Describe it.** Fill in `What is wrong?` and `What should happen?`.
-3. **Prepare agent handoff.** Studio shows `Handoff ready` with a copyable
-   prompt/ID for your coding agent (Claude Code, OpenCode, Cursor, ...).
-4. **Verify the fix.** After the agent changes the code, click `Verify fix`,
-   review the before/after evidence, and choose `Accept fix`, `Issue
-   persists`, or `Needs follow-up`.
-
-You never need to write a CSS selector: pointing at the element replaces
-manual selector discovery.
-
-> A changed screenshot is evidence, not truth. Studio never auto-accepts a fix
-> based on pixels alone — the human decides.
-
----
-
-# Example Prompt
-
-Instead of writing:
-
-> "The Save button looks strange."
-
-Simply write:
-
-> Inspect the current Viskod selection and fix the spacing while preserving the existing design system.
-
-The coding agent already knows which element you selected. Selectors, packet
-IDs, and handoff mechanics stay behind the scenes — see
-`AGENT_WORKFLOW.md` for the technical MCP call sequence.
-
----
-
-# Features
-
-## Phase 1
-
-* UI issue to verified fix workflow (Report → Prepare agent handoff → Verify fix)
-* Local-first execution
-* React support
-* Next.js support
-* Vite support
-* Chromium browser runtime
-* Desktop, tablet and mobile viewports
-* Interactive element selection
-* Container selection
-* Screenshot capture
-* DOM inspection
-* Computed style extraction
-* Diagnostics collection
-* Source hints
-* MCP server
-* Studio interface
-* Structured visual context packets
-
----
-
-# Architecture
-
-```text
-Studio
-      │
-      ▼
-Visual Context Engine
-      │
-      ▼
-Browser Runtime
-      │
-      ▼
-Running Application
-
-              │
-
-              ▼
-
-          MCP Server
-
-              │
-
-              ▼
-
-      External AI Coding Agent
-```
-
-Every layer has a single responsibility.
-
----
-
-# Repository Structure
-
-```text
-viskod/
-
-├── AGENTS.md
-├── MEMORY.md
-├── README.md
-│
-├── docs/
-│
-├── apps/
-│   └── studio/
-│
-├── packages/
-│   ├── agent-handoff/
-│   ├── audit/
-│   ├── browser-runtime/
-│   ├── capture-pipeline/
-│   ├── cli/
-│   ├── config/
-│   ├── context-engine/
-│   ├── diagnostics/
-│   ├── event-bus/
-│   ├── mcp-server/
-│   ├── overlay-system/
-│   ├── permissions/
-│   ├── plugin-system/
-│   ├── project-scanner/
-│   ├── runtime-session/
-│   ├── sdk/
-│   ├── selection-engine/
-│   ├── setup/
-│   ├── shared/
-│   ├── source-hint-engine/
-│   ├── visual-issue/
-│   ├── visual-review/
-│   ├── visual-selection/
-│   └── workspace/
-│
-├── examples/
-│
-└── tests/
-```
+Viskod observes and supplies context. External coding agents implement.
 
 ---
 
 # Supported Technologies
 
-Phase 1 targets:
-
-* Node.js 22+
-* TypeScript
-* React
-* Next.js
-* Vite
-* Chromium
-* pnpm
-
-Additional frameworks will be considered after the core architecture stabilises.
+* **Node.js 22+** (runtime requirement)
+* **Chromium** via Playwright (installed automatically, see below)
+* **React, Next.js, Vite** applications
+* **MCP-compatible coding agents** — Claude Code, OpenCode, and Cursor have
+  documented configuration examples; any MCP client can use the server
 
 ---
 
 # Installation
 
-## Quick install (published package)
+## Published package (recommended)
 
 ```bash
-npm i -g @viskod/cli
+npm i -g @viskod/cli        # → puts `viskod` on your PATH
 ```
 
-Gives you the `viskod` CLI (MCP server, session, health, IDE install). The
-first run downloads Chromium automatically. Also available via
-`bun add -g @viskod/cli` or `npx @viskod/cli`.
+Also available with:
+
+```bash
+bun add -g @viskod/cli
+npx @viskod/cli serve       # one-shot, no install
+```
+
+Package installation runs `playwright install chromium`, so the first install
+downloads a browser. If you already manage Chromium yourself you can opt out
+with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` — but then you must install
+Chromium separately or `viskod` will not be able to launch a browser.
 
 ## From source (development)
 
@@ -285,241 +108,154 @@ pnpm install
 pnpm exec playwright install chromium
 ```
 
----
-
-# Development
+Run a local app — the repository includes a fixture:
 
 ```bash
-pnpm viskod start
+node examples/phase12-source-hint-app/server.cjs
+```
+
+Start Studio:
+
+```bash
+pnpm exec tsx apps/studio/src/index.ts
 ```
 
 ---
 
-# Build
+# Studio Quickstart
+
+The recommended Viskod workflow runs through **Studio**:
+
+1. Start your local app (or the included fixture above). Leave it running.
+2. Start Studio — it serves its UI on `http://localhost:3001`.
+3. Open `http://localhost:3001`, enter your app URL, and click `Open app`.
+4. Click `Report UI issue`, hover over the problem, and click it.
+5. Describe the problem, click `Prepare agent handoff`, and copy the prompt
+   for your coding agent.
+6. After the agent changes the code, click `Verify fix` — Studio reloads the
+   page (cache-busted) and recaptures the same element so you can compare
+   before/after evidence and decide.
+
+Full walkthrough: [QUICKSTART_MCP.md](QUICKSTART_MCP.md)
+
+---
+
+# MCP Quickstart
+
+The MCP server speaks JSON-RPC over stdin/stdout and is started by your MCP
+client. The target app must already be listening, or `viskod serve` exits at
+startup with a connection error:
 
 ```bash
-pnpm build
+viskod serve --url http://localhost:3000
 ```
 
----
+## Claude Desktop
 
-# Tests
+Add to your `claude_desktop_config.json`:
 
-```bash
-pnpm test
+```json
+{
+  "mcpServers": {
+    "viskod": {
+      "command": "viskod",
+      "args": ["serve", "--url", "http://localhost:3000"]
+    }
+  }
+}
 ```
 
----
+## Cursor
 
-# Repository Validation
+Add `.cursor/mcp.json` in your project root with the same `mcpServers`
+structure (see [examples/mcp-configs/](examples/mcp-configs/)).
 
-Run all quality checks:
+## OpenCode
 
-```bash
-pnpm check
+Add to `~/.config/opencode/opencode.json` or a project-level
+`opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "viskod": {
+      "type": "local",
+      "command": ["viskod", "serve", "--url", "http://localhost:3000"],
+      "enabled": true
+    }
+  }
+}
 ```
 
-This command should execute:
+Ready-made files for all three clients live in
+[examples/mcp-configs/](examples/mcp-configs/).
 
-* linting (biome)
-* type checking (tsc -b)
-* unit tests (vitest)
+## What the agent can do
 
-Any failure should return a non-zero exit code.
+`tools/list` exposes `viskod_navigate`, `viskod_select_element`,
+`viskod_capture_context`, `create_agent_handoff`, `create_visual_review`,
+`recapture_visual_review`, and `get_visual_review`. A capture returns a
+structured context packet: DOM snapshot, computed styles, screenshot
+metadata, hierarchy, evidence sources, and a confidence rating.
 
----
+Example agent prompt:
+[examples/agent-workflows/prompts/fix-visual-issue.md](examples/agent-workflows/prompts/fix-visual-issue.md)
 
-# Development Philosophy
-
-Viskod follows a few simple principles:
-
-* Local first
-* MCP first
-* Explicit contracts
-* Small packages
-* Security by default
-* Evidence over assumption
-
-Read `AGENTS.md` before contributing.
-
-Review `MEMORY.md` before introducing architectural changes.
+Technical reference: [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md)
 
 ---
 
-# MCP Agent Workflow
+# Privacy & Security
 
-Viskod exposes MCP tools for AI coding agents, including `viskod_select_element` and `viskod_capture_context`.
+Viskod is local-first and designed to keep development data on your machine:
 
-The standard workflow:
-
-1. **Start** `pnpm viskod serve --url <APP_URL>`
-2. **Select** `viskod_select_element(selector)` → pick the element to inspect
-3. **Capture** `viskod_capture_context(selector)` → receive a context packet with DOM snapshot, computed styles, screenshots, hierarchy, and confidence
-4. **Fix** the issue in the identified source file
-5. **Re-capture** `viskod_capture_context(selector)` after `viskod_navigate` to verify the change
-
-Detailed guides:
-- [Quickstart](QUICKSTART_MCP.md) — 8-step walkthrough from install to verified fix
-- [Agent Workflow](AGENT_WORKFLOW.md) — tool usage, profile guidance, comparison interpretation
-- [MCP Config Examples](examples/mcp-configs/) — OpenCode, Cursor, and Claude Desktop templates
-- [Agent Prompt Template](examples/agent-workflows/prompts/fix-visual-issue.md) — copy-paste prompt for coding agents
+* **Telemetry is disabled by default.**
+* **Services bind to localhost/127.0.0.1 only** — no cloud accounts, no
+  hosted APIs, no credentials required.
+* **Sensitive values are redacted** before an agent ever sees them (API keys,
+  tokens, emails, credit-card numbers, secrets in URLs).
+* By default Viskod does **not** collect `.env` files, cookies, tokens,
+  source code, screenshots, DOM data, or repository contents. Capture is
+  explicit, on your machine, for the element you point at.
 
 ---
 
-# Documentation
+# Current Alpha Limitations
 
-The architecture documentation baseline is frozen at v1.0 (score: 94/100).
+Viskod is an **alpha** release. Expect rough edges and change:
 
-| Document | Purpose |
-|----------|---------|
-| [Product](./docs/product.md) | Product identity, scope, and positioning |
-| [Design Principles](./docs/design-principles.md) | Engineering philosophy |
-| [Architecture](./docs/architecture.md) | System boundaries, dependencies, and data flow |
-| [Architecture Baseline](./docs/ARCHITECTURE_BASELINE.md) | Frozen canonical snapshot |
-| [Audit Report](./docs/AUDIT_REPORT_V2.md) | Documentation consistency audit results |
-| [Change Summary](./docs/CHANGE_SUMMARY.md) | Remediation change log |
-| [Governance](./docs/governance.md) | Decision-making framework |
-| [RFC Process](./docs/rfcs.md) | Architectural change proposal process |
-| [Glossary](./docs/glossary.md) | Canonical terminology |
-
-Future architectural changes to product scope, subsystem ownership, dependency direction, runtime boundaries, public contracts or invariants require an RFC.
-
----
-
-# Privacy
-
-Viskod is designed to keep development data on your machine.
-
-By default it does **not**:
-
-* upload source code
-* upload screenshots
-* upload DOM information
-* upload repository contents
-* collect telemetry
-
-The developer owns their data.
+* The CLI and MCP tool set are alpha; interfaces may change.
+* **Screenshots capture the viewport only** — content outside the current
+  viewport is not captured.
+* **Network evidence comes from the page context only** — worker or
+  extension network activity is not captured.
+* In the MCP path, **selection is CSS-selector-dependent**; dynamic class
+  names or shadow DOM can complicate selection. (Studio's point-and-click
+  flow hides selectors from you.)
+* **Source hints are best-effort** — every hint carries a confidence rating
+  and reasoning; treat them as leads, not facts.
+* Capture requires the browser session that `viskod serve` starts; it cannot
+  capture from a detached or external browser.
+* The MCP server is launched by your MCP client over stdin/stdout; it is not
+  a standalone network service.
 
 ---
 
-# Security
+# Troubleshooting
 
-Default behaviour includes:
-
-* localhost-only services
-* validated inputs
-* typed contracts
-* sensitive attribute redaction
-* no automatic `.env` inspection
-* no cookie exposure
-* no token exposure
-
-Security is treated as a core product feature.
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| `viskod serve` exits at startup | Target URL is not listening | Start your app first, then run `viskod serve --url <url>` |
+| Studio exits at startup | Port 3001 already in use | Stop the other process on 3001 |
+| Browser does not open | Playwright Chromium missing | `pnpm exec playwright install chromium` (or reinstall the CLI) |
+| `Open app` fails | Target URL not listening | Start the app first, then open it in Studio |
+| Fix verification looks stale | Browser cache | `Verify fix` always reloads with a cache-busting query parameter |
 
 ---
 
-# Development MCPs
+# Contributing & License
 
-Recommended development tooling:
-
-## Required
-
-* Gortex MCP
-
-Used for:
-
-* repository indexing
-* dependency analysis
-* symbol lookup
-* architectural navigation
-
-Runtime must never depend on Gortex.
-
----
-
-## Optional
-
-* Playwright MCP
-
-Useful for:
-
-* Studio verification
-* browser debugging
-* automated UI inspection
-
-Viskod itself uses the Playwright TypeScript library internally regardless of whether Playwright MCP is installed.
-
----
-
-# Current Status
-
-Current milestone:
-
-**v0.2.0-alpha** — Phases 1-8 complete (Foundation through Enterprise/Advanced + Alpha Hardening)
-
-Focus areas delivered:
-
-* Visual context engine with structured context packets
-* Browser runtime, overlay, selection, and source-hint engines
-* MCP server (`viskod_select_element` / `viskod_capture_context`)
-* Plugin system, permissions, audit, and workspace packages
-* CLI (`start/scan/capture/serve/health/status/stop/export/install`)
-* Studio UI
-
-Commercial features are intentionally deferred.
-
----
-
-# Roadmap
-
-## Phase 1
-
-Visual Context Engine
-
-## Phase 2
-
-Source intelligence
-
-Framework expansion
-
-Visual diffing
-
-Accessibility insights
-
-## Phase 3
-
-Commercial edition
-
-Enterprise capabilities
-
-Plugin ecosystem
-
----
-
-# Contributing
-
-Before making changes:
-
-1. Read `AGENTS.md`.
-2. Read `MEMORY.md`.
-3. Review the implementation documents under `docs/`.
-4. Run `pnpm check`.
-5. Keep documentation updated.
-
----
-
-# Design Goal
-
-The ideal workflow should feel effortless.
-
-A developer should never need to explain where a visual issue exists.
-
-Selecting the interface should provide enough context for an AI coding agent to understand the problem immediately.
-
-That is the purpose of Viskod.
-
----
-
-# License
-
-Licence information will be added before the first public release.
+Viskod's local visual-context workflow is open source under the
+[Apache License 2.0](LICENSE). See [TRADEMARKS.md](TRADEMARKS.md) for the
+trademark policy. Contributions, issues, and pull requests are welcome.

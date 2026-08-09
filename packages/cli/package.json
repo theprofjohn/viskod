@@ -1,9 +1,9 @@
 {
   "name": "@viskod/cli",
   "version": "0.2.2-alpha",
+  "license": "Apache-2.0",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
   "bin": {
     "viskod": "./dist/index.js"
   },
@@ -20,9 +20,6 @@
   },
   "publishConfig": {
     "access": "public"
-  },
-  "exports": {
-    ".": "./src/index.ts"
   },
   "dependencies": {
     "playwright": "^1.46.0"

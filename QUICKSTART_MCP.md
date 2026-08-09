@@ -102,26 +102,32 @@ messages on stdin.
 
 ### OpenCode
 
-Create or edit `~/.config/opencode/opencode.json`:
+Create or edit `~/.config/opencode/opencode.json` (or a project-level
+`opencode.json`). OpenCode's current config format uses an `mcp` key with an
+array `command`:
 
 ```json
 {
-  "mcpServers": {
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
     "viskod": {
-      "command": "pnpm",
-      "args": [
-        "--dir", "<REPO_PATH>",
+      "type": "local",
+      "command": [
+        "pnpm", "--dir", "<REPO_PATH>",
         "exec", "tsx",
         "packages/cli/src/index.ts",
         "serve",
         "--url", "http://localhost:3000"
       ],
-      "disabled": false,
-      "autoApprove": []
+      "enabled": true
     }
   }
 }
 ```
+
+If you installed the published CLI (`npm i -g @viskod/cli`), use
+`["viskod", "serve", "--url", "http://localhost:3000"]` as the command. See
+`examples/mcp-configs/opencode.json` for that variant.
 
 ### Cursor
 

@@ -8,7 +8,7 @@
 .opencode/
 opencode.json
 .viskod/
-.viskod-test-mcp-review/
+.viskod-test-*
 .viskod-mcp-e2e/
 
 # Dependencies
@@ -50,3 +50,18 @@ pnpm-lock.yaml.*
 .viskod/*.tmp
 .viskod/logs/
 .viskod-test-mcp-handoff/
+
+# Environment files — never commit real values
+.env
+.env.*
+!.env.example
+
+# Internal harness and evidence artifacts (not part of the public core)
+.omp/
+phase21-dogfood-evidence/
+reports/
+specs/P0_*
+specs/VERTICAL_SLICE_*
+specs/ACCEPTANCE_GATES*
+specs/PROGRAMME_REPORT*
+.viskod-dogfood-*

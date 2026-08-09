@@ -1,21 +1,10 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "mcpServers": {
+  "mcp": {
     "viskod": {
-      "command": "pnpm",
-      "args": [
-        "--dir",
-        "<REPO_PATH>",
-        "exec",
-        "tsx",
-        "packages/cli/src/index.ts",
-        "serve",
-        "--url",
-        "http://localhost:3000"
-      ],
-      "env": {},
-      "disabled": false,
-      "autoApprove": []
+      "type": "local",
+      "command": ["viskod", "serve", "--url", "http://localhost:3000"],
+      "enabled": true
     }
   }
 }

@@ -783,3 +783,154 @@ The repository instruction files (`AGENTS.md`, `README.md`) define how to build.
 `MEMORY.md` explains why those decisions exist.
 
 Together they provide the permanent engineering knowledge required for long-term development.
+
+---
+
+## Decision 011
+
+Date:
+
+2026-08-08
+
+Status:
+
+Accepted
+
+Category:
+
+Product
+
+Title:
+
+Open-core product with paid Team and Enterprise layers
+
+Context:
+
+Viskod needs an adoption and revenue model that preserves its local-first
+privacy promise and complements existing AI coding agents. Charging for
+basic capture or making the local workflow cloud-dependent would weaken the
+product boundary. A fully open-source project without a commercial path would
+leave team collaboration, governance, and support unmonetized.
+
+Decision:
+
+Viskod will use an open-core model. The complete local visual-context workflow
+will be open source under Apache-2.0, including the CLI, Studio, browser
+runtime, MCP server, selection and capture, basic UI issue-to-verified-fix
+workflow, SDK, and framework adapters.
+
+Paid Team and Enterprise offerings will provide optional collaboration, shared
+workspaces, CI and visual regression workflows, integrations, governance,
+SSO/RBAC, self-hosting, premium support, and SLA capabilities. Local capture
+will remain usable without cloud dependency. Commercial code may depend on the
+public core; the public core must never depend on commercial services.
+
+The repository will remain private until the license, source boundary,
+history/secrets audit, and commercial-repository split are ready. The public
+core will be published before a user-facing README rewrite and marketing
+website.
+
+Alternatives Considered:
+
+- Closed product with an open SDK
+- Fully open source with only a future hosted service
+- Metered pricing for screenshots, MCP calls, or visual captures
+
+Reason for Rejection:
+
+A closed core would reduce adoption and trust. A future-only hosted service
+delays revenue validation. Metering the core workflow conflicts with the
+local-first product promise and makes adoption harder.
+
+Consequences:
+
+Positive:
+
+- Solo developers receive a useful, complete, zero-cloud product
+- The open core can build trust and an integration ecosystem
+- Revenue is tied to team coordination, governance, and support value
+- Commercial services remain optional and architecturally separate
+
+Negative:
+
+- Commercial collaboration and governance capabilities still need to be built
+- Apache-2.0 permits competitors to use the open core
+- Public release requires a history and secrets audit
+
+Future Review:
+
+Validate the Team and Enterprise feature boundary with design partners before
+building cloud infrastructure or committing to final pricing.
+
+Supersedes:
+
+None.
+
+---
+
+## Decision 012
+
+Date:
+
+2026-08-08
+
+Status:
+
+Accepted
+
+Category:
+
+Repository
+
+Title:
+
+Staged public core repository
+
+Context:
+
+The open-core decision requires a public home for the open-source product,
+but publishing the current repository immediately could expose unfinished
+internal material, private history, credentials, or future commercial code.
+
+Decision:
+
+Keep the current repository private while the license, open-source boundary,
+Git history, secrets, private URLs, and internal-only material are audited.
+After preparation, publish the open-source core in a public repository. Keep
+Team and Enterprise services in a separate private repository.
+
+The public core should be published before rewriting the user-facing README.
+The marketing website remains a later step, after installation and product
+workflow evidence exist.
+
+Alternatives Considered:
+
+- Publish the current repository immediately
+- Keep the entire product private indefinitely
+
+Reason for Rejection:
+
+Immediate publication creates avoidable disclosure risk. Permanent privacy
+contradicts the adoption strategy for the open-source core.
+
+Consequences:
+
+Positive:
+
+- Public release has a deliberate license and clean source boundary
+- Commercial implementation details remain private
+- README and website work are sequenced after the product foundation
+
+Negative:
+
+- Public launch is delayed until the audit is complete
+- Repository split and history review require deliberate work
+
+Future Review:
+
+Review the boundary after design-partner feedback and before adding the first
+commercial service.
+
+Supersedes:
+
+None.

@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Gate = `pnpm check`, minus dogfood browser tests: those require a
+      # fixture server on :5173 that CI does not run (they still run locally).
+      # Mirrors the release workflow's CI-compatible gate.
+      - name: Gate
+        run: |
+          pnpm exec biome check .
+          pnpm exec tsc -b
+          pnpm exec vitest run --exclude '**/dogfood*.test.ts'
