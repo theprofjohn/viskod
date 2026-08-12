@@ -71,7 +71,9 @@ jobs:
           if-no-files-found: error
       - name: Publish to npm
         # Consumes the exact artifact produced and verified by the gate.
-        run: npm publish "dist-artifact/${{ steps.pack.outputs.artifact }}" --tag "$TAG" --access public
+        # The ./ prefix matters: npm 11 parses a bare `dir/file.tgz` as a
+        # GitHub shorthand spec (git ls-remote) instead of a local file.
+        run: npm publish "./dist-artifact/${{ steps.pack.outputs.artifact }}" --tag "$TAG" --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # pre-release (e.g. 0.2.2-alpha) → `alpha` tag; stable → `latest`
