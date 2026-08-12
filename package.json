@@ -30,6 +30,8 @@
     "check": "biome check . && tsc -b && vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "smoke:agent-workflow": "node scripts/smoke-phase18-agent-workflow.mjs",
+    "demo": "node scripts/demo.mjs",
+    "demo:capture": "node scripts/capture-demo.mjs",
     "release:check": "biome check . && tsc -b && pnpm test:ci && pnpm test:dogfood && pnpm smoke:agent-workflow && pnpm build:cli && node scripts/verify-cli-artifact.mjs"
   },
   "devDependencies": {

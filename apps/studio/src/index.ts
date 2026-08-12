@@ -263,8 +263,17 @@ export class Studio {
     // WebSocket server for Chrome extension chat — same port as HTTP
     this.wss = new WebSocketServer({ server: this.server });
     this.wss.on('connection', (ws) => {
-      this.wsClients.add(ws);
-      ws.send(JSON.stringify({ type: 'studio:state', state: this.getWorkflowState() }));
+      ws.send(
+        JSON.stringify({
+          type: 'studio:state',
+          state: {
+            browserConnected: this.browserConnected,
+            pageId: this.pageId,
+            pageUrl: this.state.pageUrl,
+            workflow: this.getWorkflowState(),
+          },
+        }),
+      );
       ws.on('close', () => this.wsClients.delete(ws));
       ws.on('error', () => this.wsClients.delete(ws));
       ws.on('message', (raw) => {
@@ -327,7 +336,7 @@ export class Studio {
         res.end(renderStudioHtml());
       } else if (url === '/state') {
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(this.state));
+        res.end(JSON.stringify({ ...this.state, workflow: this.getWorkflowState() }));
       } else if (url === '/navigate' && req.method === 'POST') {
         void this.handleNavigate(req, res);
       } else if (url === '/workflow/report/start' && req.method === 'POST') {

@@ -12,13 +12,27 @@ Follow these steps in order:
 
 ### Step 1: Capture the Current State
 
-Make sure the browser is on the target page, then call `viskod_capture_context` to understand the element:
+Choose one entry path:
+
+- **Studio:** open the target app in Studio, choose `Report UI issue`, click the
+  element, accept the selection, and complete the problem/expected-result
+  description. Studio captures the selected element and prepares the issue
+  context for handoff.
+- **MCP:** navigate to the target page, select the element with
+  `viskod_select_element`, then call `viskod_capture_context` with the selector
+  returned by your own inspection. Do not use the Studio point-and-click
+  sequence and do not invent a selector when the target is not stable.
+
+For the MCP path, make sure the browser is on the target page before calling:
 
 ```
 viskod_capture_context(
   selector: "<CSS_SELECTOR>"
 )
 ```
+
+Wait for the preceding tool call to return its real `issueId` or capture
+reference; never invent an issue ID or review ID.
 
 Inspect the response carefully:
 - **`selection`**: Contains the selector, tag name, bounding box, and text of the captured element.
@@ -69,37 +83,28 @@ Before making changes, run a quick audit against these four domains:
 
 ### Step 4: Edit Only Relevant Source Files
 
-- Make minimal, targeted edits.
-- Do NOT modify files that are not related to the identified issue.
-- Do NOT expose or log values that appear redacted in the capture output.
-- If a value appears as `[REDACTED]` or `[TOKEN_REDACTED]`, treat it as sensitive — do not attempt to reconstruct or leak it.
-
-**When editing animations, follow these rules:**
-- Never animate `width`, `height`, `top`, `left` — use `transform` and `opacity` only.
-- Never use `transition: all` — always specify properties.
-- Hover feedback: 100-150ms ease-out.
-- UI transitions (selection, state change): 200-300ms ease-out.
-- Page-level transitions: 300-500ms ease-out.
-- Exit is always more subtle than enter (shorter duration, opacity-only).
-- Always provide `prefers-reduced-motion` fallback.
-
 ### Step 5: Re-Capture and Verify
 
-Create a visual review from the captured issue, then re-capture after your edits:
+Create a visual review from the issue ID returned by the preceding issue or
+handoff tool call, then re-capture using the review ID returned by
+`create_visual_review`:
 
 ```
 create_visual_review(
-  issueId: "<ISSUE_ID>"
+  issueId: "<ISSUE_ID_RETURNED_BY_PREVIOUS_CALL>"
 )
 
 recapture_visual_review(
-  reviewId: "<REVIEW_ID>",
+  reviewId: "<REVIEW_ID_RETURNED_BY_CREATE_VISUAL_REVIEW>",
   reload: true,
   cacheBust: true
 )
 ```
 
-If the element's URL or visual selection changed, `viskod_navigate` to the target URL first so the recapture targets the correct page.
+Never substitute a guessed issue ID or review ID. If the element's URL or
+visual selection changed, call `viskod_navigate` to the target URL first so the
+recapture targets the correct page.
+
 
 ### Step 6: Read the Comparison
 
@@ -107,7 +112,7 @@ Call `get_visual_review` to retrieve the full comparison, then interpret it:
 
 ```
 get_visual_review(
-  reviewId: "<REVIEW_ID>"
+  reviewId: "<REVIEW_ID_RETURNED_BY_CREATE_VISUAL_REVIEW>"
 )
 ```
 

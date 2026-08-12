@@ -97,6 +97,7 @@ export class StudioWorkflow {
   private issueId?: string;
   private handoffId?: string;
   private reviewId?: string;
+  private reviewPreview?: ReviewPreview;
   private error?: string;
 
   constructor(options: StudioWorkflowOptions) {
@@ -229,7 +230,6 @@ export class StudioWorkflow {
     if (!result.ok || !result.handoffId) {
       return this.fail(this.stage, result.error ?? 'Handoff could not be prepared.');
     }
-
     this.handoffId = result.handoffId;
     const preview = await this.userFacingHandoff.getPreview(result.handoffId);
     if (result.warnings && result.warnings.length > 0) {
@@ -281,15 +281,15 @@ export class StudioWorkflow {
         'The target could not be re-captured. Refresh the page and try again.',
       );
     }
-
     const preview = await this.userFacingReview.getPreview(this.reviewId);
     if (!preview) {
       return this.fail('verifying', 'Verification results are unavailable. Try again.');
     }
 
+    this.reviewPreview = preview;
     this.stage = 'review_ready';
     this.error = preview.warnings.length > 0 ? preview.warnings.join(' ') : undefined;
-    return ok(this.buildState(undefined, preview));
+    return ok(this.buildState());
   }
 
   /** Record the human decision and move to `decided`. */
@@ -312,11 +312,9 @@ export class StudioWorkflow {
     if (!decided) {
       return this.fail(this.stage, 'The decision could not be recorded. Try again.');
     }
-
     this.stage = 'decided';
-    this.error = undefined;
-    const preview = await this.userFacingReview.getPreview(this.reviewId);
-    return ok(this.buildState(undefined, preview));
+    this.reviewPreview = (await this.userFacingReview.getPreview(this.reviewId)) ?? undefined;
+    return ok(this.buildState());
   }
 
   /** Invalidate the workflow (navigation, reselect). */
@@ -326,7 +324,7 @@ export class StudioWorkflow {
     this.capturedPacket = null;
     this.issueId = undefined;
     this.handoffId = undefined;
-    this.reviewId = undefined;
+    this.reviewPreview = undefined;
     this.error = undefined;
   }
 
@@ -368,7 +366,7 @@ export class StudioWorkflow {
       handoffId: this.handoffId,
       reviewId: this.reviewId,
       handoff: handoff ?? null,
-      review: review ?? null,
+      review: review ?? this.reviewPreview ?? null,
     };
     if (this.error) state.error = this.error;
     return state;

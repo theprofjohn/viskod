@@ -27,6 +27,14 @@ agent can reason about what you are actually seeing.
 ## Why Viskod
 
 Visual bugs are difficult for coding agents to fix when the report describes only a symptom. Viskod captures the running element and its surrounding evidence, then gives your MCP-compatible agent a grounded handoff it can act on and you can verify.
+## See Viskod in action
+
+![Studio selection evidence](website/demo-selection.png)
+
+![Studio review evidence](website/demo-review.png)
+
+These images come from the included local fixture; run the [local workflow](examples/agent-workflows/README.md#try-it-locally) or visit the [marketing site](https://theprofjohn.github.io/viskod/) to learn more.
+
 
 ---
 
@@ -161,6 +169,14 @@ startup with a connection error:
 ```bash
 viskod serve --url http://localhost:3000
 ```
+## Choose a path
+
+| Path | Start here |
+|------|------------|
+| Studio demo | [Try the included fixture locally](examples/agent-workflows/README.md#try-it-locally) |
+| MCP client | [Use the MCP tool path](examples/agent-workflows/README.md#mcp-path) |
+| Published CLI | [Install `@viskod/cli` from npm](https://www.npmjs.com/package/@viskod/cli) |
+
 
 ## Claude Desktop
 
