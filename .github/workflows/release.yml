@@ -132,13 +132,7 @@ jobs:
           dist_tag="${{ contains(needs.publish.outputs.version, '-') && 'alpha' || 'latest' }}"
           artifact="${{ needs.publish.outputs.artifact }}"
           checksum="${{ steps.checksum.outputs.sha256 }}"
-          notes="## Release metadata
-- Tag: \`$tag\`
-- Commit: \`$commit\`
-- Package: \`@viskod/cli@$version\`
-- npm dist-tag: \`$dist_tag\`
-- Artifact: \`$artifact\`
-- SHA-256: \`$checksum\`"
+          notes="$(printf '## Release metadata\n- Tag: %s\n- Commit: %s\n- Package: @viskod/cli@%s\n- npm dist-tag: %s\n- Artifact: %s\n- SHA-256: %s' "$tag" "$commit" "$version" "$dist_tag" "$artifact" "$checksum")"
           gh release create "$tag" "dist-artifact/$artifact" --title "$tag" --notes "$notes"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
