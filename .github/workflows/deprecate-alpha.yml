@@ -1,0 +1,26 @@
+name: deprecate-alpha
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: npm deprecation message applied to pre-gate alpha versions
+        required: true
+        default: 'Superseded by the deterministic release gate'
+
+jobs:
+  deprecate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Deprecate pre-gate alpha versions
+        run: |
+          for v in 0.2.0-alpha 0.2.1-alpha 0.2.2-alpha; do
+            npm deprecate "@viskod/cli@$v" "$MESSAGE"
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          MESSAGE: ${{ github.event.inputs.message }}
