@@ -22,11 +22,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Gate = `pnpm check`, minus dogfood browser tests: those require a
-      # fixture server on :5173 that CI does not run (they still run locally).
-      # Mirrors the release workflow's CI-compatible gate.
+      # Gate = `pnpm check`, minus dogfood browser tests: those require an
+      # external fixture server that CI does not run. Uses the exact same
+      # `test:ci` exclusion as the release gate so both stay in sync.
       - name: Gate
         run: |
           pnpm exec biome check .
           pnpm exec tsc -b
-          pnpm exec vitest run --exclude '**/dogfood*.test.ts'
+          pnpm test:ci

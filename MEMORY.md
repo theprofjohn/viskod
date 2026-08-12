@@ -934,3 +934,94 @@ commercial service.
 Supersedes:
 
 None.
+
+---
+
+## Decision 013
+
+Date:
+
+2026-08-12
+
+Status:
+
+Accepted
+
+Category:
+
+Repository
+
+Title:
+
+Deterministic alpha release gate
+
+Context:
+
+The phase-24/25 dogfood tests require an external shadcn-admin fixture on
+`localhost:5173` that a clean checkout does not provide, so the old
+`release:check` (plain `vitest run`) failed a release from a clean
+environment with connection-refused errors. A tagged alpha release must be
+reproducible from a clean checkout with no developer-machine paths.
+
+Decision:
+
+- The CI/release test suite is `test:ci` (`vitest run --config
+  vitest.ci.config.ts`), which excludes `**/dogfood*.test.ts` via a dedicated
+  vitest config instead of shell globs (single quotes in npm scripts break on
+  Windows cmd; shell quoting is not a release-gate mechanism).
+- Dogfood tests remain local-only under `test:dogfood` and fail with a clear
+  message when the external fixture directory is missing.
+- `release:check` is deterministic: `biome check . && tsc -b && pnpm test:ci
+  && pnpm smoke:agent-workflow && pnpm build:cli && node
+  scripts/verify-cli-artifact.mjs`. The smoke is the end-to-end proof (it
+  starts its own fixture and Studio) and is never skipped.
+- `packages/cli/package.json` is the publishable version authority; the root
+  version mirrors it. `scripts/verify-release-version.mjs` refuses any tag
+  that is not `v<cli version>`; the release workflow runs it before the gate.
+- `scripts/verify-cli-artifact.mjs` packs `@viskod/cli` and fails unless the
+  tarball is `@viskod/cli` at the expected version with only the declared
+  `dist/index.js` entrypoint and no repository source, `.viskod` data, test
+  files, or secret-looking files.
+- The release workflow requires a GitHub `release` environment (human
+  approval), publishes the exact verified tarball, and creates the GitHub
+  release only after post-publish verification of the installed package.
+- The bundled CLI reports its version (`viskod --version`); the version is
+  injected at bundle time by `scripts/build-cli.mjs` from the publishable
+  package version.
+
+Alternatives Considered:
+
+- Keep the inline `--exclude '**/dogfood*.test.ts'` argument in npm scripts:
+  single quotes are passed literally through pnpm's cmd-based script runner on
+  Windows, so dogfood tests ran anyway.
+- Use `pnpm --filter @viskod/cli pack`: pnpm rejects `--filter` with `pack`
+  (recursive-mode option parse error); `pnpm --dir packages/cli pack` is used
+  instead.
+
+Reason for Rejection:
+
+The inline-exclude alternative was observed to fail on Windows; the
+`--filter` pack variant fails on every platform.
+
+Consequences:
+
+Positive:
+
+- A tagged release is reproducible from a clean checkout on Linux CI and
+  Windows locally.
+- The published artifact is exactly the verified tarball; no second build.
+- Version/tag mismatch, failed gates, or missing approval prevent publication.
+
+Negative:
+
+- `pnpm check` still runs dogfood tests locally, so a local full check needs
+  the external fixture.
+
+Future Review:
+
+Replace the external dogfood fixture with a repository-contained fixture to
+fold dogfood coverage back into the release gate.
+
+Supersedes:
+
+None.

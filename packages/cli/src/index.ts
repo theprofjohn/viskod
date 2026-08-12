@@ -9,6 +9,12 @@ import { DaemonClient, DaemonServer, RuntimeSession } from '@viskod/runtime-sess
 import { SelectionEngine } from '@viskod/selection-engine';
 import { SourceHintEngine } from '@viskod/source-hint-engine';
 
+// Injected at bundle time by scripts/build-cli.mjs from the publishable
+// packages/cli/package.json version. Source runs (tsx) fall back to a dev
+// marker; the published executable always reports the real package version.
+declare const __VISKOD_VERSION__: string | undefined;
+const VISKOD_VERSION = typeof __VISKOD_VERSION__ !== 'undefined' ? __VISKOD_VERSION__ : '0.0.0-dev';
+
 function createRuntime() {
   const eventBus = new EventBus({ enableHistory: true, historySize: 100 });
   const browserRuntime = new BrowserRuntime(eventBus);
@@ -66,6 +72,11 @@ async function main(): Promise<void> {
     case 'install':
       await cmdInstall(args.slice(1));
       break;
+    case 'version':
+    case '--version':
+    case '-v':
+      console.log(`Viskod v${VISKOD_VERSION}`);
+      break;
     default:
       printHelp();
   }
@@ -74,7 +85,7 @@ async function main(): Promise<void> {
 async function cmdStart(subArgs: string[]): Promise<void> {
   const targetUrl = subArgs[0] ?? 'http://localhost:3000';
 
-  console.log('Viskod v0.2.0-alpha');
+  console.log(`Viskod v${VISKOD_VERSION}`);
   console.log('Starting persistent runtime session...');
 
   const session = new RuntimeSession();

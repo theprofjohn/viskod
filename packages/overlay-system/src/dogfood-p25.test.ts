@@ -70,6 +70,12 @@ const state: SharedState = {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
+  if (!fs.existsSync(TARGET_DIR)) {
+    throw new Error(
+      `Dogfood fixture missing: ${TARGET_DIR}. test:dogfood requires the external shadcn-admin fixture (dev server on ${TARGET_URL}); it is excluded from test:ci and release:check.`,
+    );
+  }
+
   try {
     fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true });
   } catch {}

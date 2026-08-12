@@ -1,6 +1,6 @@
 {
   "name": "viskod",
-  "version": "0.2.0-alpha",
+  "version": "0.2.3-alpha",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -10,6 +10,8 @@
     "build": "pnpm -r build",
     "build:cli": "node scripts/build-cli.mjs",
     "test": "vitest run",
+    "test:ci": "vitest run --config vitest.ci.config.ts",
+    "test:dogfood": "vitest run packages/overlay-system/src/dogfood-*.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "check:types": "tsc -b",
@@ -20,7 +22,7 @@
     "check": "biome check . && tsc -b && vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "smoke:agent-workflow": "node scripts/smoke-phase18-agent-workflow.mjs",
-    "release:check": "biome check . && tsc -b && vitest run && node scripts/smoke-phase18-agent-workflow.mjs"
+    "release:check": "biome check . && tsc -b && pnpm test:ci && pnpm smoke:agent-workflow && pnpm build:cli && node scripts/verify-cli-artifact.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

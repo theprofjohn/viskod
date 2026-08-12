@@ -5,14 +5,23 @@ on:
     tags:
       - 'v*'
 
+# `contents: write` is scoped to the `release` job (GitHub release creation);
+# publish and verify run with the minimum permissions for checkout/npm.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Human approval boundary: the `release` environment must be configured in
+    # repository settings with at least one required reviewer before the first
+    # public tag. A failed gate or missing approval prevents npm publication.
+    environment: release
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
+      artifact: ${{ steps.pack.outputs.artifact }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -24,28 +33,48 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Gate = `pnpm check`, minus dogfood browser tests: those require a
-      # fixture server on :5173 that CI does not run (they still run locally).
-      - name: Gate
-        run: |
-          pnpm exec biome check .
-          pnpm exec tsc -b
-          pnpm exec vitest run --exclude '**/dogfood*.test.ts'
-      - run: pnpm build:cli
+      - name: Install Playwright Chromium
+        run: sudo pnpm exec playwright install --with-deps chromium
+      # The tag that triggered this workflow must equal v<@viskod/cli version>;
+      # any other tag is refused before anything is built or published.
+      - name: Verify tag matches package version
+        run: node scripts/verify-release-version.mjs "$GITHUB_REF_NAME"
+      # Deterministic release gate: Biome, tsc, CI-compatible tests, the
+      # self-starting end-to-end workflow smoke, CLI bundling, and packed
+      # artifact verification.
+      - name: Release gate
+        run: pnpm release:check
       - id: version
         run: echo "version=$(node -p "require('./packages/cli/package.json').version")" >> "$GITHUB_OUTPUT"
+      # Pack once, record the exact artifact, and publish that file — never a
+      # second, unverified build. (`pnpm pack` rejects --filter; use --dir.)
+      - name: Pack artifact for publication
+        id: pack
+        run: |
+          mkdir -p dist-artifact
+          pnpm --dir packages/cli pack --pack-destination dist-artifact
+          artifact="$(basename "$(ls dist-artifact/*.tgz)")"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+          echo "Publishing artifact: $artifact (version ${{ steps.version.outputs.version }})"
+      - name: Upload packed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: viskod-cli-tarball
+          path: dist-artifact/*.tgz
+          if-no-files-found: error
       - name: Publish to npm
-        # --no-git-checks: tag checkouts are detached HEAD, which pnpm's
-        # default publish-branch check rejects. The tree is clean at a tag.
-        run: pnpm --filter @viskod/cli publish --tag "$TAG" --access public --no-git-checks
+        # Consumes the exact artifact produced and verified by the gate.
+        run: npm publish "dist-artifact/${{ steps.pack.outputs.artifact }}" --tag "$TAG" --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # pre-release (e.g. 0.2.0-alpha) → `alpha` tag; stable → `latest`
+          # pre-release (e.g. 0.2.2-alpha) → `alpha` tag; stable → `latest`
           TAG: ${{ contains(steps.version.outputs.version, '-') && 'alpha' || 'latest' }}
 
   verify:
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -55,6 +84,15 @@ jobs:
         run: npm install -g @viskod/cli@${{ needs.publish.outputs.version }}
       - name: Install Chromium system deps
         run: sudo npx playwright install-deps chromium
+      - name: Installed executable reports expected version
+        run: |
+          reported="$(viskod --version)"
+          expected="${{ needs.publish.outputs.version }}"
+          echo "reported: $reported"
+          case "$reported" in
+            *"$expected"*) ;;
+            *) echo "version mismatch: expected $expected in '$reported'" >&2; exit 1 ;;
+          esac
       - name: Health check (no repo, no tsx)
         run: viskod health
       - name: MCP tools/list probe through published binary
@@ -67,11 +105,40 @@ jobs:
             | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const l=d.trim().split('\n').map(JSON.parse);if(l.length!==2)process.exit(1);const tools=l[1].result.tools.map(t=>t.name);if(!tools.includes('viskod_capture_context')||!tools.includes('recapture_visual_review'))process.exit(1);console.log('MCP OK:',tools.length,'tools')})"
 
   release:
+    # A GitHub release is created only after both publication and
+    # post-publish verification succeed.
     needs: [publish, verify]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Download packed artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: viskod-cli-tarball
+          path: dist-artifact
+      - name: Compute artifact checksum
+        id: checksum
+        run: |
+          artifact="${{ needs.publish.outputs.artifact }}"
+          sha256sum "dist-artifact/$artifact" | awk '{print $1}' > checksum.txt
+          echo "sha256=$(cat checksum.txt)" >> "$GITHUB_OUTPUT"
       - name: Create GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          version="${{ needs.publish.outputs.version }}"
+          tag="$GITHUB_REF_NAME"
+          commit="$GITHUB_SHA"
+          dist_tag="${{ contains(needs.publish.outputs.version, '-') && 'alpha' || 'latest' }}"
+          artifact="${{ needs.publish.outputs.artifact }}"
+          checksum="${{ steps.checksum.outputs.sha256 }}"
+          notes="## Release metadata
+- Tag: \`$tag\`
+- Commit: \`$commit\`
+- Package: \`@viskod/cli@$version\`
+- npm dist-tag: \`$dist_tag\`
+- Artifact: \`$artifact\`
+- SHA-256: \`$checksum\`"
+          gh release create "$tag" "dist-artifact/$artifact" --title "$tag" --notes "$notes"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 /**
@@ -16,6 +17,9 @@ import { build } from 'esbuild';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const entry = resolve(root, 'packages/cli/src/index.ts');
 const outfile = resolve(root, 'packages/cli/dist/index.js');
+const cliVersion = JSON.parse(
+  readFileSync(resolve(root, 'packages/cli/package.json'), 'utf8'),
+).version;
 
 await build({
   entryPoints: [entry],
@@ -25,7 +29,12 @@ await build({
   format: 'esm',
   target: 'node22',
   external: ['playwright'],
+  define: {
+    // packages/cli/package.json is the publish authority; the bundled
+    // executable must report exactly the version that will be published.
+    __VISKOD_VERSION__: JSON.stringify(cliVersion),
+  },
   logLevel: 'info',
 });
 
-console.log(`Bundled @viskod/cli → ${outfile}`);
+console.log(`Bundled @viskod/cli@${cliVersion} → ${outfile}`);

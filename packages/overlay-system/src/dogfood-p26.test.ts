@@ -18,6 +18,12 @@ import { describe, expect, it } from 'vitest';
 
 const TARGET_DIR = 'C:\\viskod-dogfood-shadcn-admin';
 
+if (!fs.existsSync(TARGET_DIR)) {
+  throw new Error(
+    `Dogfood fixture missing: ${TARGET_DIR}. test:dogfood requires the external shadcn-admin fixture; it is excluded from test:ci and release:check.`,
+  );
+}
+
 describe('Phase 26 Dogfood — First-Run Setup', () => {
   it('DF26-01: detect project from shadcn-admin', () => {
     const result = detectAndConfigureProject({ projectRoot: TARGET_DIR });

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 // Increase default timeout for all tests in this file
 vi.setConfig({ testTimeout: 60000 });
 import { type ChildProcess, spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getOverlayScript } from '@viskod/overlay-system';
@@ -49,6 +49,11 @@ async function checkServerRunning(): Promise<boolean> {
 }
 
 beforeAll(async () => {
+  if (!existsSync(TARGET_DIR)) {
+    throw new Error(
+      `Dogfood fixture missing: ${TARGET_DIR}. test:dogfood requires the external shadcn-admin fixture (dev server on ${TARGET_URL}); it is excluded from test:ci and release:check.`,
+    );
+  }
   const running = await checkServerRunning();
   if (!running) {
     devProc = await startDevServer();
