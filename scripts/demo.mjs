@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -10,10 +12,9 @@ function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
-function spawnProc(command, args) {
+function spawnProc(command, args, cwd = ROOT) {
   const child = spawn(command, args, {
-    cwd: ROOT,
-    shell: true,
+    cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -60,12 +61,17 @@ function tail(value) {
   const text = value.trim();
   return text ? text.slice(-2000) : '(no stderr output)';
 }
-
-const fixture = spawnProc('node', ['examples/phase12-source-hint-app/server.cjs']);
-const studio = spawnProc(process.platform === 'win32' ? 'npx.cmd' : 'npx', [
-  'tsx',
-  'apps/studio/src/index.ts',
-]);
+const demoCwd = mkdtempSync(join(tmpdir(), 'viskod-demo-'));
+const fixture = spawnProc(
+  process.execPath,
+  [join(ROOT, 'examples/phase12-source-hint-app/server.cjs')],
+  demoCwd,
+);
+const studio = spawnProc(
+  process.execPath,
+  [join(ROOT, 'node_modules/tsx/dist/cli.mjs'), join(ROOT, 'apps/studio/src/index.ts')],
+  demoCwd,
+);
 let stopping = false;
 
 function stop() {
@@ -109,6 +115,10 @@ try {
   console.error(`Demo failed: ${error instanceof Error ? error.message : String(error)}`);
   console.error(`Failed service stderr (tail):\n${tail(failedService.readStderr())}`);
   console.error('Recovery: stop any process using ports 3000/3001, then run pnpm demo again.');
-  stop();
-  process.exitCode = 1;
+} finally {
+  try {
+    rmSync(demoCwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch {
+    // Windows can briefly hold a child process working directory after exit.
+  }
 }
