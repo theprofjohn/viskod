@@ -23,11 +23,11 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       artifact: ${{ steps.pack.outputs.artifact }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.15.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -64,7 +64,7 @@ jobs:
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
           echo "Publishing artifact: $artifact (version ${{ steps.version.outputs.version }})"
       - name: Upload packed artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: viskod-cli-tarball
           path: dist-artifact/*.tgz
@@ -85,8 +85,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install published CLI (postinstall downloads Chromium)
@@ -121,9 +121,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download packed artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: viskod-cli-tarball
           path: dist-artifact
