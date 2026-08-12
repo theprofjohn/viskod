@@ -1,0 +1,29 @@
+name: prove-release-gate
+
+on:
+  workflow_dispatch:
+
+# Temporary: proves the full deterministic release gate (including dogfood)
+# on ubuntu-latest before the next real tag. Removed after a green run.
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: |
+          pnpm exec playwright install chromium
+          sudo npx playwright install-deps chromium
+      - name: Release gate
+        run: pnpm release:check
