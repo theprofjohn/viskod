@@ -51,13 +51,16 @@ jobs:
       - id: version
         run: echo "version=$(node -p "require('./packages/cli/package.json').version")" >> "$GITHUB_OUTPUT"
       # Pack once, record the exact artifact, and publish that file — never a
-      # second, unverified build. (`pnpm pack` rejects --filter; use --dir.)
+      # second, unverified build. (`pnpm pack` rejects --filter; use --dir,
+      # and an absolute destination: relative paths resolve against the
+      # package dir, not the checkout root.)
       - name: Pack artifact for publication
         id: pack
         run: |
-          mkdir -p dist-artifact
-          pnpm --dir packages/cli pack --pack-destination dist-artifact
-          artifact="$(basename "$(ls dist-artifact/*.tgz)")"
+          mkdir -p "$GITHUB_WORKSPACE/dist-artifact"
+          pnpm --dir packages/cli pack --pack-destination "$GITHUB_WORKSPACE/dist-artifact"
+          artifact="$(basename "$(ls "$GITHUB_WORKSPACE"/dist-artifact/*.tgz 2>/dev/null)" | tail -n1)"
+          test -n "$artifact" || { echo "pack produced no tarball" >&2; exit 1; }
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
           echo "Publishing artifact: $artifact (version ${{ steps.version.outputs.version }})"
       - name: Upload packed artifact
