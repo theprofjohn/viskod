@@ -1019,12 +1019,91 @@ Negative:
 
 Future Review:
 
-Replace the external dogfood fixture with a repository-contained fixture to
-fold dogfood coverage back into the release gate.
+None.
 
 Supersedes:
 
 None.
+
+---
+
+## Decision 015
+
+Date:
+
+2026-08-12
+
+Status:
+
+Accepted
+
+Category:
+
+Repository
+
+Title:
+
+Repo-contained dogfood fixture joins the release gate
+
+Context:
+
+Decision 013 kept the dogfood tests local-only because they depended on an
+external `C:\viskod-dogfood-shadcn-admin` fixture. The plan's Future Review
+called for folding dogfood coverage back into the gate once a repo-contained
+fixture existed.
+
+Decision:
+
+`examples/dogfood-app` is a repo-contained shadcn-admin-style React/Vite
+fixture (a workspace member so its deps install hermetically from the
+lockfile). The dogfood tests target it; `test:dogfood` runs through
+`vitest.dogfood.config.ts` (config glob — positional globs break on Windows
+cmd), and `release:check` now runs `pnpm test:dogfood` after `test:ci`. The
+root tsc project excludes the fixture (it typechecks standalone).
+
+Two product defects surfaced by folding the fixture in were fixed rather than
+worked around:
+
+- `source-hint-engine` `buildCacheKey` omitted DOM text, so elements sharing
+  route/tag/id/class but with different visible text collided in the cache
+  and hint results depended on call order. The key now includes text, role,
+  and testId.
+- `agent-handoff` `AgentIssueBriefSchema.sourceHints` omitted `status`, so
+  Zod stripped it on persistence and the handoff brief lost the hint status.
+
+Alternatives Considered:
+
+- Vendor the full shadcn-admin app: ~100 extra dependencies and a nested
+  workspace; unnecessary — the tests use generic selectors.
+- Keep dogfood local-only: leaves the release gate without the overlay
+  workflow coverage.
+
+Reason for Rejection:
+
+The minimal fixture satisfies every dogfood scenario (125/125 pass) with a
+small dependency footprint; keeping dogfood out of the gate preserves the
+gap Decision 013's Future Review wanted closed.
+
+Consequences:
+
+Positive:
+
+- The release gate now runs the full overlay/issue/handoff/review/setup
+  dogfood coverage from a clean checkout.
+- No developer-machine paths remain in the test suite.
+
+Negative:
+
+- `release:check` is heavier (dogfood suite ~3.5 minutes, needs Chromium,
+  which the release workflow already installs).
+
+Future Review:
+
+None.
+
+Supersedes:
+
+Decision 013 (dogfood external-fixture portion).
 
 ---
 
