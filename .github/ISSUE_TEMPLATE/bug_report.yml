@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem in Viskod.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove credentials and private application data before submitting. Never include tokens, cookies, `.env` contents, raw packet JSON, or screenshots containing secrets.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and the smallest reproducible example.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: input
+    id: viskod-version
+    attributes:
+      label: Viskod version or commit
+      placeholder: 0.2.3-alpha or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Node, pnpm, and operating system
+      placeholder: Node 22 / pnpm 9.15.0 / Windows 11
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: Target application and framework
+      placeholder: Vite + React, Next.js, or other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include commands and safe-to-share logs. Redact secrets and private URLs.
+    validations:
+      required: true

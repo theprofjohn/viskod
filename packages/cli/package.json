@@ -2,6 +2,15 @@
   "name": "@viskod/cli",
   "version": "0.2.3-alpha",
   "license": "Apache-2.0",
+  "homepage": "https://theprofjohn.github.io/viskod/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/theprofjohn/viskod.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/theprofjohn/viskod/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "bin": {

@@ -3,6 +3,14 @@
   "version": "0.2.3-alpha",
   "private": true,
   "license": "Apache-2.0",
+  "homepage": "https://theprofjohn.github.io/viskod/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/theprofjohn/viskod.git"
+  },
+  "bugs": {
+    "url": "https://github.com/theprofjohn/viskod/issues"
+  },
   "type": "module",
   "scripts": {
     "viskod": "tsx packages/cli/src/index.ts",

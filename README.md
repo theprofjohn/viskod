@@ -2,6 +2,10 @@
 
 > **AI can read your code. Viskod lets it see your UI.**
 
+[Website](https://theprofjohn.github.io/viskod/) · [Install](https://www.npmjs.com/package/@viskod/cli) · [Documentation](QUICKSTART_MCP.md) · [License](LICENSE)
+
+[![CI](https://github.com/theprofjohn/viskod/actions/workflows/ci.yml/badge.svg)](https://github.com/theprofjohn/viskod/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/@viskod/cli?include_prereleases)](https://www.npmjs.com/package/@viskod/cli) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 Viskod is a **visual context engine** for AI coding agents, built for
 frontend and product engineers who use MCP-compatible coding agents (Claude
 Code, OpenCode, Cursor, ...).
@@ -17,6 +21,12 @@ application and Viskod captures structured visual context — screenshots,
 DOM metadata, computed styles, diagnostics and best-effort source hints —
 then exposes it through **Model Context Protocol (MCP)** so your coding
 agent can reason about what you are actually seeing.
+
+---
+
+## Why Viskod
+
+Visual bugs are difficult for coding agents to fix when the report describes only a symptom. Viskod captures the running element and its surrounding evidence, then gives your MCP-compatible agent a grounded handoff it can act on and you can verify.
 
 ---
 
@@ -82,6 +92,8 @@ Viskod observes and supplies context. External coding agents implement.
 ---
 
 # Installation
+
+> **Project status:** Alpha — interfaces may change. See [Current Alpha Limitations](#current-alpha-limitations) before adopting Viskod in a critical workflow.
 
 ## Published package (recommended)
 
@@ -259,3 +271,5 @@ Viskod is an **alpha** release. Expect rough edges and change:
 Viskod's local visual-context workflow is open source under the
 [Apache License 2.0](LICENSE). See [TRADEMARKS.md](TRADEMARKS.md) for the
 trademark policy. Contributions, issues, and pull requests are welcome.
+
+Project links: [Website](https://theprofjohn.github.io/viskod/) · [Source](https://github.com/theprofjohn/viskod) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)

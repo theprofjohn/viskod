@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest an improvement to the Viskod workflow.
+title: "feature: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Describe the user or agent workflow that is currently difficult.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What outcome would help?
+      description: Describe the smallest useful behavior, not only an implementation.
+    validations:
+      required: true
+  - type: input
+    id: workflow
+    attributes:
+      label: Affected workflow
+      placeholder: capture, selection, handoff, review, Studio, MCP, or CLI
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or existing tools have you tried?
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to help implement or test this.
+          required: false
