@@ -1,5 +1,6 @@
 # IDE / local tooling
 .gortex/
+.gortex-batch-*
 .gemini/
 .hermes/
 .claude/

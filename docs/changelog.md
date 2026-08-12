@@ -220,6 +220,47 @@ This example illustrates the preferred release style.
 
 ---
 
+# Release Log
+
+## Version 0.2.3-alpha
+
+Release Date: 2026-08-12
+
+Summary
+
+First release produced by the deterministic release gate: a tagged alpha is
+reproducible from a clean checkout, runs the CI-compatible suite plus the
+full UI workflow dogfood coverage, verifies the exact packed artifact, and
+publishes only after version/tag consistency, the end-to-end smoke, and
+post-publish verification pass.
+
+Added
+
+- `viskod --version` reports the packaged CLI version
+- Repo-contained dogfood fixture (`examples/dogfood-app`) so the overlay →
+  issue → handoff → review → setup suite runs inside the release gate
+- Packed-artifact verification (name, version, entrypoint, no repository or
+  secret files) before publication
+
+Changed
+
+- `release:check` no longer depends on an external fixture application on a
+  developer machine path
+- Test suite split: `test:ci` (CI-compatible, excludes browser dogfood) and
+  `test:dogfood` (full UI workflow suite)
+- MCP `initialize` reports the packaged CLI version instead of a stale
+  hard-coded string
+
+Fixed
+
+- Source-hint results could be stale: elements on the same route sharing
+  tag/class/id but with different visible text collided in the engine cache
+- Handoff briefs lost the source-hint status when persisted (schema omitted
+  the field)
+- CLI `start` banner reported an outdated hard-coded version
+
+---
+
 # Migration Notes
 
 Breaking releases should provide migration guidance.
