@@ -14,7 +14,7 @@ vi.setConfig({ testTimeout: 60000 });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..', '..');
-const TARGET_DIR = 'C:\\viskod-dogfood-shadcn-admin';
+const TARGET_DIR = path.join(ROOT, 'examples', 'dogfood-app');
 const TARGET_URL = 'http://localhost:5173';
 const ISSUE_STORAGE = path.join(ROOT, '.viskod-dogfood-issues');
 
@@ -37,7 +37,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 beforeAll(async () => {
   if (!fs.existsSync(TARGET_DIR)) {
     throw new Error(
-      `Dogfood fixture missing: ${TARGET_DIR}. test:dogfood requires the external shadcn-admin fixture (dev server on ${TARGET_URL}); it is excluded from test:ci and release:check.`,
+      `Dogfood fixture missing: ${TARGET_DIR}. test:dogfood requires the repo-contained fixture at examples/dogfood-app (dev server on ${TARGET_URL}).`,
     );
   }
 

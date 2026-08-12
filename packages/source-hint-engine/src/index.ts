@@ -131,7 +131,10 @@ function scoreHint(evidence: HintEvidence[]): number {
 function buildCacheKey(input: HintInput): string {
   const rt = input.route;
   const dc = input.domContext;
-  return `${rt.pathname}:${dc.tagName}:${dc.id ?? ''}:${dc.className ?? ''}`;
+  // Text, role, and testId are part of the evidence: two elements on the same
+  // route with the same tag/id/class but different visible text must not share
+  // a cache entry (that produced stale hints dependent on call order).
+  return `${rt.pathname}:${dc.tagName}:${dc.id ?? ''}:${dc.className ?? ''}:${dc.role ?? ''}:${dc.testId ?? ''}:${dc.text ?? ''}`;
 }
 
 function buildHintId(filePath: string, evidence: HintEvidence[]): string {

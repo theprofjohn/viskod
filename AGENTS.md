@@ -36,8 +36,8 @@ Run commands from the repository root with Node 22+ and pnpm 9+:
 ```sh
 pnpm install
 pnpm check                         # biome check . && tsc -b && vitest run (local, incl. dogfood)
-pnpm test:ci                       # CI-compatible gate: vitest run --exclude '**/dogfood*.test.ts'
-pnpm test:dogfood                  # vitest run packages/overlay-system/src/dogfood-*.test.ts (external fixture required)
+pnpm test:ci                       # CI-compatible gate: vitest run --config vitest.ci.config.ts (excludes dogfood)
+pnpm test:dogfood                  # vitest run packages/overlay-system/src/dogfood-*.test.ts (repo fixture at examples/dogfood-app)
 pnpm lint                          # biome check .
 pnpm format                        # biome format --write .
 pnpm typecheck                     # tsc -b
@@ -51,10 +51,10 @@ pnpm build:cli                     # bundle @viskod/cli for distribution
 pnpm viskod                       # run CLI from source via tsx
 pnpm test:e2e                      # opt-in tests/e2e using vitest.e2e.config.ts
 pnpm smoke:agent-workflow          # MCP workflow smoke test
-pnpm release:check                 # biome + tsc + test:ci + deterministic smoke + CLI bundle + packed-artifact verification
+pnpm release:check                 # biome + tsc + test:ci + dogfood + deterministic smoke + CLI bundle + packed-artifact verification
 ```
 
-The `pnpm check` gate runs local dogfood tests. For a CI-equivalent run that avoids external dogfood fixtures, use `pnpm test:ci` (the exact script CI and `release:check` use). Dogfood tests (`pnpm test:dogfood`) require the external `C:\viskod-dogfood-shadcn-admin` fixture and fail with a clear message when it is missing. `pnpm test:e2e` is separate from the default gate; `tests/e2e/chat-workflow.test.ts` assumes Studio is already running on port 3001, while `studio-flow.test.ts` boots its own fixture/Studio servers.
+The `pnpm check` gate runs local dogfood tests. For a CI-equivalent run that avoids browser dogfood tests, use `pnpm test:ci` (the exact script CI uses). Dogfood tests (`pnpm test:dogfood`) run against the repo-contained fixture at `examples/dogfood-app` (a workspace member) and are part of `pnpm release:check`; they fail with a clear message if the fixture is missing. `pnpm test:e2e` is separate from the default gate; `tests/e2e/chat-workflow.test.ts` assumes Studio is already running on port 3001, while `studio-flow.test.ts` boots its own fixture/Studio servers.
 
 ## Code Conventions & Common Patterns
 

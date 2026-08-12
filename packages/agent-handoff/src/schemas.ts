@@ -60,6 +60,7 @@ export const AgentIssueBriefSchema = z.object({
   sourceHints: z
     .object({
       count: z.number().int().nonnegative(),
+      status: z.enum(['ranked', 'ambiguous', 'low_confidence', 'missing']).optional(),
       topHints: z.array(
         z.object({
           displayName: z.string(),

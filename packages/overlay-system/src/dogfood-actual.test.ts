@@ -12,7 +12,7 @@ import { type Browser, type Page, chromium } from 'playwright';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..', '..');
-const TARGET_DIR = 'C:\\viskod-dogfood-shadcn-admin';
+const TARGET_DIR = join(ROOT, 'examples', 'dogfood-app');
 const TARGET_URL = 'http://localhost:5173';
 
 const overlayScript = getOverlayScript();
@@ -51,7 +51,7 @@ async function checkServerRunning(): Promise<boolean> {
 beforeAll(async () => {
   if (!existsSync(TARGET_DIR)) {
     throw new Error(
-      `Dogfood fixture missing: ${TARGET_DIR}. test:dogfood requires the external shadcn-admin fixture (dev server on ${TARGET_URL}); it is excluded from test:ci and release:check.`,
+      `Dogfood fixture missing: ${TARGET_DIR}. test:dogfood requires the repo-contained fixture at examples/dogfood-app (dev server on ${TARGET_URL}).`,
     );
   }
   const running = await checkServerRunning();

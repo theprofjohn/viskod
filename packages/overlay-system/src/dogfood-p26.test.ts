@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   checkAgentConfigReadiness,
   completeSetup,
@@ -16,11 +17,12 @@ import {
 // Phase 26 dogfood: First-Run Setup — end-to-end on shadcn-admin
 import { describe, expect, it } from 'vitest';
 
-const TARGET_DIR = 'C:\\viskod-dogfood-shadcn-admin';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const TARGET_DIR = path.join(ROOT, 'examples', 'dogfood-app');
 
 if (!fs.existsSync(TARGET_DIR)) {
   throw new Error(
-    `Dogfood fixture missing: ${TARGET_DIR}. test:dogfood requires the external shadcn-admin fixture; it is excluded from test:ci and release:check.`,
+    `Dogfood fixture missing: ${TARGET_DIR}. test:dogfood requires the repo-contained fixture at examples/dogfood-app.`,
   );
 }
 

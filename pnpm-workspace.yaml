@@ -1,3 +1,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+  # Repo-contained dogfood fixture: part of the workspace so its deps are
+  # installed hermetically by `pnpm install` (lockfile-pinned) for the
+  # dogfood test suite.
+  - "examples/dogfood-app"
