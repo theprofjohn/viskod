@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { EventBus } from '@viskod/event-bus';
 import type { Result, ViskodError } from '@viskod/shared';
-import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
+import { createViskodError, err, ok } from '@viskod/shared';
 import type {
   ComponentIndex,
   DesignSystemDetection,
@@ -909,14 +909,12 @@ export class ProjectScanner {
   }
 
   private scannerError(code: string, message: string): ViskodError {
-    return {
+    return createViskodError({
       code,
-      category: ErrorCategory.RUNTIME,
-      severity: ErrorSeverity.RECOVERABLE,
+      category: 'runtime',
+      severity: 'recoverable',
       message,
-      correlationId: crypto.randomUUID(),
       subsystem: 'project-scanner',
-      timestamp: new Date().toISOString(),
-    };
+    });
   }
 }

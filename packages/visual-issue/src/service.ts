@@ -1,12 +1,5 @@
 import type { EventBus } from '@viskod/event-bus';
-import {
-  ErrorCategory,
-  ErrorSeverity,
-  type Result,
-  type ViskodError,
-  err,
-  ok,
-} from '@viskod/shared';
+import { type Result, type ViskodError, createViskodError, err, ok } from '@viskod/shared';
 import type { VisualSelection } from '@viskod/visual-selection';
 import {
   createLifecycleEvent,
@@ -82,6 +75,23 @@ export class IssueServiceImpl implements IssueService {
     severity?: VisualIssueSeverity,
     evidence?: IssueEvidenceSummary,
   ): Promise<Result<VisualIssue>> {
+    const validation = this.validateCreateSelection(selection);
+    if (!validation.ok) return err(validation.error);
+
+    const issue = this.buildIssue(
+      selection,
+      sessionId,
+      pageId,
+      title,
+      description,
+      severity,
+      evidence,
+    );
+
+    return this.persistCreatedIssue(issue, selection.summary.targetCount);
+  }
+
+  private validateCreateSelection(selection: VisualSelection): Result<void> {
     if (selection.resolution.status === 'missing' || selection.resolution.status === 'stale') {
       return err(
         this.ieError(
@@ -93,10 +103,20 @@ export class IssueServiceImpl implements IssueService {
     if (!selection.targets || selection.targets.length === 0) {
       return err(this.ieError('NO_ACTIVE_SELECTION', 'Select an element or region first.'));
     }
+    return ok(undefined);
+  }
 
+  private buildIssue(
+    selection: VisualSelection,
+    sessionId: string,
+    pageId: string,
+    title?: string,
+    description?: string,
+    severity?: VisualIssueSeverity,
+    evidence?: IssueEvidenceSummary,
+  ): VisualIssue {
     const now = new Date().toISOString();
     const issueId = crypto.randomUUID();
-
     const effectiveTitle =
       title ||
       generateDefaultTitle(
@@ -117,7 +137,7 @@ export class IssueServiceImpl implements IssueService {
       resolutionStatus: selection.resolution.status,
     };
 
-    const issue: VisualIssue = {
+    return {
       schemaVersion: 1 as const,
       issueId,
       sessionId,
@@ -148,7 +168,12 @@ export class IssueServiceImpl implements IssueService {
       lifecycle: [makeCreatedEvent()],
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
     };
+  }
 
+  private async persistCreatedIssue(
+    issue: VisualIssue,
+    targetCount: number,
+  ): Promise<Result<VisualIssue>> {
     const redacted = redactIssue(issue);
     const result = await this.persistence.saveIssue(redacted.issue);
     if (!result.ok) return err(result.error);
@@ -156,11 +181,11 @@ export class IssueServiceImpl implements IssueService {
     this.eventBus.publish({
       eventId: crypto.randomUUID(),
       eventType: 'VI_EVENT:ISSUE_CREATED',
-      timestamp: now,
+      timestamp: issue.createdAt,
       version: '1.0.0',
       source: 'visual-issue',
-      correlationId: issueId,
-      payload: { issueId, title: redacted.issue.title, targetCount: selection.summary.targetCount },
+      correlationId: issue.issueId,
+      payload: { issueId: issue.issueId, title: redacted.issue.title, targetCount },
     });
 
     return ok(redacted.issue);
@@ -368,14 +393,12 @@ export class IssueServiceImpl implements IssueService {
   }
 
   private ieError(code: IssueErrorCode | string, message: string): ViskodError {
-    return {
+    return createViskodError({
       code,
-      category: ErrorCategory.RUNTIME,
-      severity: ErrorSeverity.RECOVERABLE,
+      category: 'runtime',
+      severity: 'recoverable',
       message,
-      correlationId: crypto.randomUUID(),
       subsystem: 'visual-issue',
-      timestamp: new Date().toISOString(),
-    };
+    });
   }
 }

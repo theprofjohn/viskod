@@ -1,12 +1,5 @@
 import type { EventBus } from '@viskod/event-bus';
-import {
-  ErrorCategory,
-  ErrorSeverity,
-  type Result,
-  type ViskodError,
-  err,
-  ok,
-} from '@viskod/shared';
+import { type Result, type ViskodError, createViskodError, err, ok } from '@viskod/shared';
 import { boxCandidateToTarget, deduplicateTargets, reduceBoxSelection } from './box-selection';
 import type { BoxCandidate } from './box-selection';
 import { normalizeText } from './redaction';
@@ -365,14 +358,12 @@ export class VisualSelectionServiceImpl implements VisualSelectionService {
   }
 
   private seError(code: string, message: string): ViskodError {
-    return {
+    return createViskodError({
       code,
-      category: ErrorCategory.RUNTIME,
-      severity: ErrorSeverity.RECOVERABLE,
+      category: 'runtime',
+      severity: 'recoverable',
       message,
-      correlationId: crypto.randomUUID(),
       subsystem: 'visual-selection',
-      timestamp: new Date().toISOString(),
-    };
+    });
   }
 }

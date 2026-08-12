@@ -1,14 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { VISKOD_STORAGE_DIR } from '@viskod/shared';
-import {
-  ErrorCategory,
-  ErrorSeverity,
-  type Result,
-  type ViskodError,
-  err,
-  ok,
-} from '@viskod/shared';
+import { type Result, type ViskodError, createViskodError, err, ok } from '@viskod/shared';
 import { VisualIssueSchema } from './schemas';
 import type { VisualIssue } from './types';
 
@@ -223,14 +216,12 @@ export class IssuePersistence {
   }
 
   private peError(code: string, message: string): ViskodError {
-    return {
+    return createViskodError({
       code,
-      category: ErrorCategory.STORAGE,
-      severity: ErrorSeverity.RECOVERABLE,
+      category: 'storage',
+      severity: 'recoverable',
       message,
-      correlationId: crypto.randomUUID(),
       subsystem: 'visual-issue',
-      timestamp: new Date().toISOString(),
-    };
+    });
   }
 }

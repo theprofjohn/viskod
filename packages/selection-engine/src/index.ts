@@ -1,7 +1,7 @@
 import type { BrowserHandle, BrowserRuntime } from '@viskod/browser-runtime';
 import type { EventBus } from '@viskod/event-bus';
 import type { Result, ViskodError } from '@viskod/shared';
-import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
+import { createViskodError, err, ok } from '@viskod/shared';
 import type {
   AccessibilityInfo,
   HierarchyNode,
@@ -486,14 +486,12 @@ export class SelectionEngine {
   }
 
   private seError(code: string, message: string): ViskodError {
-    return {
+    return createViskodError({
       code,
-      category: ErrorCategory.RUNTIME,
-      severity: ErrorSeverity.RECOVERABLE,
+      category: 'runtime',
+      severity: 'recoverable',
       message,
-      correlationId: crypto.randomUUID(),
       subsystem: 'selection-engine',
-      timestamp: new Date().toISOString(),
-    };
+    });
   }
 }

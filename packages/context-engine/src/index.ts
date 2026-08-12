@@ -20,7 +20,7 @@ import type { CapturePipeline } from '@viskod/capture-pipeline';
 import type { EventBus } from '@viskod/event-bus';
 import type { SelectionEngine, SelectionTarget } from '@viskod/selection-engine';
 import type { BaseEvent, BoundingBox, Result } from '@viskod/shared';
-import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
+import { createViskodError, err, ok } from '@viskod/shared';
 import type { ViskodError } from '@viskod/shared';
 import type { SourceHintEngine } from '@viskod/source-hint-engine';
 
@@ -730,14 +730,12 @@ export class VisualContextEngine {
   }
 
   private vceError(code: string, message: string): ViskodError {
-    return {
+    return createViskodError({
       code,
-      category: ErrorCategory.RUNTIME,
-      severity: ErrorSeverity.RECOVERABLE,
+      category: 'runtime',
+      severity: 'recoverable',
       message,
-      correlationId: crypto.randomUUID(),
       subsystem: 'visual-context-engine',
-      timestamp: new Date().toISOString(),
-    };
+    });
   }
 }

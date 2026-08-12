@@ -45,6 +45,16 @@ export function err(error: ViskodError): Result<never> {
   return { ok: false, error };
 }
 
+export function createViskodError(
+  input: Omit<ViskodError, 'correlationId' | 'timestamp'>,
+): ViskodError {
+  return {
+    ...input,
+    correlationId: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+  };
+}
+
 export function isRecoverable(error: ViskodError): boolean {
   return error.severity !== ErrorSeverity.FATAL && error.severity !== ErrorSeverity.CRITICAL;
 }

@@ -1,11 +1,10 @@
 import type { EventBus } from '@viskod/event-bus';
 import {
   type BoundingBox,
-  ErrorCategory,
-  ErrorSeverity,
   type Result,
   type Viewport,
   type ViskodError,
+  createViskodError,
   err,
   ok,
 } from '@viskod/shared';
@@ -833,14 +832,12 @@ export class BrowserRuntime {
   }
 
   private brError(code: string, message: string): ViskodError {
-    return {
+    return createViskodError({
       code,
-      category: ErrorCategory.BROWSER,
-      severity: ErrorSeverity.RECOVERABLE,
+      category: 'browser',
+      severity: 'recoverable',
       message,
-      correlationId: crypto.randomUUID(),
       subsystem: 'browser-runtime',
-      timestamp: new Date().toISOString(),
-    };
+    });
   }
 }

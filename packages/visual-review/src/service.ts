@@ -1,13 +1,6 @@
 import type { HandoffService } from '@viskod/agent-handoff';
 import type { EventBus } from '@viskod/event-bus';
-import {
-  ErrorCategory,
-  ErrorSeverity,
-  type Result,
-  type ViskodError,
-  err,
-  ok,
-} from '@viskod/shared';
+import { type Result, type ViskodError, createViskodError, err, ok } from '@viskod/shared';
 import type { IssueService, VisualIssue } from '@viskod/visual-issue';
 import { computeComparison } from './comparison';
 import {
@@ -466,15 +459,13 @@ export class ReviewServiceImpl implements ReviewService {
   }
 
   private reError(code: ReviewErrorCode | string, message: string): ViskodError {
-    return {
+    return createViskodError({
       code,
-      category: ErrorCategory.RUNTIME,
-      severity: ErrorSeverity.RECOVERABLE,
+      category: 'runtime',
+      severity: 'recoverable',
       message,
-      correlationId: crypto.randomUUID(),
       subsystem: 'visual-review',
-      timestamp: new Date().toISOString(),
-    };
+    });
   }
 }
 
