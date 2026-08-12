@@ -34,7 +34,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Install Playwright Chromium
-        run: sudo pnpm exec playwright install --with-deps chromium
+        # pnpm is on PNPM_HOME, not in sudo's secure_path, so browser download
+        # runs without sudo and apt deps use the proven `sudo npx` pattern.
+        run: |
+          pnpm exec playwright install chromium
+          sudo npx playwright install-deps chromium
       # The tag that triggered this workflow must equal v<@viskod/cli version>;
       # any other tag is refused before anything is built or published.
       - name: Verify tag matches package version
