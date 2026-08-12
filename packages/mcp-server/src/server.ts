@@ -13,12 +13,19 @@ import type {
  * Lives in its own module so `entry.ts` (tool registration) and `index.ts`
  * (public exports) do not form an import cycle.
  */
+// Injected at bundle time by scripts/build-cli.mjs from the publishable
+// packages/cli/package.json version; source runs (tsx/tests) fall back to a
+// dev marker. The published executable reports the real package version.
+declare const __VISKOD_VERSION__: string | undefined;
+const VISKOD_SERVER_VERSION =
+  typeof __VISKOD_VERSION__ !== 'undefined' ? __VISKOD_VERSION__ : '0.0.0-dev';
+
 export class MCPServer {
   private tools = new Map<string, MCPToolDefinition>();
   private toolHandlers = new Map<string, MCPToolHandler>();
   private resources = new Map<string, MCPResourceDefinition>();
   private resourceHandlers = new Map<string, MCPResourceHandler>();
-  private serverInfo = { name: 'viskod-mcp', version: '0.2.0-alpha' };
+  private serverInfo = { name: 'viskod-mcp', version: VISKOD_SERVER_VERSION };
   private startup?: () => Promise<void>;
 
   registerTool(definition: MCPToolDefinition, handler: MCPToolHandler): void {
