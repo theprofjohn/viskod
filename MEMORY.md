@@ -1025,3 +1025,69 @@ fold dogfood coverage back into the release gate.
 Supersedes:
 
 None.
+
+---
+
+## Decision 014
+
+Date:
+
+2026-08-12
+
+Status:
+
+Accepted
+
+Category:
+
+Repository
+
+Title:
+
+First gated alpha release is 0.2.3-alpha
+
+Context:
+
+The plan for the deterministic release gate targeted `0.2.2-alpha`, but that
+version was already published on npm (2026-08-07, outside the 72-hour
+unpublish window), so re-publishing it is impossible. A fresh gated publish
+requires an unpublished version.
+
+Decision:
+
+`0.2.3-alpha` is the first release produced by the deterministic gate
+(`v0.2.3-alpha` tag, commit `222594e`). The version contract
+(`scripts/verify-release-version.mjs`) continues to require tag equals
+`v<publishable CLI version>`; release versions must never reuse an npm
+version that already exists. `latest` stays at `0.2.0-alpha`; alpha releases
+publish under the `alpha` dist-tag only.
+
+Alternatives Considered:
+
+- Unpublish `0.2.2-alpha` and republish it: not available (72-hour window
+  elapsed).
+- Publish under a stale version: npm rejects same-version publishes.
+
+Reason for Rejection:
+
+The only viable path to a fresh gated publish is a new patch version.
+
+Consequences:
+
+Positive:
+
+- The released alpha is fully gated and verified end to end.
+- Dist-tags are unambiguous (`alpha` → `0.2.3-alpha`, `latest` unchanged).
+
+Negative:
+
+- The public npm history contains pre-gate `0.2.0/0.2.1/0.2.2-alpha`
+  publishes that were not produced by the current gate.
+
+Future Review:
+
+None.
+
+Supersedes:
+
+None.
