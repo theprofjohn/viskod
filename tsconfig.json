@@ -48,5 +48,6 @@
     { "path": "./packages/agent-handoff" },
     { "path": "./packages/visual-review" },
     { "path": "./apps/studio" }
-  ]
+  ],
+  "exclude": ["examples/dogfood-app"]
 }

@@ -65,3 +65,15 @@ specs/VERTICAL_SLICE_*
 specs/ACCEPTANCE_GATES*
 specs/PROGRAMME_REPORT*
 .viskod-dogfood-*
+
+# Dogfood fixture emitted artifacts (root tsc project must not compile it)
+examples/dogfood-app/src/**/*.js
+examples/dogfood-app/src/**/*.d.ts
+examples/dogfood-app/src/**/*.js.map
+examples/dogfood-app/src/**/*.d.ts.map
+
+# Dogfood fixture emitted artifacts (root tsc project must not compile it)
+examples/dogfood-app/**/*.js
+examples/dogfood-app/**/*.d.ts
+examples/dogfood-app/**/*.js.map
+examples/dogfood-app/**/*.d.ts.map
