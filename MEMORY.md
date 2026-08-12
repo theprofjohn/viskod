@@ -1107,6 +1107,73 @@ Decision 013 (dogfood external-fixture portion).
 
 ---
 
+## Decision 016
+
+Date:
+
+2026-08-12
+
+Status:
+
+Accepted
+
+Category:
+
+Security
+
+Title:
+
+Hard approval gate for releases
+
+Context:
+
+The release workflow's `publish` job runs against the `release` environment
+with a required-reviewer rule. With a single owner and
+`prevent_self_review: false`, the owner's own tag pushes self-approve, so the
+"human approval" boundary was effectively transparent. A hard gate requires
+that the person who triggers a release cannot also approve it.
+
+Decision:
+
+The `release` environment is configured with `can_admins_bypass: false` and
+`prevent_self_review: true` (reviewer: the repo owner). A release run
+triggered by the owner now waits for approval from a different reviewer and
+will not publish until one exists and approves. Completing a release
+therefore requires a second collaborator added to the environment's
+reviewers list; until then, tag pushes create runs that pause at the
+approval gate.
+
+Alternatives Considered:
+
+- Leave self-review permitted: not a hard gate.
+- Add a wait timer only: adds delay, not approval.
+
+Reason for Rejection:
+
+Both alternatives preserve single-person release authority.
+
+Consequences:
+
+Positive:
+
+- No single person can publish a release without a second approver.
+- A failed gate or missing approval prevents npm publication by construction.
+
+Negative:
+
+- Releases are blocked until a second collaborator is added to the
+  environment reviewers (owner cannot self-approve).
+
+Future Review:
+
+None.
+
+Supersedes:
+
+None.
+
+---
+
 ## Decision 014
 
 Date:
