@@ -1,3 +1,8 @@
+import { type RedactionRule, applyRedaction, isSensitiveAttributeName } from '@viskod/shared';
+
+export type { RedactionRule } from '@viskod/shared';
+export { applyRedaction } from '@viskod/shared';
+
 export interface ConsoleEntry {
   level: 'log' | 'info' | 'warn' | 'error' | 'debug';
   message: string;
@@ -55,86 +60,6 @@ export const DEFAULT_TRUNCATION: TruncationConfig = {
   maxUrlLength: 500,
   maxAttributeLength: 500,
 };
-
-export interface RedactionRule {
-  pattern: RegExp;
-  replacement: string | ((match: string) => string);
-  label: string;
-}
-
-const DEFAULT_RULES: RedactionRule[] = [
-  {
-    pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
-    replacement: '[EMAIL_REDACTED]',
-    label: 'email',
-  },
-  { pattern: /\b(?:\d{4}[- ]?){3}\d{4}\b/g, replacement: '[CARD_REDACTED]', label: 'card-number' },
-  // URL query parameters with sensitive names — must come before assign-secret
-  {
-    pattern:
-      /(?:[?&])(token|access_token|refresh_token|id_token|api_key|apikey|key|secret|password|session|csrf|auth|authorization)=[^&\s]{4,}/gi,
-    replacement: (match: string) => {
-      const eqIdx = match.indexOf('=');
-      return `${match.slice(0, eqIdx + 1)}[REDACTED]`;
-    },
-    label: 'query-param-sensitive',
-  },
-  // API keys: sk_test/sk_live/pk_test/pk_live with 3+ alphanumeric suffix
-  {
-    pattern:
-      /\b(?:sk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|pk[-_]?(?:test|live)_[A-Za-z0-9]{3,}|sk-[A-Za-z0-9]{6,}|pk-[A-Za-z0-9]{6,})/gi,
-    replacement: '[API_KEY_REDACTED]',
-    label: 'api-key',
-  },
-  // api_key = value, apikey: value, "api key": value
-  {
-    pattern: /\b(?:api[_-]?key|apikey)['"]?\s*[:=]\s*['"]?(?:[A-Za-z0-9_\-]{8,})/gi,
-    replacement: '[API_KEY_REDACTED]',
-    label: 'api-key-assignment',
-  },
-  // key=value / secret=value / password=value / token=value in text (not ?query)
-  {
-    pattern:
-      /(?<![?&_\w])\b(?:secret|password|passwd|pwd|token|access_token|refresh_token|id_token|api_key|apikey)\s*[:=]\s*['"]?(?:[A-Za-z0-9_\-./]{4,})/gi,
-    replacement: '[SECRET_REDACTED]',
-    label: 'assign-secret',
-  },
-  // "token <value>", "secret <value>", "key <value>" in prose
-  {
-    pattern:
-      /\b(?:token|secret|password|passwd|pwd|bearer|auth)\s+['"]?(?:[A-Za-z0-9_\-./@#$%^&*+=-]{6,})/gi,
-    replacement: '[SECRET_REDACTED]',
-    label: 'inline-secret',
-  },
-  // Base64-like tokens (16+ base64 chars with padding)
-  {
-    pattern: /\b(?:[A-Za-z0-9+/]{16,})(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})\b/g,
-    replacement: '[TOKEN_REDACTED]',
-    label: 'base64-token',
-  },
-];
-
-export function applyRedaction(
-  text: string,
-  extraRules?: RedactionRule[],
-): { text: string; redactions: string[] } {
-  const rules = [...DEFAULT_RULES, ...(extraRules ?? [])];
-  const applied: string[] = [];
-  let result = text;
-  for (const rule of rules) {
-    const candidate =
-      typeof rule.replacement === 'function'
-        ? result.replace(rule.pattern, rule.replacement as (match: string) => string)
-        : result.replace(rule.pattern, rule.replacement);
-    if (candidate !== result) {
-      if (!applied.includes(rule.label)) {
-        applied.push(rule.label);
-      }
-      result = candidate;
-    }
-  }
-  return { text: result, redactions: applied };
-}
 
 export function truncateConsoleEntries(
   entries: ConsoleEntry[],
@@ -274,6 +199,11 @@ export function redactEvidence(
   };
 }
 
+/**
+ * Redact a string record (headers, DOM attributes, …). Values under
+ * sensitive attribute names are replaced wholesale (default-deny) in
+ * addition to regex-based redaction.
+ */
 function redactRecord(
   record: Record<string, string>,
   extraRules?: RedactionRule[],
@@ -281,6 +211,11 @@ function redactRecord(
 ): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [k, v] of Object.entries(record)) {
+    if (isSensitiveAttributeName(k)) {
+      redactionSet?.add('sensitive-attribute');
+      result[k] = '[REDACTED]';
+      continue;
+    }
     const { text, redactions } = applyRedaction(v, extraRules);
     for (const r of redactions) redactionSet?.add(r);
     result[k] = text;

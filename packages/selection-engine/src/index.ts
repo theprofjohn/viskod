@@ -1,4 +1,4 @@
-import type { BrowserHandle, BrowserRuntime } from '@viskod/browser-runtime';
+import type { BrowserHandle, BrowserRuntime, ResolvedElementRef } from '@viskod/browser-runtime';
 import type { EventBus } from '@viskod/event-bus';
 import type { Result, ViskodError } from '@viskod/shared';
 import { createViskodError, err, ok } from '@viskod/shared';
@@ -32,7 +32,7 @@ export class SelectionEngine {
 
   async resolveTarget(event: {
     selector: string;
-    boundingBox: { x: number; y: number; width: number; height: number };
+    boundingBox?: { x: number; y: number; width: number; height: number };
     source: string;
     timestamp: string;
   }): Promise<Result<SelectionTarget>> {
@@ -75,15 +75,54 @@ export class SelectionEngine {
     return ok(target);
   }
 
+  /**
+   * Validate a selection against the live DOM (Phase 28A fail-closed
+   * contract) and produce a snapshot.
+   *
+   * `resolvedRef` — an already-resolved element reference (Phase 28B) — is
+   * used for EVERY element-scoped evidence query so the snapshot always
+   * describes the same element that selector resolution picked. When it is
+   * omitted and a browser is available, validation resolves its own element
+   * reference (and releases it before returning). Callers that already hold
+   * a reference (e.g. VisualContextEngine capture) must pass it so no
+   * selector re-query can silently pick a different match.
+   */
   async validateSelection(
     target: SelectionTarget,
     browserHandle?: BrowserHandle,
+    resolvedRef?: ResolvedElementRef,
   ): Promise<Result<SelectionSnapshot>> {
     const startTime = Date.now();
     const correlationId = crypto.randomUUID();
+    let ownedRef: ResolvedElementRef | null = null;
 
     try {
-      const hierarchyResult = await this.buildHierarchy(target, browserHandle);
+      // Fail closed on the core target (VISKOD-AUDIT-015): with a browser
+      // available, never report a selector as resolved unless browser-backed
+      // resolution succeeded. Malformed/missing/detached/ambiguous selectors
+      // are typed errors instead of fabricated stub snapshots.
+      let ref = resolvedRef ?? null;
+      if (browserHandle && this.browserRuntime && !ref) {
+        const resolution = await this.browserRuntime.resolveElement(
+          browserHandle,
+          target.selector,
+          target.boundingBox,
+        );
+        if (!resolution.ok) {
+          this.selectionsFailed++;
+          this.processingTimes.push(Date.now() - startTime);
+          return err(resolution.error);
+        }
+        if (resolution.value.status !== 'resolved') {
+          this.selectionsFailed++;
+          this.processingTimes.push(Date.now() - startTime);
+          return err(this.selectorError(resolution.value.status, target.selector));
+        }
+        ref = resolution.value;
+        ownedRef = ref;
+      }
+
+      const hierarchyResult = await this.buildHierarchy(target, browserHandle, ref ?? undefined);
       if (!hierarchyResult.ok) {
         this.selectionsFailed++;
         this.processingTimes.push(Date.now() - startTime);
@@ -91,7 +130,7 @@ export class SelectionEngine {
       }
 
       const geometry = await this.computeGeometry(target, browserHandle);
-      const visibility = await this.computeVisibility(target, browserHandle);
+      const visibility = await this.computeVisibility(target, browserHandle, ref ?? undefined);
       const accessibility = await this.computeAccessibility(target, browserHandle);
       const selectionId = this.selectionId(target.selector, target.boundingBox);
 
@@ -140,17 +179,34 @@ export class SelectionEngine {
         payload: { error: seError.message, selector: target.selector },
       });
       return err(seError);
+    } finally {
+      // Release only the reference this call resolved itself; caller-owned
+      // references are released by their owner.
+      if (ownedRef && this.browserRuntime) {
+        await this.browserRuntime.releaseElement(ownedRef);
+      }
     }
   }
 
   async buildHierarchy(
     target: SelectionTarget,
     handle?: BrowserHandle,
+    ref?: ResolvedElementRef,
   ): Promise<Result<HierarchyRoot>> {
     // Use real browser hierarchy when available
     if (handle && this.browserRuntime) {
       try {
-        const result = await this.browserRuntime.getElementHierarchy(handle, target.selector);
+        if (!ref) {
+          // No resolved reference: never re-query the selector (Phase 28B),
+          // which could silently pick a different match.
+          return err(
+            this.seError(
+              'SE_TARGET_NOT_RESOLVED',
+              `The element could not be resolved in the page: ${target.selector}`,
+            ),
+          );
+        }
+        const result = await this.browserRuntime.getElementHierarchy(handle, ref);
         if (result.ok && result.value) {
           const h = result.value;
           return ok({
@@ -186,11 +242,19 @@ export class SelectionEngine {
           });
         }
       } catch {
-        // Fall through to stub
+        // noop — typed error below
       }
+      // Browser-backed resolution failed: never fabricate a stub snapshot
+      // with a fake `data-selector` element (VISKOD-AUDIT-015).
+      return err(
+        this.seError(
+          'SE_TARGET_NOT_RESOLVED',
+          `The element could not be resolved in the page: ${target.selector}`,
+        ),
+      );
     }
 
-    // Fallback stub
+    // Fallback stub (only used when no browser is available)
     try {
       const selectedNode: HierarchyNode = {
         tagName: 'element',
@@ -267,34 +331,33 @@ export class SelectionEngine {
     target: SelectionTarget,
     handle?: BrowserHandle,
   ): Promise<SelectionGeometry> {
-    if (!handle || !this.browserRuntime) {
+    const unavailable = (): SelectionGeometry => {
+      // No observed geometry (and no caller-provided trusted box): snapshot
+      // geometry is unavailable. Never fabricate a box for disambiguation —
+      // resolution already happened; this is metadata only.
+      const box = target.boundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
       return {
-        boundingBox: target.boundingBox,
-        visibleRegion: target.boundingBox,
+        boundingBox: box,
+        visibleRegion: box,
         clipState: 'visible',
         viewportIntersectionRatio: 1.0,
       };
-    }
+    };
+
+    if (!handle || !this.browserRuntime) return unavailable();
 
     try {
-      const info = await this.browserRuntime.getElementInfoAtPoint(
-        handle,
-        target.boundingBox.x + target.boundingBox.width / 2,
-        target.boundingBox.y + target.boundingBox.height / 2,
-      );
-      if (!info.ok || !info.value) {
-        return {
-          boundingBox: target.boundingBox,
-          visibleRegion: target.boundingBox,
-          clipState: 'visible',
-          viewportIntersectionRatio: 1.0,
-        };
-      }
+      const center = await this.observedCenter(target, handle);
+      if (!center) return unavailable();
 
-      const bb = info.value.boundingBox as
-        | { x: number; y: number; width: number; height: number }
-        | undefined;
+      const info = await this.browserRuntime.getElementInfoAtPoint(handle, center.x, center.y);
+      const bb = info.ok
+        ? (info.value?.boundingBox as
+            | { x: number; y: number; width: number; height: number }
+            | undefined)
+        : undefined;
       const box = bb ?? target.boundingBox;
+      if (!box) return unavailable();
 
       // Compute viewport intersection
       const viewport = { width: 1280, height: 720 }; // fallback, could be passed in
@@ -315,20 +378,16 @@ export class SelectionEngine {
         viewportIntersectionRatio: Math.round(ratio * 100) / 100,
       };
     } catch {
-      return {
-        boundingBox: target.boundingBox,
-        visibleRegion: target.boundingBox,
-        clipState: 'visible',
-        viewportIntersectionRatio: 1.0,
-      };
+      return unavailable();
     }
   }
 
   private async computeVisibility(
-    target: SelectionTarget,
+    _target: SelectionTarget,
     handle?: BrowserHandle,
+    ref?: ResolvedElementRef,
   ): Promise<VisibilityReport> {
-    if (!handle || !this.browserRuntime) {
+    if (!handle || !this.browserRuntime || !ref) {
       return {
         display: 'block',
         visible: true,
@@ -341,7 +400,7 @@ export class SelectionEngine {
     }
 
     try {
-      const styles = await this.browserRuntime.getComputedStyles(handle, target.selector);
+      const styles = await this.browserRuntime.getComputedStyles(handle, ref);
       if (!styles.ok) {
         return {
           display: 'block',
@@ -412,11 +471,18 @@ export class SelectionEngine {
     }
 
     try {
-      const info = await this.browserRuntime.getElementInfoAtPoint(
-        handle,
-        target.boundingBox.x + target.boundingBox.width / 2,
-        target.boundingBox.y + target.boundingBox.height / 2,
-      );
+      const center = await this.observedCenter(target, handle);
+      if (!center) {
+        return {
+          role: null,
+          name: null,
+          landmark: null,
+          headingLevel: null,
+          hasFocus: false,
+          tabIndex: null,
+        };
+      }
+      const info = await this.browserRuntime.getElementInfoAtPoint(handle, center.x, center.y);
       if (!info.ok || !info.value) {
         return {
           role: null,
@@ -467,11 +533,46 @@ export class SelectionEngine {
     }
   }
 
+  /**
+   * Anchor point for evidence queries (Phase 28A geometry trust contract).
+   *
+   * Prefers the caller-provided trusted box center; otherwise measures the
+   * real rect of the resolved element (browser-backed). Returns null when no
+   * observed geometry exists — callers must not fall back to synthetic
+   * coordinates.
+   */
+  private async observedCenter(
+    target: SelectionTarget,
+    handle?: BrowserHandle,
+    ref?: ResolvedElementRef,
+  ): Promise<{ x: number; y: number } | null> {
+    if (target.boundingBox) {
+      return {
+        x: target.boundingBox.x + target.boundingBox.width / 2,
+        y: target.boundingBox.y + target.boundingBox.height / 2,
+      };
+    }
+    if (handle && this.browserRuntime && ref) {
+      try {
+        const info = await this.browserRuntime.getSelectedElementInfo(handle, ref);
+        const bb = info.ok ? info.value?.boundingBox : undefined;
+        if (bb && bb.width > 0 && bb.height > 0) {
+          return { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 };
+        }
+      } catch {
+        // no observed geometry available
+      }
+    }
+    return null;
+  }
+
   private selectionId(
     selector: string,
-    boundingBox: { x: number; y: number; width: number; height: number },
+    boundingBox?: { x: number; y: number; width: number; height: number },
   ): string {
-    const raw = `${selector}|${boundingBox.x}|${boundingBox.y}|${boundingBox.width}|${boundingBox.height}`;
+    const raw = boundingBox
+      ? `${selector}|${boundingBox.x}|${boundingBox.y}|${boundingBox.width}|${boundingBox.height}`
+      : `${selector}|none`;
     return `${selector.slice(0, 20)}-${this.hashFnv(raw)}`;
   }
 
@@ -483,6 +584,30 @@ export class SelectionEngine {
       hash = hash >>> 0;
     }
     return hash.toString(36);
+  }
+
+  private selectorError(
+    status: 'resolved' | 'missing' | 'malformed' | 'ambiguous' | 'detached',
+    selector: string,
+  ): ViskodError {
+    switch (status) {
+      case 'malformed':
+        return this.seError('SE_SELECTOR_MALFORMED', `The selector is not valid CSS: ${selector}`);
+      case 'missing':
+        return this.seError('SE_SELECTOR_NO_MATCH', `No element matches the selector: ${selector}`);
+      case 'detached':
+        return this.seError(
+          'SE_SELECTOR_DETACHED',
+          `The selected element is no longer attached to the page: ${selector}`,
+        );
+      case 'ambiguous':
+        return this.seError(
+          'SE_SELECTOR_AMBIGUOUS',
+          `The selector matches multiple elements: ${selector}. Use a more specific selector.`,
+        );
+      default:
+        return this.seError('SE_SELECTOR_UNRESOLVED', `Could not resolve: ${selector}`);
+    }
   }
 
   private seError(code: string, message: string): ViskodError {

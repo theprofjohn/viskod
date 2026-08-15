@@ -2,7 +2,14 @@ import type { HandoffService } from '@viskod/agent-handoff';
 import type { EventBus } from '@viskod/event-bus';
 import { type Result, type ViskodError, createViskodError, err, ok } from '@viskod/shared';
 import type { IssueService, VisualIssue } from '@viskod/visual-issue';
-import { computeComparison } from './comparison';
+import { ReviewArtifactStore } from './artifact-store';
+import type {
+  ReviewArtifactsManifest,
+  ReviewArtifactsPreview,
+  TargetCropCapture,
+  VisualArtifactPolicy,
+} from './artifact-types';
+import { computeComparison, finalizeArtifactComparison } from './comparison';
 import {
   isValidReviewTransition,
   makeAfterCaptureCompletedEvent,
@@ -19,8 +26,11 @@ import { redactReview } from './redaction';
 import { resolveRecaptureTarget } from './targetResolver';
 import type {
   RecaptureAdapter,
+  RecaptureResult,
+  ResolvedRecaptureTarget,
   ReviewErrorCode,
   ReviewSnapshotRef,
+  VisualComparison,
   VisualReview,
   VisualReviewCreateInput,
   VisualReviewCreateOutput,
@@ -51,6 +61,7 @@ export class ReviewServiceImpl implements ReviewService {
   private issueService: IssueService;
   private eventBus: EventBus;
   private recaptureAdapter?: RecaptureAdapter;
+  private artifactStore: ReviewArtifactStore;
 
   constructor(
     eventBus: EventBus,
@@ -58,12 +69,114 @@ export class ReviewServiceImpl implements ReviewService {
     handoffService?: HandoffService,
     persistence?: ReviewPersistence,
     recaptureAdapter?: RecaptureAdapter,
+    artifactStore?: ReviewArtifactStore,
   ) {
     this.eventBus = eventBus;
     this.issueService = issueService;
     void handoffService;
     this.persistence = persistence ?? new ReviewPersistence();
     this.recaptureAdapter = recaptureAdapter;
+    this.artifactStore = artifactStore ?? new ReviewArtifactStore();
+  }
+
+  /**
+   * Phase 31: set the local-sensitive visual-review artifact policy. Default
+   * is disabled (Phase 29 privacy stance) — artifacts only exist after
+   * explicit Studio-level opt-in.
+   */
+  setArtifactPolicy(policy: VisualArtifactPolicy): void {
+    this.artifactStore.setPolicy(policy);
+  }
+
+  private async attachBeforeArtifacts(review: VisualReview): Promise<Result<VisualReview>> {
+    if (!this.artifactStore.isEnabled()) return ok(review);
+    const result = await this.artifactStore.ensureBeforeForReview(review.reviewId, review.issueId);
+    if (!result.ok) return err(result.error);
+    if (result.value) {
+      return ok({ ...review, artifacts: buildArtifactsPreview(result.value) });
+    }
+    return ok(review);
+  }
+
+  private async attachAfterArtifacts(
+    review: VisualReview,
+    after: ReviewSnapshotRef,
+    recaptureShot: TargetCropCapture | undefined,
+  ): Promise<Result<VisualReview>> {
+    if (!this.artifactStore.isEnabled()) return ok(review);
+    if (!recaptureShot) {
+      // Policy enabled but the adapter produced no crop: leave the review's
+      // artifacts as-is (before may exist) and mark visual comparison
+      // unavailable through the comparison layer.
+      return ok(review);
+    }
+    const result = await this.artifactStore.saveAfterForReview(
+      review.reviewId,
+      review.issueId,
+      recaptureShot,
+    );
+    if (!result.ok) return err(result.error);
+    const manifest = result.value;
+    if (!manifest) return ok(review);
+
+    let updated = review;
+    if (manifest.comparison) {
+      const finalized = finalizeArtifactComparison(review.before, after, manifest.comparison);
+      manifest.comparison = finalized;
+      await this.persistManifestComparison(manifest);
+      const baseComparison = review.comparison ?? {
+        status: 'visual_unavailable',
+        confidence: 0.5,
+        summary: '',
+        target: {
+          beforeStatus: review.before.targetSummary.resolutionStatus,
+          afterStatus: after.targetSummary.resolutionStatus,
+          sameTargetLikely: true,
+          warnings: [],
+        },
+        warnings: [],
+      };
+      // Target/identity problems dominate the pixel result: an identity
+      // mismatch is incomparable, never "unchanged pixels, different element".
+      const metadataStatus = baseComparison.status;
+      const finalStatus: VisualComparison['status'] =
+        metadataStatus === 'missing_after' ||
+        metadataStatus === 'ambiguous_after' ||
+        metadataStatus === 'incomparable'
+          ? metadataStatus
+          : finalized.status === 'unavailable'
+            ? 'visual_unavailable'
+            : finalized.status;
+      const merged: VisualComparison = {
+        ...baseComparison,
+        status: finalStatus,
+        visual: {
+          ...baseComparison.visual,
+          artifactComparison: finalized,
+          viewportCompatible: finalized.viewportCompatible,
+          changedPixelRatio: finalized.changedPixelRatio,
+          ...(manifest.pairing.diffArtifactId
+            ? { diffArtifactId: manifest.pairing.diffArtifactId, screenshotDiffId: 'available' }
+            : {}),
+        },
+        warnings: [
+          ...baseComparison.warnings,
+          ...(finalized.status === 'incomparable' && finalized.reason ? [finalized.reason] : []),
+          ...(finalized.status === 'unavailable' && finalized.reason ? [finalized.reason] : []),
+        ],
+      };
+      updated = { ...review, comparison: merged };
+    }
+
+    return ok({ ...updated, artifacts: buildArtifactsPreview(manifest) });
+  }
+
+  private async persistManifestComparison(manifest: ReviewArtifactsManifest): Promise<void> {
+    // Best-effort: the manifest's comparison is derived from the review
+    // comparison; failures are surfaced through the next artifact op.
+    await this.artifactStore
+      .updateComparison(manifest.reviewId, manifest.comparison ?? null)
+      .catch(() => undefined);
   }
 
   async createReview(
@@ -118,7 +231,13 @@ export class ReviewServiceImpl implements ReviewService {
       redaction: { applied: false, rules: [], strippedFields: [], warnings },
     };
 
-    const redacted = redactReview(review);
+    // Phase 31: when local visual review is enabled, the review inherits the
+    // pre-change baseline captured before the coding agent modified the page.
+    const withArtifacts = await this.attachBeforeArtifacts(review);
+    if (!withArtifacts.ok) return err(withArtifacts.error);
+    const reviewWithArtifacts = withArtifacts.value;
+
+    const redacted = redactReview(reviewWithArtifacts);
     const saveResult = await this.persistence.saveReview(redacted.review);
     if (!saveResult.ok) return err(saveResult.error);
 
@@ -160,6 +279,7 @@ export class ReviewServiceImpl implements ReviewService {
       after: review.after,
       comparison: review.comparison,
       decision: review.decision,
+      artifacts: review.artifacts,
     });
   }
 
@@ -412,7 +532,7 @@ export class ReviewServiceImpl implements ReviewService {
 
     const after = buildAfterSnapshot(recaptureResult, review, resolvedTarget);
 
-    const comparison = computeComparison(review.before, after);
+    let comparison = computeComparison(review.before, after);
     const compEvent = makeComparisonCompletedEvent(comparison.status);
 
     const completionTime = new Date().toISOString();
@@ -430,6 +550,22 @@ export class ReviewServiceImpl implements ReviewService {
         compEvent,
       ],
     };
+
+    // Phase 31: persist the after crop, run the real pixel comparison, and
+    // merge the artifact evidence into the review comparison.
+    const withArtifacts = await this.attachAfterArtifacts(
+      review,
+      after,
+      recaptureResult.elementScreenshot,
+    );
+    if (withArtifacts.ok) {
+      review = withArtifacts.value;
+      if (review.comparison && review.comparison !== comparison) {
+        comparison = review.comparison;
+      }
+    }
+    // Artifact persistence failure is recoverable: the metadata review is
+    // still valid and the UI reports visual comparison unavailable.
 
     const finalRedacted = redactReview(review);
     const finalSave = await this.persistence.saveReview(finalRedacted.review);
@@ -472,11 +608,74 @@ export class ReviewServiceImpl implements ReviewService {
 /**
  * Consumer projection: the raw selection snapshot is an internal recapture
  * locator (it can contain stable-attribute selectors) and is persisted for
- * recapture only — it is never returned to consumers.
+ * recapture only — it is never returned to consumers. Phase 28B stable
+ * attribute identity is also internal (it can double as a locator); the
+ * projection keeps only the opaque target id.
  */
 function projectSnapshot(snapshot: ReviewSnapshotRef): ReviewSnapshotRef {
   const { selectionSnapshot: _selectionSnapshot, ...source } = snapshot.source;
-  return { ...snapshot, source };
+  const identity = snapshot.identity ? { targetId: snapshot.identity.targetId } : undefined;
+  return { ...snapshot, source, identity };
+}
+
+/**
+ * Phase 31: sanitized artifact preview for user-facing state. Opaque ids
+ * only — no filesystem paths, no raw image data. The preview explicitly
+ * marks local-sensitive artifacts as unavailable when the policy is on but
+ * no collected evidence exists.
+ */
+function buildArtifactsPreview(manifest: ReviewArtifactsManifest): ReviewArtifactsPreview {
+  const entry = (role: 'before' | 'after' | 'diff') =>
+    manifest.artifacts.find((a) => a.role === role);
+
+  const before = entry('before');
+  const after = entry('after');
+  const diff = entry('diff');
+
+  const hasCollectedBefore = before?.status === 'collected';
+  const hasCollectedAfter = after?.status === 'collected';
+  let visualUnavailableReason: string | undefined;
+  if (!hasCollectedBefore && !hasCollectedAfter) {
+    visualUnavailableReason = 'Local visual review artifacts were not captured.';
+  } else if (!hasCollectedBefore) {
+    visualUnavailableReason = 'The pre-change visual baseline is unavailable.';
+  } else if (!hasCollectedAfter) {
+    visualUnavailableReason = 'The post-change capture is unavailable.';
+  } else if (
+    manifest.comparison?.status === 'unavailable' ||
+    manifest.comparison?.status === 'incomparable'
+  ) {
+    visualUnavailableReason = manifest.comparison.reason ?? 'The captures cannot be compared.';
+  }
+
+  return {
+    policy: manifest.policy,
+    before: before
+      ? {
+          artifactId: before.artifactId,
+          status: before.status,
+          capturedAt: before.capturedAt,
+          dimensions: before.dimensions,
+        }
+      : undefined,
+    after: after
+      ? {
+          artifactId: after.artifactId,
+          status: after.status,
+          capturedAt: after.capturedAt,
+          dimensions: after.dimensions,
+        }
+      : undefined,
+    diff: diff
+      ? {
+          artifactId: diff.artifactId,
+          status: diff.status,
+          capturedAt: diff.capturedAt,
+        }
+      : undefined,
+    comparison: manifest.comparison,
+    visualUnavailableReason,
+  };
 }
 
 function projectReview(review: VisualReview): VisualReview {
@@ -497,6 +696,12 @@ function buildBeforeSnapshot(
   const firstTarget = targets[0] as Record<string, unknown> | undefined;
   const geometry = (firstTarget?.geometry as Record<string, unknown>) ?? {};
   const viewportRect = (geometry.viewportRect as Record<string, number>) ?? {};
+  const targetId = firstTarget?.targetId as string | undefined;
+  const stableAttributes = (
+    firstTarget?.fingerprints as { stableAttributes?: Record<string, string> } | undefined
+  )?.stableAttributes;
+  const hasIdentity =
+    !!targetId || (stableAttributes !== undefined && Object.keys(stableAttributes).length > 0);
 
   return {
     snapshotId: crypto.randomUUID(),
@@ -523,6 +728,9 @@ function buildBeforeSnapshot(
       confidence: issue.targetSummary.confidence,
       resolutionStatus: issue.targetSummary.resolutionStatus,
     },
+    // Phase 28B stable identity — display labels are never target identity
+    // (Phase 31 / VISKOD-AUDIT-005).
+    identity: hasIdentity ? { targetId, stableAttributes } : undefined,
     visualEvidence: {
       overlayExcluded: false,
       cropRect: viewportRect.width
@@ -546,9 +754,9 @@ function buildBeforeSnapshot(
 }
 
 function buildAfterSnapshot(
-  recaptureResult: import('./types').RecaptureResult,
+  recaptureResult: RecaptureResult,
   review: VisualReview,
-  resolvedTarget: import('./types').ResolvedRecaptureTarget | null,
+  resolvedTarget: ResolvedRecaptureTarget | null,
 ): ReviewSnapshotRef {
   let resolutionStatus: 'resolved' | 'ambiguous' | 'stale' | 'missing' = 'resolved';
   if (!recaptureResult.selector) {
@@ -577,13 +785,19 @@ function buildAfterSnapshot(
     },
     targetSummary: {
       mode: review.before.targetSummary.mode,
-      label: recaptureResult.tagName,
+      // VISKOD-AUDIT-005 (Phase 31): never present tagName as the target
+      // label. The before label is presentation-only identity context; real
+      // identity lives in `identity` (Phase 28B stable attributes).
+      label: review.before.targetSummary.label,
       role: review.before.targetSummary.role,
       textPreview: recaptureResult.text?.slice(0, 200),
       targetCount: resolutionStatus === 'missing' ? 0 : 1,
       confidence: resolutionStatus === 'missing' ? 0 : (resolvedTarget?.confidence ?? 0.9),
       resolutionStatus,
     },
+    // Phase 28B stable identity of the resolved after element — display
+    // labels are never used as target identity (VISKOD-AUDIT-005).
+    identity: recaptureResult.identity,
     visualEvidence: {
       overlayExcluded: false,
       cropRect:

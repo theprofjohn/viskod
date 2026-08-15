@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 // Increase default timeout for all tests in this file
 vi.setConfig({ testTimeout: 60000 });
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +63,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (browser) await browser.close();
-  if (devProc) devProc.kill();
+  if (devProc) killTree(devProc);
   // Write results
   const outDir = join(ROOT, 'phase21-dogfood-evidence');
   try {
@@ -74,6 +74,23 @@ afterAll(async () => {
     JSON.stringify({ results, timestamp: new Date().toISOString() }, null, 2),
   );
 });
+
+/**
+ * Kill the whole process tree. `proc.kill()` alone leaves orphaned children
+ * (e.g. vite under pnpm dev) on Windows, leaking ports across runs.
+ */
+function killTree(proc: ChildProcess): void {
+  if (proc.exitCode !== null) return;
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      proc.kill('SIGTERM');
+    }
+  } catch {
+    /* already gone */
+  }
+}
 
 // Helper: create a page with overlay injected
 async function makePage(viewport = { width: 1440, height: 900 }): Promise<Page> {

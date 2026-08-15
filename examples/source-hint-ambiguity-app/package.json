@@ -1,0 +1,7 @@
+{
+  "name": "source-hint-ambiguity-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Phase 30 E2E fixture: two source files contain identical visible text so source resolution must report ambiguity.",
+  "dependencies": {}
+}

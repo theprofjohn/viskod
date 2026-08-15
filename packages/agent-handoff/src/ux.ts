@@ -16,8 +16,11 @@ export interface SendToAgentInput {
     score?: number;
     reasons?: string[];
     warnings?: string[];
+    qualification?: 'exact' | 'probable' | 'possible' | 'weak';
   }>;
   sourceHintStatus?: 'ranked' | 'ambiguous' | 'low_confidence' | 'missing';
+  /** Phase 30: semantic resolution state captured at issue time. */
+  sourceHintResolution?: 'resolved' | 'ambiguous' | 'unavailable';
 }
 
 export interface SendToAgentResult {
@@ -75,6 +78,7 @@ export class UserFacingHandoff {
         includeSourceHints: input.includeSourceHints,
         sourceHints: input.sourceHints,
         sourceHintStatus: input.sourceHintStatus,
+        sourceHintResolution: input.sourceHintResolution,
       },
       sessionId,
       pageId,

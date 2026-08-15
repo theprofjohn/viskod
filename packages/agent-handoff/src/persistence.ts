@@ -16,6 +16,17 @@ const HANDOFFS_DIR = 'handoffs';
 const HANDOFF_FILE = 'handoff.json';
 const INDEX_FILE = 'index.json';
 
+/**
+ * Handoff ids are opaque, single-path-segment tokens. Anything with path
+ * separators, traversal, or absolute-path shapes is rejected before it can
+ * become a filesystem lookup (Phase 29 security requirement).
+ */
+const SAFE_HANDOFF_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+function isValidHandoffId(id: string): boolean {
+  return typeof id === 'string' && SAFE_HANDOFF_ID.test(id);
+}
+
 export interface HandoffIndex {
   version: 1;
   handoffs: Array<{
@@ -58,6 +69,9 @@ export class HandoffPersistence {
   }
 
   async saveHandoff(handoff: AgentHandoff): Promise<Result<void>> {
+    if (!isValidHandoffId(handoff.handoffId)) {
+      return err(this.heError('INVALID_HANDOFF_ID', `Invalid handoff ID: ${handoff.handoffId}`));
+    }
     const parsed = AgentHandoffSchema.safeParse(handoff);
     if (!parsed.success) {
       return err(
@@ -102,6 +116,9 @@ export class HandoffPersistence {
   }
 
   async loadHandoff(handoffId: string): Promise<Result<AgentHandoff>> {
+    if (!isValidHandoffId(handoffId)) {
+      return err(this.heError('INVALID_HANDOFF_ID', `Invalid handoff ID: ${handoffId}`));
+    }
     const filePath = this.handoffFilePath(handoffId);
     if (!fs.existsSync(filePath)) {
       return err(this.heError('HANDOFF_NOT_FOUND', `Handoff '${handoffId}' not found`));
@@ -136,6 +153,9 @@ export class HandoffPersistence {
   }
 
   async deleteHandoff(handoffId: string): Promise<Result<void>> {
+    if (!isValidHandoffId(handoffId)) {
+      return err(this.heError('INVALID_HANDOFF_ID', `Invalid handoff ID: ${handoffId}`));
+    }
     const dir = this.handoffDir(handoffId);
     if (!fs.existsSync(dir)) return ok(undefined);
 
@@ -214,6 +234,7 @@ export class HandoffPersistence {
   }
 
   handoffExists(handoffId: string): boolean {
+    if (!isValidHandoffId(handoffId)) return false;
     return fs.existsSync(this.handoffFilePath(handoffId));
   }
 

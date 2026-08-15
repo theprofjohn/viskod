@@ -134,6 +134,8 @@ viskod capture <selector>
 
 viskod serve --url <APP_URL>
 
+viskod serve --url <APP_URL> --project-root <TARGET_PROJECT_DIR>
+
 viskod health
 
 viskod status

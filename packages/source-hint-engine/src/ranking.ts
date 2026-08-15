@@ -1,4 +1,5 @@
 import { type ImportGraphEntry, classifyHint, detectLanguage } from './classifier';
+import { computeSourceResolution } from './evidence';
 import type {
   HintRanking,
   HintSafety,
@@ -10,8 +11,7 @@ import type {
 } from './types';
 
 const MAX_HINTS = 10;
-const AMBIGUITY_THRESHOLD = 0.1;
-const LOW_CONFIDENCE_THRESHOLD = 0.3;
+const LOW_CONFIDENCE_THRESHOLD = 0.35;
 
 interface RankInput {
   hints: SourceHint[];
@@ -26,35 +26,14 @@ interface RankInput {
   projectRootPath?: string;
 }
 
-const KIND_SCORE_WEIGHTS: Record<SourceHintKind, number> = {
+const KIND_PENALTY: Record<SourceHintKind, number> = {
   'usage-site': 1.0,
-  'route-owner': 0.85,
-  'component-owner': 0.7,
-  'definition-site': 0.5,
-  'style-owner': 0.4,
-  'test-owner': 0.2,
-  unknown: 0.1,
-};
-
-const EVIDENCE_SIGNAL_WEIGHTS: Record<string, number> = {
-  'route-match': 0.9,
-  'jsx-text-match': 0.85,
-  'aria-label-match': 0.8,
-  'testid-match': 0.85,
-  'text-content-match': 0.75,
-  'import-graph-match': 0.7,
-  'component-name-match': 0.5,
-  'class-name-match': 0.4,
-  'file-exists': 0.6,
-  'case-insensitive-match': 0.5,
-  'style-adjacent': 0.3,
-  'file-name-match': 0.4,
-  'nearby-text-match': 0.6,
-  'source-map': 0.9,
-  'framework-convention': 0.3,
-  'directory-convention': 0.3,
-  'data-attribute-match': 0.5,
-  heuristic: 0.2,
+  'route-owner': 1.0,
+  'component-owner': 0.9,
+  'definition-site': 0.8,
+  'style-owner': 0.9,
+  'test-owner': 0.3,
+  unknown: 0.9,
 };
 
 export function rankHints(input: RankInput): RankingResult {
@@ -63,12 +42,15 @@ export function rankHints(input: RankInput): RankingResult {
   if (input.hints.length === 0) {
     return {
       status: 'missing',
+      resolution: 'unavailable',
       topHints: [],
       warnings: ['No source hints available'],
     };
   }
 
-  // Classify and score each hint
+  // Classify and score each hint. The calibrated confidence comes from the
+  // evidence model; ranking only applies kind penalties (test/story files
+  // rank lower, etc.) — it never inflates confidence.
   const classified: Array<{
     hint: SourceHint;
     kind: SourceHintKind;
@@ -107,30 +89,37 @@ export function rankHints(input: RankInput): RankingResult {
     });
   }
 
-  // Sort by score descending (deterministic: break ties by filePath)
+  // Deterministic sort: score desc, stable path asc.
   classified.sort((a, b) => {
-    if (Math.abs(a.score - b.score) < 0.001) {
-      return a.hint.filePath.localeCompare(b.hint.filePath);
-    }
-    return b.score - a.score;
+    const diff = a.score - b.score;
+    if (Math.abs(diff) >= 0.0001) return b.score - a.score;
+    return a.hint.filePath.localeCompare(b.hint.filePath);
   });
 
-  // Detect ambiguity
-  let status: SourceHintStatus = 'ranked';
-  if (classified.length >= 2) {
-    const topScore = classified[0]!.score;
-    const secondScore = classified[1]!.score;
-    if (topScore - secondScore < AMBIGUITY_THRESHOLD) {
-      status = 'ambiguous';
-      warnings.push(
-        `Top candidates are very close (score diff: ${(topScore - secondScore).toFixed(3)}). Multiple files are plausible.`,
-      );
-    }
+  // Phase 30 semantic resolution from the EVIDENCE (unpenalized), so
+  // ambiguity is a property of the evidence, not of ranking adjustments.
+  const { resolution, status } = computeSourceResolution(
+    input.hints.map((h) => ({
+      confidence: h.confidence,
+      qualification: h.qualification,
+      path: h.filePath,
+    })),
+  );
+
+  if (resolution === 'ambiguous') {
+    warnings.push(
+      'Top candidates are too close to distinguish safely. Multiple files are plausible.',
+    );
   }
 
-  // Check low confidence
-  if (classified.length > 0 && classified[0]!.confidence < LOW_CONFIDENCE_THRESHOLD) {
-    status = 'low_confidence';
+  // Backward-compatible status: low-confidence single candidates.
+  let finalStatus: SourceHintStatus = status;
+  if (
+    classified.length > 0 &&
+    (classified[0]?.confidence ?? 0) < LOW_CONFIDENCE_THRESHOLD &&
+    status !== 'ambiguous'
+  ) {
+    finalStatus = 'low_confidence';
     warnings.push('All hints have low confidence. Treat as suggestions only.');
   }
 
@@ -167,7 +156,7 @@ export function rankHints(input: RankInput): RankingResult {
       schemaVersion: 1 as const,
       hintId: c.hint.hintId,
       kind,
-      status: idx === 0 ? status : status === 'ambiguous' ? 'ambiguous' : 'ranked',
+      status: idx === 0 ? finalStatus : finalStatus === 'ambiguous' ? 'ambiguous' : 'ranked',
       file: {
         displayPath,
         language: detectLanguage(c.hint.filePath),
@@ -180,10 +169,12 @@ export function rankHints(input: RankInput): RankingResult {
       evidence: c.hint.evidence,
       ranking,
       safety,
+      qualification: c.hint.qualification ?? qualifyFromScore(c.hint.confidence),
+      reasons: c.hint.reasons ?? [],
     };
   });
 
-  return { status, topHints, warnings };
+  return { status: finalStatus, resolution, topHints, warnings };
 }
 
 function computeScore(
@@ -191,64 +182,37 @@ function computeScore(
   kind: SourceHintKind,
   input: RankInput,
 ): { score: number; confidence: number; reasons: string[]; penalties: string[] } {
-  let score = 0;
-  let confidence = hint.confidence;
-  const reasons: string[] = [];
+  const reasons: string[] = [...(hint.reasons ?? [])];
   const penalties: string[] = [];
 
-  // Base score from kind classification
-  const kindWeight = KIND_SCORE_WEIGHTS[kind] ?? 0.1;
-  score += kindWeight * 0.4;
-  reasons.push(`kind=${kind} (weight=${kindWeight})`);
+  let score = hint.confidence;
+  let confidence = hint.confidence;
 
-  // Evidence-based scoring
-  let evidenceScore = 0;
-  let evidenceCount = 0;
-  for (const ev of hint.evidence) {
-    const signalWeight = EVIDENCE_SIGNAL_WEIGHTS[ev.type] ?? 0.2;
-    evidenceScore += signalWeight * ev.confidence;
-    evidenceCount++;
-  }
-  if (evidenceCount > 0) {
-    const avgEvidence = evidenceScore / evidenceCount;
-    score += avgEvidence * 0.4;
-    reasons.push(`evidence avg=${avgEvidence.toFixed(3)} (${evidenceCount} signals)`);
+  // Kind penalty — never a bonus that inflates confidence.
+  const kindFactor = KIND_PENALTY[kind] ?? 0.9;
+  if (kindFactor < 1) {
+    penalties.push(`${kind} (penalty ${kindFactor})`);
+    score *= kindFactor;
+    confidence *= kindFactor;
   }
 
-  // Existence bonus
-  if (hint.exists) {
-    score += 0.1;
-    reasons.push('file exists on disk');
-  } else {
+  // Existence is already part of the evidence model; non-existing files are
+  // never generated anymore, but keep the guard for legacy callers.
+  if (!hint.exists) {
     penalties.push('file does not exist on disk');
+    score *= 0.5;
     confidence *= 0.5;
   }
 
-  // Route match bonus
+  // Route match bonus only when the candidate IS the matched route file.
   if (input.matchedRoute && hint.filePath === input.matchedRoute.file) {
-    score += 0.15;
-    reasons.push('matches current route file');
-  } else if (kind === 'route-owner') {
+    reasons.push('matches the current route file');
     score += 0.05;
-    reasons.push('is a route/page file');
   }
 
-  // Usage-site bonus for files containing visible text
-  if (kind === 'usage-site') {
-    score += 0.1;
-    reasons.push('identified as usage site');
-  }
-
-  // Penalty for definition-site (reusable primitives)
-  if (kind === 'definition-site') {
-    penalties.push('reusable UI primitive (definition site)');
-    confidence *= 0.8;
-  }
-
-  // Penalty for test/story files
+  // Penalty for test/story files (already in kind factor; keep reason).
   if (kind === 'test-owner') {
     penalties.push('test or story file');
-    confidence *= 0.3;
   }
 
   // Penalty for generated/build paths
@@ -258,14 +222,21 @@ function computeScore(
   );
   if (hasGeneratedDir) {
     penalties.push('generated/build output');
+    score *= 0.2;
     confidence *= 0.2;
   }
 
-  // Clamp
   score = Math.min(Math.max(score, 0), 1);
   confidence = Math.min(Math.max(confidence, 0), 1);
 
   return { score, confidence, reasons, penalties };
+}
+
+function qualifyFromScore(confidence: number): 'exact' | 'probable' | 'possible' | 'weak' {
+  if (confidence >= 0.9) return 'exact';
+  if (confidence >= 0.65) return 'probable';
+  if (confidence >= 0.35) return 'possible';
+  return 'weak';
 }
 
 function sanitizePath(filePath: string, projectRoot?: string): string {

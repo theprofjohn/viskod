@@ -17,7 +17,22 @@ describe('SelectionEngine', () => {
     if (result.ok) {
       expect(result.value.selector).toBe('.my-button');
       expect(result.value.source).toBe('overlay');
-      expect(result.value.boundingBox.x).toBe(10);
+      expect(result.value.boundingBox?.x).toBe(10);
+    }
+  });
+
+  it('resolves a bare selector with no geometry (Phase 28A)', async () => {
+    const bus = new EventBus();
+    const engine = new SelectionEngine(bus);
+    const result = await engine.resolveTarget({
+      selector: '.bare-item',
+      source: 'mcp',
+      timestamp: new Date().toISOString(),
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.selector).toBe('.bare-item');
+      expect(result.value.boundingBox).toBeUndefined();
     }
   });
 

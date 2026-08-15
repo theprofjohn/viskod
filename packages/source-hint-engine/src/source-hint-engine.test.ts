@@ -29,7 +29,27 @@ function makeHintInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('SourceHintEngine hardening', () => {
+function makeProject(rootPath: string) {
+  return {
+    metadata: {
+      projectId: 'test',
+      name: 't',
+      rootPath,
+      packageManager: 'pnpm',
+      language: 'ts',
+    },
+    componentIndex: { directories: ['src/components'] },
+  };
+}
+
+function makeTmpProject(): { dir: string; componentDir: string } {
+  const dir = join(tmpdir(), `viskod-she-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
+  const componentDir = join(dir, 'src', 'components');
+  mkdirSync(componentDir, { recursive: true });
+  return { dir, componentDir };
+}
+
+describe('SourceHintEngine hardening (Phase 30 calibrated)', () => {
   it('rejects hints when rootPath is missing', async () => {
     const engine = new SourceHintEngine(new EventBus());
     const input = makeHintInput();
@@ -39,128 +59,75 @@ describe('SourceHintEngine hardening', () => {
     if (!result.ok) expect(result.error.message).toContain('root path');
   });
 
-  it('returns non-existing candidates when no files exist', async () => {
+  it('returns unavailable (typed error) instead of fabricating non-existing candidates', async () => {
     const engine = new SourceHintEngine(new EventBus());
     const input = makeHintInput({
-      project: {
-        metadata: {
-          projectId: 'test',
-          name: 't',
-          rootPath: '/nonexistent/path',
-          packageManager: 'pnpm',
-          language: 'ts',
-        },
-        componentIndex: { directories: ['src/components'] },
-      },
+      project: makeProject('/nonexistent/path'),
     });
     const result = await engine.generateHints(input);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.length).toBeGreaterThan(0);
-      for (const hint of result.value) {
-        expect(hint.exists).toBe(false);
-      }
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('SH_INSUFFICIENT_EVIDENCE');
     }
   });
 
-  it('ranks existing exact files above non-existing generated ones', async () => {
-    const tmpDir = join(tmpdir(), `viskod-she-test-${Date.now()}`);
-    const compDir = join(tmpDir, 'src', 'components');
-    mkdirSync(compDir, { recursive: true });
-    writeFileSync(join(compDir, 'TargetCard.jsx'), 'export default function TargetCard() {}');
-    writeFileSync(join(compDir, 'TargetCard.css'), '.target-card { color: red }');
+  it('ranks existing class-file matches above nothing fabricated — no ghost paths', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(join(componentDir, 'TargetCard.jsx'), 'export default function TargetCard() {}');
+    writeFileSync(join(componentDir, 'TargetCard.css'), '.target-card { color: red }');
 
     const engine = new SourceHintEngine(new EventBus());
-    const input = makeHintInput({
-      project: {
-        metadata: {
-          projectId: 'test',
-          name: 't',
-          rootPath: tmpDir,
-          packageManager: 'pnpm',
-          language: 'ts',
-        },
-        componentIndex: { directories: ['src/components'] },
-      },
-    });
+    const input = makeHintInput({ project: makeProject(dir) });
     const result = await engine.generateHints(input);
     expect(result.ok).toBe(true);
     if (result.ok) {
       const hints = result.value;
       expect(hints.length).toBeGreaterThan(0);
-      // Primary should be an existing exact match
-      expect(hints[0]?.exists).toBe(true);
-      expect([0.8, 0.85, 0.95]).toContain(hints[0]?.confidence);
-      // Non-existing should rank lower
-      const nonExisting = hints.filter((h) => !h.exists);
-      const existing = hints.filter((h) => h.exists);
-      expect(existing.length).toBeGreaterThan(0);
-      for (const ne of nonExisting) {
-        const neIdx = hints.indexOf(ne);
-        const lastExistingIdx = Math.max(...existing.map((e) => hints.indexOf(e)));
-        expect(neIdx).toBeGreaterThan(lastExistingIdx);
+      // Every returned candidate is a real file — never a fabricated path.
+      for (const hint of hints) {
+        expect(hint.exists).toBe(true);
+        expect(hint.matchType).not.toBe('generated-non-existing');
+        expect(hint.matchType).not.toBe('generated');
       }
+      // Class-name file existence is moderate evidence → possible at most.
+      const primary = hints[0];
+      expect(primary?.qualification).toBe('possible');
+      expect(primary?.confidence).toBeLessThan(0.65);
     }
 
-    rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   });
 
-  it('finds case-insensitive matches when exact casing differs', async () => {
-    const tmpDir = join(tmpdir(), `viskod-she-ci-${Date.now()}`);
-    const compDir = join(tmpDir, 'src', 'components');
-    mkdirSync(compDir, { recursive: true });
-    // Create file with different casing than the generated pattern
-    writeFileSync(join(compDir, 'TargetCard.jsx'), '');
+  it('finds case-insensitive matches with calibrated (not inflated) confidence', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(join(componentDir, 'TargetCard.jsx'), '');
 
     const engine = new SourceHintEngine(new EventBus());
-    const input = makeHintInput({
-      project: {
-        metadata: {
-          projectId: 'test',
-          name: 't',
-          rootPath: tmpDir,
-          packageManager: 'pnpm',
-          language: 'ts',
-        },
-        componentIndex: { directories: ['src/components'] },
-      },
-    });
+    const input = makeHintInput({ project: makeProject(dir) });
     const result = await engine.generateHints(input);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const hints = result.value;
-      const ciHints = hints.filter((h) => h.matchType === 'case-insensitive');
+      const ciHints = result.value.filter((h) => h.matchType === 'case-insensitive');
       expect(ciHints.length).toBeGreaterThan(0);
       for (const h of ciHints) {
         expect(h.exists).toBe(true);
         expect(h.filePath.toLowerCase()).toContain('targetcard');
-        expect(h.confidence).toBe(0.85);
+        // Calibrated: class-name-only evidence can never be high confidence.
+        expect(h.confidence).toBe(0.5);
+        expect(h.qualification).toBe('possible');
       }
     }
 
-    rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   });
 
-  it('suggests adjacent CSS files when a component is found', async () => {
-    const tmpDir = join(tmpdir(), `viskod-she-css-${Date.now()}`);
-    const compDir = join(tmpDir, 'src', 'components');
-    mkdirSync(compDir, { recursive: true });
-    writeFileSync(join(compDir, 'TargetCard.jsx'), '');
-    writeFileSync(join(compDir, 'TargetCard.css'), '');
+  it('suggests adjacent CSS files as weak evidence when a component is found', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(join(componentDir, 'TargetCard.jsx'), '');
+    writeFileSync(join(componentDir, 'TargetCard.css'), '');
 
     const engine = new SourceHintEngine(new EventBus());
-    const input = makeHintInput({
-      project: {
-        metadata: {
-          projectId: 'test',
-          name: 't',
-          rootPath: tmpDir,
-          packageManager: 'pnpm',
-          language: 'ts',
-        },
-        componentIndex: { directories: ['src/components'] },
-      },
-    });
+    const input = makeHintInput({ project: makeProject(dir) });
     const result = await engine.generateHints(input);
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -168,254 +135,97 @@ describe('SourceHintEngine hardening', () => {
       expect(cssHints.length).toBeGreaterThan(0);
       for (const h of cssHints) {
         expect(h.exists).toBe(true);
-        // May be found directly (case-insensitive) or via style adjacency
-        expect(['style-adjacent', 'case-insensitive']).toContain(h.matchType);
+        expect(h.qualification).toBe('weak');
+        expect(h.confidence).toBeLessThan(0.35);
       }
     }
 
-    rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   });
 
-  it('confidence is differentiated (not flat 0.65 anymore)', async () => {
-    const tmpDir = join(tmpdir(), `viskod-she-conf-${Date.now()}`);
-    const compDir = join(tmpDir, 'src', 'components');
-    mkdirSync(compDir, { recursive: true });
-    writeFileSync(join(compDir, 'TargetCard.jsx'), '');
+  it('confidence is differentiated and capped (no flat inflation)', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(join(componentDir, 'TargetCard.jsx'), '');
+    writeFileSync(join(componentDir, 'TargetCard.css'), '');
 
     const engine = new SourceHintEngine(new EventBus());
-    const input = makeHintInput({
-      project: {
-        metadata: {
-          projectId: 'test',
-          name: 't',
-          rootPath: tmpDir,
-          packageManager: 'pnpm',
-          language: 'ts',
-        },
-        componentIndex: { directories: ['src/components'] },
-      },
-    });
+    const input = makeHintInput({ project: makeProject(dir) });
     const result = await engine.generateHints(input);
     expect(result.ok).toBe(true);
     if (result.ok) {
       const confidences = result.value.map((h) => h.confidence);
       const uniqueConfidences = [...new Set(confidences)];
       expect(uniqueConfidences.length).toBeGreaterThan(1);
+      for (const c of uniqueConfidences) expect(c).toBeLessThan(0.65);
     }
 
-    rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   });
 
-  it('includes reason and matchType for each hint', async () => {
+  it('includes reasons, matchType, and qualification for each hint', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(join(componentDir, 'TargetCard.jsx'), '');
+
     const engine = new SourceHintEngine(new EventBus());
-    const input = makeHintInput({
-      project: {
-        metadata: {
-          projectId: 'test',
-          name: 't',
-          rootPath: '/nonexistent',
-          packageManager: 'pnpm',
-          language: 'ts',
-        },
-        componentIndex: { directories: ['src/components'] },
-      },
-    });
+    const input = makeHintInput({ project: makeProject(dir) });
     const result = await engine.generateHints(input);
     expect(result.ok).toBe(true);
     if (result.ok) {
       for (const hint of result.value) {
         expect(hint.reason).toBeTruthy();
+        expect(hint.reasons?.length).toBeGreaterThan(0);
         expect(hint.matchType).toBeTruthy();
         expect(typeof hint.exists).toBe('boolean');
+        expect(['exact', 'probable', 'possible', 'weak']).toContain(hint.qualification);
       }
     }
+
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('backward compatible with schema version', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(join(componentDir, 'TargetCard.jsx'), '');
+
     const engine = new SourceHintEngine(new EventBus());
-    const input = makeHintInput({
-      project: {
-        metadata: {
-          projectId: 'test',
-          name: 't',
-          rootPath: '/nonexistent',
-          packageManager: 'pnpm',
-          language: 'ts',
-        },
-        componentIndex: { directories: ['src/components'] },
-      },
-    });
+    const input = makeHintInput({ project: makeProject(dir) });
     const result = await engine.generateHints(input);
     expect(result.ok).toBe(true);
     if (result.ok && result.value.length > 0) {
       expect(result.value[0]?.schemaVersion).toBeTruthy();
     }
+
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('accepts className and generates hints from it', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(join(componentDir, 'TargetCard.jsx'), 'export default function TargetCard() {}');
+
     const engine = new SourceHintEngine(new EventBus());
     const input = makeHintInput({
       domContext: { tagName: 'div', className: 'target-card' },
-      project: {
-        metadata: {
-          projectId: 'test',
-          name: 't',
-          rootPath: '/tmp',
-          packageManager: 'pnpm',
-          language: 'ts',
-        },
-        componentIndex: { directories: ['src/components'] },
-      },
+      project: makeProject(dir),
     });
     const result = await engine.generateHints(input);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.length).toBeGreaterThan(0);
       const hasTargetCard = result.value.some((h) =>
-        h.filePath.toLowerCase().includes('target-card'),
+        h.filePath.toLowerCase().includes('targetcard'),
       );
       expect(hasTargetCard).toBe(true);
     }
-  });
 
-  describe('usage-site hint ranking', () => {
-    it('usage-site hint ranks above generic component hints when visible text matches', async () => {
-      const tmpDir = join(tmpdir(), `viskod-she-usage-${Date.now()}`);
-      // Create generic component (card.tsx) that WON'T match via usage-site (no visible text in it)
-      // We rely on className-based matching for generic hints
-      const compDir = join(tmpDir, 'src', 'components');
-      mkdirSync(compDir, { recursive: true });
-      writeFileSync(join(compDir, 'card.tsx'), 'export function Card() { return <div>Card</div> }');
-      writeFileSync(join(compDir, 'flex.tsx'), 'export function Flex() { return <div>Flex</div> }');
-
-      // Create usage file with visible text AND component references
-      const usageDir = join(tmpDir, 'src', 'features', 'auth', 'sign-in');
-      mkdirSync(usageDir, { recursive: true });
-      writeFileSync(
-        join(usageDir, 'index.tsx'),
-        [
-          'import { Card } from "@/components/ui/card"',
-          'export function SignIn() {',
-          '  return <Card><CardTitle>Sign in</CardTitle><label>Email</label><input />',
-          '    <label>Password</label><input type="password" /></Card>',
-          '}',
-        ].join('\n'),
-      );
-
-      const engine = new SourceHintEngine(new EventBus());
-      const input = makeHintInput({
-        domContext: {
-          tagName: 'div',
-          className: 'flex max-w-sm gap-4',
-          text: 'Sign in Enter your email and password below to log into your account',
-        },
-        project: {
-          metadata: {
-            projectId: 'test',
-            name: 't',
-            rootPath: tmpDir,
-            packageManager: 'pnpm',
-            language: 'ts',
-          },
-          componentIndex: { directories: ['src/components'] },
-        },
-      });
-      const result = await engine.generateHints(input);
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        const hints = result.value;
-        expect(hints.length).toBeGreaterThan(0);
-
-        // Log hints for debugging
-        console.log('Top 5 hints:');
-        hints.slice(0, 5).forEach((h, i) => {
-          console.log(
-            `  ${i + 1}. ${h.filePath} (${h.matchType}, exists=${h.exists}, conf=${h.confidence})`,
-          );
-        });
-
-        // Top hint should be the usage-site file
-        const topHint = hints[0]!;
-        expect(topHint.filePath).toContain('sign-in');
-        expect(topHint.matchType).toBe('usage-site');
-        expect(topHint.exists).toBe(true);
-        expect(topHint.reason).toContain('Usage-site');
-
-        // Usage-site hint should be at #1
-        const usageSiteIdx = hints.findIndex((h) => h.matchType === 'usage-site');
-        expect(usageSiteIdx).toBe(0);
-      }
-
-      rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    it('generic component hints still appear below usage-site hint', async () => {
-      const tmpDir = join(tmpdir(), `viskod-she-generic-${Date.now()}`);
-      const compDir = join(tmpDir, 'src', 'components');
-      mkdirSync(compDir, { recursive: true });
-      writeFileSync(join(compDir, 'card.tsx'), 'export function Card() { return <div>Card</div> }');
-      writeFileSync(join(compDir, 'flex.tsx'), 'export function Flex() { return <div>Flex</div> }');
-
-      const usageDir = join(tmpDir, 'src', 'features', 'auth', 'sign-in');
-      mkdirSync(usageDir, { recursive: true });
-      writeFileSync(
-        join(usageDir, 'index.tsx'),
-        '// Sign in with Card\nimport { Card } from "./card"\nexport default function Page() { return <Card><h1>Sign in</h1></Card> }\n',
-      );
-
-      const engine = new SourceHintEngine(new EventBus());
-      const input = makeHintInput({
-        domContext: {
-          tagName: 'div',
-          className: 'flex max-w-sm gap-4',
-          text: 'Sign in Email Password submit account',
-        },
-        project: {
-          metadata: {
-            projectId: 'test',
-            name: 't',
-            rootPath: tmpDir,
-            packageManager: 'pnpm',
-            language: 'ts',
-          },
-          componentIndex: { directories: ['src/components'] },
-        },
-      });
-      const result = await engine.generateHints(input);
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        const hints = result.value;
-
-        const usageSiteIdx = hints.findIndex((h) => h.matchType === 'usage-site');
-        expect(usageSiteIdx).toBe(0);
-
-        // Generic hints still exist (flex.tsx, card.tsx)
-        const hasGeneric = hints.some((h) => h.matchType !== 'usage-site');
-        expect(hasGeneric).toBe(true);
-
-        // Generic hints are ranked after #1
-        const firstNonUsage = hints.findIndex((h) => h.matchType !== 'usage-site');
-        expect(firstNonUsage).toBeGreaterThan(0);
-      }
-
-      rmSync(tmpDir, { recursive: true, force: true });
-    });
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('uses cache for repeated identical inputs', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(join(componentDir, 'TargetCard.jsx'), '');
+
     const engine = new SourceHintEngine(new EventBus());
-    const input = makeHintInput({
-      project: {
-        metadata: {
-          projectId: 'test',
-          name: 't',
-          rootPath: '/nonexistent',
-          packageManager: 'pnpm',
-          language: 'ts',
-        },
-        componentIndex: { directories: ['src/components'] },
-      },
-    });
+    const input = makeHintInput({ project: makeProject(dir) });
     const first = await engine.generateHints(input);
     const second = await engine.generateHints(input);
     expect(first.ok).toBe(true);
@@ -423,5 +233,81 @@ describe('SourceHintEngine hardening', () => {
     if (first.ok && second.ok) {
       expect(first.value[0]?.hintId).toBe(second.value[0]?.hintId);
     }
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('exhausted scan budget returns explicit unavailable, not a hang (Phase 30)', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    for (let i = 0; i < 20; i++) {
+      writeFileSync(
+        join(componentDir, `File${i}.tsx`),
+        `export function File${i}() { return <p>Shared status ${i} banner</p>; }`,
+      );
+    }
+
+    const engine = new SourceHintEngine(new EventBus());
+    const input = makeHintInput({
+      domContext: { tagName: 'p', className: '', id: '', text: 'Shared status banner' },
+      project: makeProject(dir),
+    });
+    // A budget of 2 files forces exhaustion on a 20-file tree.
+    const result = await engine.generateHints(input, { budget: { maxFiles: 2, maxTimeMs: 5000 } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('SH_BUDGET_EXCEEDED');
+    }
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('never generates a Card candidate from a generic div alone (VISKOD-AUDIT-008)', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(join(componentDir, 'card.tsx'), 'export function Card() { return <div /> }');
+
+    const engine = new SourceHintEngine(new EventBus());
+    const input = makeHintInput({
+      // Generic div with NO class, NO id, NO text — the audit's dangerous case.
+      domContext: { tagName: 'div', className: '', id: '', text: '' },
+      project: makeProject(dir),
+    });
+    const result = await engine.generateHints(input);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // No evidence → explicit unavailable, NOT a fabricated high-confidence Card.
+      expect(result.error.code).toBe('SH_INSUFFICIENT_EVIDENCE');
+    }
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a generic div with class card never yields high confidence for card.tsx', async () => {
+    const { dir, componentDir } = makeTmpProject();
+    writeFileSync(
+      join(componentDir, 'card.tsx'),
+      'export function Card() { return <div>Card</div> }',
+    );
+
+    const engine = new SourceHintEngine(new EventBus());
+    const input = makeHintInput({
+      domContext: { tagName: 'div', className: 'card', id: '', text: 'Card' },
+      project: makeProject(dir),
+    });
+    const result = await engine.generateHints(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const card = result.value.find((h) => h.filePath.toLowerCase().includes('card.tsx'));
+      expect(card).toBeDefined();
+      if (card) {
+        // Generic class + single word 'Card': honest possible at most.
+        // The audit bug was ~0.95 inflated confidence — this can never be
+        // probable/exact or dominate ranking.
+        expect(card.qualification).not.toBe('probable');
+        expect(card.qualification).not.toBe('exact');
+        expect(card.confidence).toBeLessThan(0.65);
+      }
+    }
+
+    rmSync(dir, { recursive: true, force: true });
   });
 });

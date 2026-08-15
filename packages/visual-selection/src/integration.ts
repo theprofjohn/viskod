@@ -44,7 +44,10 @@ export class SelectionOverlayController {
   private service: VisualSelectionService;
   private overlayScript: string;
   private active = false;
-  private pollInterval: ReturnType<typeof setInterval> | null = null;
+  /** Next-poll timer; serialized loop so polls never overlap (VISKOD-AUDIT-013). */
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped on exit so late async poll completions cannot mutate state. */
+  private generation = 0;
 
   constructor(options: OverlayIntegrationOptions) {
     this.pageId = options.pageId;
@@ -79,10 +82,11 @@ export class SelectionOverlayController {
     this.stopPolling();
 
     await this.browser.hideOverlaySelectionMode();
-    await this.service.exitSelectionMode(this.pageId);
+    const exitResult = await this.service.exitSelectionMode(this.pageId);
 
     this.active = false;
-    return ok(undefined);
+    this.generation++;
+    return exitResult;
   }
 
   async clearSelection(): Promise<Result<void>> {
@@ -98,6 +102,9 @@ export class SelectionOverlayController {
   }
 
   private async handleOverlayEvent(event: OverlayEvent): Promise<void> {
+    if (!this.active) return;
+    const generation = this.generation;
+
     switch (event.type) {
       case 'overlay:element-clicked': {
         const data = event.data as Record<string, unknown> | undefined;
@@ -107,8 +114,10 @@ export class SelectionOverlayController {
           .map((info) => this.buildTargetFromEvent(info))
           .filter((target): target is VisualSelectionTarget => target !== null);
         if (targets.length === 0) return;
+        if (generation !== this.generation || !this.active) return;
 
         const pageInfo = await this.buildPageInfo();
+        if (generation !== this.generation || !this.active) return;
         if (targets.length === 1 && data.multi !== true) {
           this.service.createSingleSelection(
             this.pageId,
@@ -134,12 +143,14 @@ export class SelectionOverlayController {
         const targets = this.selectedEventInfos(data)
           .map((info) => this.buildTargetFromEvent(info))
           .filter((target): target is VisualSelectionTarget => target !== null);
+        if (generation !== this.generation || !this.active) return;
         if (targets.length === 0) {
           await this.service.clearSelection(this.pageId);
           break;
         }
 
         const pageInfo = await this.buildPageInfo();
+        if (generation !== this.generation || !this.active) return;
         this.service.createMultiSelection(
           this.pageId,
           targets,
@@ -158,6 +169,7 @@ export class SelectionOverlayController {
         if (!dragRect) return;
 
         const targets = await this.collectBoxTargets(dragRect);
+        if (generation !== this.generation || !this.active) return;
         const selectionResult = this.service.createBoxSelection(
           this.pageId,
           targets,
@@ -208,22 +220,43 @@ export class SelectionOverlayController {
     );
   }
 
+  /**
+   * Serialized overlay polling: the next poll is scheduled only after the
+   * previous poll completes, so executions can never overlap. Stop bumps the
+   * generation, which makes any in-flight poll discard its result before it
+   * can mutate selection state after exit.
+   */
   private startPolling(): void {
-    this.pollInterval = setInterval(async () => {
-      if (!this.active) return;
+    if (this.pollTimer) return;
+    this.scheduleNextPoll();
+  }
 
-      const result = await this.browser.pollOverlayEvent();
-      if (result.ok && result.value) {
-        const event = result.value as OverlayEvent;
-        await this.handleOverlayEvent(event);
-      }
+  private scheduleNextPoll(): void {
+    if (!this.active) return;
+    this.pollTimer = setTimeout(() => {
+      this.pollTimer = null;
+      void this.pollOnce();
     }, 100);
   }
 
+  private async pollOnce(): Promise<void> {
+    if (!this.active) return;
+    const generation = this.generation;
+
+    const result = await this.browser.pollOverlayEvent();
+    if (generation !== this.generation || !this.active) return;
+    if (result.ok && result.value) {
+      await this.handleOverlayEvent(result.value as OverlayEvent);
+    }
+    if (generation !== this.generation || !this.active) return;
+    this.scheduleNextPoll();
+  }
+
   private stopPolling(): void {
-    if (this.pollInterval) {
-      clearInterval(this.pollInterval);
-      this.pollInterval = null;
+    this.generation++;
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = null;
     }
   }
 

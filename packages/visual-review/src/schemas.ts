@@ -14,6 +14,8 @@ export const VisualReviewStatusSchema = z.enum([
 export const VisualComparisonStatusSchema = z.enum([
   'changed',
   'unchanged',
+  'incomparable',
+  'visual_unavailable',
   'missing_after',
   'ambiguous_after',
   'stale_before',
@@ -92,6 +94,12 @@ export const ReviewSnapshotRefSchema = z.object({
     confidence: z.number().min(0).max(1),
     resolutionStatus: z.enum(['resolved', 'ambiguous', 'stale', 'missing']),
   }),
+  identity: z
+    .object({
+      targetId: z.string().optional(),
+      stableAttributes: z.record(z.string(), z.string()).optional(),
+    })
+    .optional(),
   visualEvidence: z
     .object({
       screenshotId: z.string().optional(),
@@ -126,6 +134,37 @@ export const VisualComparisonSchema = z.object({
       boundingBoxDelta: RectDeltaSchema.optional(),
       screenshotDiffId: z.string().optional(),
       diffThumbnailId: z.string().optional(),
+      artifactComparison: z
+        .object({
+          status: z.enum(['changed', 'unchanged', 'incomparable', 'unavailable']),
+          reason: z.string().optional(),
+          changedPixelRatio: z.number().min(0).max(1).optional(),
+          changedPixels: z.number().int().nonnegative().optional(),
+          totalPixels: z.number().int().nonnegative().optional(),
+          comparisonDimensions: z
+            .object({ width: z.number().int().positive(), height: z.number().int().positive() })
+            .optional(),
+          beforeDimensions: z
+            .object({ width: z.number().int().positive(), height: z.number().int().positive() })
+            .optional(),
+          afterDimensions: z
+            .object({ width: z.number().int().positive(), height: z.number().int().positive() })
+            .optional(),
+          geometry: z
+            .object({
+              xDelta: z.number().optional(),
+              yDelta: z.number().optional(),
+              widthDelta: z.number().optional(),
+              heightDelta: z.number().optional(),
+            })
+            .optional(),
+          geometryChanged: z.boolean().optional(),
+          viewportCompatible: z.boolean().optional(),
+          pixelDiffConfigVersion: z.number().optional(),
+        })
+        .optional(),
+      diffArtifactId: z.string().optional(),
+      viewportCompatible: z.boolean().optional(),
     })
     .optional(),
   evidence: z
@@ -145,6 +184,57 @@ export const VisualReviewDecisionSchema = z.object({
   actor: z.enum(['local-user', 'system']),
 });
 
+export const ReviewArtifactsPreviewSchema = z.object({
+  policy: z.enum(['disabled', 'local-sensitive-target-crop']),
+  before: z
+    .object({
+      artifactId: z.string(),
+      status: z.enum(['collected', 'not_collected', 'failed', 'unavailable']),
+      capturedAt: z.string().optional(),
+      dimensions: z.object({ width: z.number(), height: z.number() }).optional(),
+    })
+    .optional(),
+  after: z
+    .object({
+      artifactId: z.string(),
+      status: z.enum(['collected', 'not_collected', 'failed', 'unavailable']),
+      capturedAt: z.string().optional(),
+      dimensions: z.object({ width: z.number(), height: z.number() }).optional(),
+    })
+    .optional(),
+  diff: z
+    .object({
+      artifactId: z.string(),
+      status: z.enum(['collected', 'not_collected', 'failed', 'unavailable']),
+      capturedAt: z.string().optional(),
+    })
+    .optional(),
+  comparison: z
+    .object({
+      status: z.enum(['changed', 'unchanged', 'incomparable', 'unavailable']),
+      reason: z.string().optional(),
+      changedPixelRatio: z.number().optional(),
+      changedPixels: z.number().optional(),
+      totalPixels: z.number().optional(),
+      comparisonDimensions: z.object({ width: z.number(), height: z.number() }).optional(),
+      beforeDimensions: z.object({ width: z.number(), height: z.number() }).optional(),
+      afterDimensions: z.object({ width: z.number(), height: z.number() }).optional(),
+      geometry: z
+        .object({
+          xDelta: z.number().optional(),
+          yDelta: z.number().optional(),
+          widthDelta: z.number().optional(),
+          heightDelta: z.number().optional(),
+        })
+        .optional(),
+      geometryChanged: z.boolean().optional(),
+      viewportCompatible: z.boolean().optional(),
+      pixelDiffConfigVersion: z.number().optional(),
+    })
+    .optional(),
+  visualUnavailableReason: z.string().optional(),
+});
+
 export const VisualReviewSchema = z.object({
   schemaVersion: z.literal(1),
   reviewId: z.string().min(1),
@@ -160,6 +250,7 @@ export const VisualReviewSchema = z.object({
   after: ReviewSnapshotRefSchema.optional(),
   comparison: VisualComparisonSchema.optional(),
   decision: VisualReviewDecisionSchema.optional(),
+  artifacts: ReviewArtifactsPreviewSchema.optional(),
   lifecycle: z.array(VisualReviewEventSchema).default([]),
   redaction: z.object({
     applied: z.boolean(),

@@ -172,7 +172,6 @@ export class RuntimeSession {
 
     const selection: SelectionTarget = {
       selector,
-      boundingBox: { x: 0, y: 0, width: 100, height: 100 },
       source: 'mcp',
     };
 

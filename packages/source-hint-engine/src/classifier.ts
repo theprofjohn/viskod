@@ -95,6 +95,12 @@ export interface ImportGraphEntry {
   importedName: string;
   isDefault: boolean;
   isNamespace: boolean;
+  /**
+   * true when the import specifier is a relative/local path and
+   * `importedFile` was resolved to a repository-relative file path.
+   * Package imports remain `isLocal: false`.
+   */
+  isLocal?: boolean;
 }
 
 export function classifyHint(input: ClassifyInput): {

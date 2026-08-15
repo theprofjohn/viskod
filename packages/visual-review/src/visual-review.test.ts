@@ -3,8 +3,10 @@ import * as path from 'node:path';
 import { EventBus } from '@viskod/event-bus';
 import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
 import type { VisualSelection } from '@viskod/visual-selection';
+import { PNG } from 'pngjs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ReviewPersistence, ReviewServiceImpl } from './index';
+import type { TargetCropCapture } from './artifact-types';
+import { ReviewArtifactStore, ReviewPersistence, ReviewServiceImpl } from './index';
 import { resolveRecaptureTarget } from './targetResolver';
 import type { RecaptureAdapter, RecaptureResult, ReviewSnapshotRef } from './types';
 
@@ -881,5 +883,510 @@ describe('Target resolution', () => {
       expect(result.value.status).toBe('ready');
       expect(result.value.after).toBeDefined();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 31 — local-sensitive visual review artifacts
+// ---------------------------------------------------------------------------
+
+function makeShot(
+  rgb: [number, number, number] = [10, 120, 200],
+  identity?: TargetCropCapture['identity'],
+  capturedAt?: string,
+): TargetCropCapture {
+  const png = new PNG({ width: 120, height: 40 });
+  for (let i = 0; i < 120 * 40; i++) {
+    const idx = i * 4;
+    png.data[idx] = rgb[0];
+    png.data[idx + 1] = rgb[1];
+    png.data[idx + 2] = rgb[2];
+    png.data[idx + 3] = 255;
+  }
+  return {
+    buffer: PNG.sync.write(png),
+    format: 'png',
+    width: 120,
+    height: 40,
+    targetRect: { x: 100, y: 200, width: 120, height: 40 },
+    cropRect: { x: 76, y: 176, width: 168, height: 88 },
+    padding: 24,
+    viewport: { width: 1440, height: 900, deviceScaleFactor: 1 },
+    url: 'http://localhost:5173/settings',
+    capturedAt: capturedAt ?? new Date().toISOString(),
+    resolutionStatus: 'resolved',
+    matchCount: 1,
+    identity: identity ?? { targetId: 'tgt_001', stableAttributes: { 'data-testid': 'save-btn' } },
+  };
+}
+
+function makeShotAdapter(shot: TargetCropCapture): RecaptureAdapter {
+  return async () =>
+    makeRecaptureResult({
+      boundingBox: shot.targetRect,
+      text: 'Save changes',
+      viewport: {
+        width: shot.viewport.width,
+        height: shot.viewport.height,
+        deviceScaleFactor: shot.viewport.deviceScaleFactor,
+      },
+      elementScreenshot: shot,
+      identity: shot.identity,
+    });
+}
+
+let phase31IssueCounter = 0;
+
+/** Fresh issue with a unique target identity — isolates baseline state between tests. */
+async function createPhase31Issue(): Promise<{
+  issueId: string;
+  targetId: string;
+  stableAttributes: Record<string, string>;
+}> {
+  phase31IssueCounter++;
+  const targetId = `tgt_p31_${phase31IssueCounter}`;
+  const stableAttributes = { 'data-testid': `save-btn-${phase31IssueCounter}` };
+  const selection = makeSelection({
+    targets: [
+      {
+        targetId,
+        documentOrder: 0,
+        geometry: { viewportRect: { x: 100, y: 200, width: 120, height: 40 } },
+        semantics: {
+          tagName: 'button',
+          role: 'button',
+          accessibleName: 'Save',
+          textPreview: 'Save changes',
+          isInteractive: true,
+        },
+        fingerprints: { stableAttributes },
+        resolutionCandidates: [{ strategy: 'runtime-node', value: 'live', confidence: 0.9 }],
+      },
+    ],
+  });
+  const result = await issueService.createIssue(
+    selection,
+    'test-session',
+    'test-page',
+    `Phase 31 issue ${phase31IssueCounter}`,
+  );
+  if (!result.ok) throw new Error('failed to create Phase 31 issue');
+  return { issueId: result.value.issueId, targetId, stableAttributes };
+}
+
+describe('Phase 31 — visual review artifacts', () => {
+  it('enabled policy attaches the baseline at review creation', async () => {
+    const { issueId } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    await store.saveBaseline(issueId, makeShot());
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      undefined,
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    expect(create.ok).toBe(true);
+    if (!create.ok) return;
+    const get = await service.getReview(create.value.reviewId);
+    expect(get.ok).toBe(true);
+    if (get.ok) {
+      expect(get.value.artifacts?.policy).toBe('local-sensitive-target-crop');
+      expect(get.value.artifacts?.before?.status).toBe('collected');
+      expect(get.value.artifacts?.before?.artifactId).toMatch(/^art_[a-f0-9]{32}$/);
+      // No filesystem path ever leaks into the projection.
+      expect(JSON.stringify(get.value)).not.toContain('.viskod');
+      expect(JSON.stringify(get.value)).not.toContain('before.png');
+      // Stable-attribute identity stays internal: the projection carries
+      // only the opaque target id.
+      expect(JSON.stringify(get.value)).not.toContain('data-testid');
+      expect(JSON.stringify(get.value)).not.toContain('save-btn');
+    }
+  });
+
+  it('disabled policy never attaches artifacts and reports visual unavailable', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(makeShot([10, 120, 200], { targetId, stableAttributes })),
+      new ReviewArtifactStore(REVIEW_STORAGE, 'disabled'),
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    const recapture = await service.recaptureReview({ reviewId: create.value.reviewId });
+    expect(recapture.ok).toBe(true);
+    if (recapture.ok) {
+      expect(recapture.value.artifacts).toBeUndefined();
+      expect(recapture.value.comparison?.status).toBe('unchanged'); // legacy metadata result
+    }
+  });
+
+  it('unchanged capture stays unchanged with real pixel evidence', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    await store.saveBaseline(issueId, makeShot([10, 120, 200], { targetId, stableAttributes }));
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(makeShot([10, 120, 200], { targetId, stableAttributes })),
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    const result = await service.recaptureReview({ reviewId: create.value.reviewId });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.comparison?.status).toBe('unchanged');
+      expect(result.value.comparison?.visual?.artifactComparison?.changedPixelRatio).toBe(0);
+      expect(result.value.artifacts?.after?.status).toBe('collected');
+      expect(result.value.artifacts?.diff?.status).toBe('collected');
+    }
+  });
+
+  it('color-only change is detected via pixel evidence', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    await store.saveBaseline(issueId, makeShot([255, 255, 255], { targetId, stableAttributes }));
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(makeShot([255, 0, 0], { targetId, stableAttributes })),
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    const result = await service.recaptureReview({ reviewId: create.value.reviewId });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.comparison?.status).toBe('changed');
+      expect(
+        result.value.comparison?.visual?.artifactComparison?.changedPixelRatio,
+      ).toBeGreaterThan(0.99);
+      expect(result.value.comparison?.visual?.diffArtifactId).toBeTruthy();
+    }
+  });
+
+  it('geometry-only movement is detected as changed through geometry evidence', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    const beforeShot = makeShot([10, 120, 200], { targetId, stableAttributes });
+    await store.saveBaseline(issueId, beforeShot);
+    // Same pixels, moved 20px right.
+    const afterShot = {
+      ...makeShot([10, 120, 200], { targetId, stableAttributes }),
+      targetRect: { x: 120, y: 200, width: 120, height: 40 },
+    };
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(afterShot),
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    const result = await service.recaptureReview({ reviewId: create.value.reviewId });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.comparison?.status).toBe('changed');
+      expect(result.value.comparison?.visual?.artifactComparison?.geometry?.xDelta).toBe(20);
+      expect(result.value.comparison?.visual?.artifactComparison?.geometryChanged).toBe(true);
+    }
+  });
+
+  it('viewport/DPR mismatch is incomparable, never a confident pixel result', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    const beforeShot = makeShot([10, 120, 200], { targetId, stableAttributes });
+    await store.saveBaseline(issueId, beforeShot);
+    const afterShot = {
+      ...makeShot([10, 120, 200], { targetId, stableAttributes }),
+      viewport: { width: 800, height: 600, deviceScaleFactor: 1 },
+    };
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(afterShot),
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    const result = await service.recaptureReview({ reviewId: create.value.reviewId });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.comparison?.status).toBe('incomparable');
+      expect(result.value.comparison?.visual?.artifactComparison?.viewportCompatible).toBe(false);
+    }
+  });
+
+  it('missing baseline reports visual comparison unavailable, never fabricated', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(makeShot([10, 120, 200], { targetId, stableAttributes })),
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    const result = await service.recaptureReview({ reviewId: create.value.reviewId });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.comparison?.status).toBe('visual_unavailable');
+      expect(result.value.comparison?.visual?.artifactComparison?.status).toBe('unavailable');
+    }
+  });
+
+  it('after label never falls back to tagName (VISKOD-AUDIT-005 regression)', async () => {
+    // Before label is a human-readable label; the after recapture resolves a
+    // DIV with the same content. Identity/label must not flip to changed.
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    await store.saveBaseline(issueId, makeShot([10, 120, 200], { targetId, stableAttributes }));
+    const adapter: RecaptureAdapter = async () =>
+      makeRecaptureResult({
+        tagName: 'DIV',
+        text: 'Save changes',
+        boundingBox: { x: 100, y: 200, width: 120, height: 40 },
+        elementScreenshot: makeShot([10, 120, 200], { targetId, stableAttributes }),
+        identity: { targetId, stableAttributes },
+      });
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      adapter,
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    const result = await service.recaptureReview({ reviewId: create.value.reviewId });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.after?.targetSummary.label).toBe('Save changes');
+      expect(result.value.comparison?.status).toBe('unchanged');
+    }
+  });
+
+  it('identity mismatch (target replaced) is incomparable, never a silent diff', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    await store.saveBaseline(issueId, makeShot([10, 120, 200], { targetId, stableAttributes }));
+    const adapter: RecaptureAdapter = async () =>
+      makeRecaptureResult({
+        text: 'Save changes',
+        elementScreenshot: makeShot([10, 120, 200], {
+          targetId: 'tgt_replaced',
+          stableAttributes: { 'data-testid': 'other-btn' },
+        }),
+        identity: { targetId: 'tgt_replaced', stableAttributes: { 'data-testid': 'other-btn' } },
+      });
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      adapter,
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    const result = await service.recaptureReview({ reviewId: create.value.reviewId });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.comparison?.status).toBe('incomparable');
+    }
+  });
+
+  it('artifacts survive a simulated restart and stay pairable by review id', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    await store.saveBaseline(issueId, makeShot([255, 255, 255], { targetId, stableAttributes }));
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(makeShot([255, 0, 0], { targetId, stableAttributes })),
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    await service.recaptureReview({ reviewId: create.value.reviewId });
+
+    // Fresh process: new persistence + new artifact store on the same dirs.
+    const freshStore = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    const freshService = new ReviewServiceImpl(
+      new EventBus(),
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      undefined,
+      freshStore,
+    );
+    const get = await freshService.getReview(create.value.reviewId);
+    expect(get.ok).toBe(true);
+    if (get.ok) {
+      expect(get.value.comparison?.status).toBe('changed');
+      expect(get.value.artifacts?.before?.artifactId).toBeTruthy();
+      expect(get.value.artifacts?.after?.artifactId).toBeTruthy();
+      expect(get.value.artifacts?.diff?.artifactId).toBeTruthy();
+    }
+    const manifest = await freshStore.loadManifest(create.value.reviewId);
+    expect(manifest.ok && manifest.value?.pairing.beforeArtifactId).toBeTruthy();
+  });
+
+  it('recordDecision persists the optional note (VISKOD-AUDIT-023)', async () => {
+    const { issueId } = await createPhase31Issue();
+    const create = await reviewService.createReview({ issueId }, 's', 'p');
+    if (!create.ok) return;
+    const result = await reviewService.recordDecision(create.value.reviewId, {
+      decision: 'accepted',
+      note: 'Colors and spacing verified after the fix',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.decision?.note).toBe('Colors and spacing verified after the fix');
+    }
+    const fresh = new ReviewServiceImpl(
+      new EventBus(),
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+    );
+    const get = await fresh.getReview(create.value.reviewId);
+    expect(get.ok && get.value.decision?.note).toBe('Colors and spacing verified after the fix');
+  });
+
+  it('Phase 31A: createReview fails closed when the committed baseline file is missing — no fabricated before', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    await store.saveBaseline(issueId, makeShot([255, 255, 255], { targetId, stableAttributes }));
+    // Simulate the durable baseline file disappearing after a restart while
+    // its manifest remains (the failure case in Phase 31A §4).
+    fs.rmSync(path.join(REVIEW_STORAGE, 'baselines', issueId, 'before.png'), { force: true });
+
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(makeShot([255, 0, 0], { targetId, stableAttributes })),
+      store,
+    );
+    const reviewDirsBefore = fs
+      .readdirSync(REVIEW_STORAGE, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name !== 'baselines')
+      .map((d) => d.name)
+      .sort();
+    const create = await service.createReview({ issueId }, 's', 'p');
+    expect(create.ok).toBe(false);
+    if (!create.ok) expect(create.error.code).toBe('ARTIFACT_NOT_FOUND');
+
+    // No review was persisted and no review artifact dir was created; the
+    // post-change image was never captured or substituted as BEFORE.
+    const reviewDirsAfterFailure = fs
+      .readdirSync(REVIEW_STORAGE, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name !== 'baselines')
+      .map((d) => d.name)
+      .sort();
+    expect(reviewDirsAfterFailure).toEqual(reviewDirsBefore);
+    const baselineDir = path.join(REVIEW_STORAGE, 'baselines', issueId);
+    expect(fs.readdirSync(baselineDir).sort()).toEqual(['manifest.json']);
+  });
+
+  it('Phase 31A: createReview fails closed on a corrupted baseline file — typed ARTIFACT_INVALID_IMAGE', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    await store.saveBaseline(issueId, makeShot([255, 255, 255], { targetId, stableAttributes }));
+    fs.writeFileSync(
+      path.join(REVIEW_STORAGE, 'baselines', issueId, 'before.png'),
+      'corrupt bytes',
+    );
+
+    const service = new ReviewServiceImpl(
+      eventBus,
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(makeShot([255, 0, 0], { targetId, stableAttributes })),
+      store,
+    );
+    const create = await service.createReview({ issueId }, 's', 'p');
+    expect(create.ok).toBe(false);
+    if (!create.ok) expect(create.error.code).toBe('ARTIFACT_INVALID_IMAGE');
+  });
+
+  it('Phase 31A: review after restart uses the exact original baseline bytes (SHA-256 identity)', async () => {
+    const { issueId, targetId, stableAttributes } = await createPhase31Issue();
+    const capturedAt = '2026-08-15T08:30:00.000Z';
+    const store = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    await store.saveBaseline(
+      issueId,
+      makeShot([255, 255, 255], { targetId, stableAttributes }, capturedAt),
+    );
+
+    // Fresh process instances on the same durable dirs — the restart path.
+    const freshStore = new ReviewArtifactStore(REVIEW_STORAGE, 'local-sensitive-target-crop');
+    const freshService = new ReviewServiceImpl(
+      new EventBus(),
+      issueService,
+      undefined,
+      new ReviewPersistence(REVIEW_STORAGE),
+      makeShotAdapter(makeShot([255, 0, 0], { targetId, stableAttributes })),
+      freshStore,
+    );
+    const create = await freshService.createReview({ issueId }, 's', 'p');
+    expect(create.ok).toBe(true);
+    if (!create.ok) return;
+
+    // The review's before artifact is byte-identical to the ORIGINAL
+    // baseline captured pre-restart, and keeps its original capturedAt.
+    const beforeId = create.value.reviewId;
+    const manifest = await freshStore.loadManifest(beforeId);
+    expect(manifest.ok && manifest.value).toBeTruthy();
+    if (!manifest.ok || !manifest.value) return;
+    const beforeEntry = manifest.value.artifacts.find((a) => a.role === 'before');
+    expect(beforeEntry?.capturedAt).toBe(capturedAt);
+    const baselineBuffer = await freshStore.readBaselineBuffer(issueId);
+    const reviewBeforeBuffer = await freshStore.readArtifact(
+      beforeId,
+      manifest.value.pairing.beforeArtifactId as string,
+    );
+    expect(baselineBuffer.ok && reviewBeforeBuffer.ok).toBe(true);
+    if (baselineBuffer.ok && reviewBeforeBuffer.ok) {
+      expect(reviewBeforeBuffer.value.equals(baselineBuffer.value)).toBe(true);
+    }
+
+    // Verification after restart pairs AFTER/DIFF to that original BEFORE.
+    const recapture = await freshService.recaptureReview({ reviewId: beforeId });
+    expect(recapture.ok).toBe(true);
+    if (!recapture.ok) return;
+    expect(recapture.value.comparison?.status).toBe('changed');
+    const finalManifest = await freshStore.loadManifest(beforeId);
+    expect(finalManifest.ok && finalManifest.value).toBeTruthy();
+    if (!finalManifest.ok || !finalManifest.value) return;
+    expect(finalManifest.value.pairing.beforeArtifactId).toBe(
+      manifest.value.pairing.beforeArtifactId,
+    );
+    expect(finalManifest.value.pairing.afterArtifactId).toBeTruthy();
+    expect(finalManifest.value.pairing.diffArtifactId).toBeTruthy();
+    expect(finalManifest.value.comparison?.status).toBe('changed');
   });
 });

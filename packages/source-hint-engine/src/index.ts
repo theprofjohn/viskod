@@ -5,15 +5,20 @@ import type { Result, ViskodError } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 
 import type { ImportGraphEntry } from './classifier';
-import { buildImportGraph } from './import-graph';
+import { MIN_CONFIDENCE, scoreEvidence } from './evidence';
+import type { EvidenceFamily } from './evidence';
+import { buildImportGraph, buildLocalDependencyClosure } from './import-graph';
+import { DEFAULT_SCAN_BUDGET, type ScanBudget, ScanBudgetExceededError } from './import-graph';
 import { rankHints } from './ranking';
 import type {
   DiscoveryMethod,
+  EvidenceType,
   HintEngineHealth,
   HintEvidence,
   HintInput,
   RankingResult,
   SourceHint,
+  SourceQualification,
   UsageSiteSourceHint,
 } from './types';
 
@@ -21,18 +26,46 @@ export type {
   HintEngineHealth,
   HintEvidence,
   HintInput,
+  RankingResult,
   SourceHint,
   UsageSiteSourceHint,
-  RankingResult,
+  SourceQualification,
 };
 export * from './types';
 export { classifyHint, detectLanguage } from './classifier';
 export { rankHints } from './ranking';
-export { buildImportGraph, findImporters, findImports } from './import-graph';
+export {
+  buildImportGraph,
+  buildLocalDependencyClosure,
+  findImporters,
+  findImports,
+  resolveLocalImport,
+  ScanBudgetExceededError,
+  DEFAULT_SCAN_BUDGET,
+} from './import-graph';
+export type { ScanBudget } from './import-graph';
+export {
+  computeSourceResolution,
+  qualifyConfidence,
+  scoreEvidence,
+  MIN_CONFIDENCE,
+} from './evidence';
+export type { EvidenceFamily, EvidenceScoreInput, FamilySignal } from './evidence';
 export type { ImportGraphEntry } from './classifier';
 
-const SCHEMA_VERSION = '1.0.0';
-const MIN_CONFIDENCE = 0.1;
+/**
+ * Schema version of generated hints. 2.0.0 = Phase 30 calibration: numeric
+ * confidence is now an evidence-based score with an explicit semantic
+ * qualification. Callers must never compare a legacy inflated value with a
+ * calibrated one as if they were the same scale.
+ *
+ * Exported so the capture pipeline can persist the model version that
+ * produced a capture-time source-resolution snapshot (Phase 30A). A future
+ * model bumps this version; persisted snapshots keep their capture-time
+ * conclusion regardless.
+ */
+export const SOURCE_HINT_SCHEMA_VERSION = '2.0.0';
+const SCHEMA_VERSION = SOURCE_HINT_SCHEMA_VERSION;
 const MAX_HINTS = 10;
 const SUBSYSTEM = 'source-hint-engine';
 
@@ -40,10 +73,104 @@ const EXTENSION_PATTERNS = ['.tsx', '.jsx', '.vue', '.svelte', '.ts', '.js'];
 
 const STYLE_EXTENSIONS = ['.css', '.scss', '.less', '.module.css', '.module.scss'];
 
-function dirBasename(dir: string): string {
-  const parts = dir.split('/');
-  return parts[parts.length - 1] ?? '';
-}
+/** Directories scanned for usage sites (existing convention). */
+const USAGE_SITE_DIRS = [
+  'src/features',
+  'src/pages',
+  'src/routes',
+  'src/app',
+  'features',
+  'pages',
+  'routes',
+  'app',
+];
+
+/** Class tokens too generic to imply ownership (weak evidence only). */
+const GENERIC_TOKENS = new Set([
+  'card',
+  'button',
+  'btn',
+  'item',
+  'container',
+  'section',
+  'wrapper',
+  'box',
+  'panel',
+  'header',
+  'footer',
+  'nav',
+  'list',
+  'row',
+  'column',
+  'grid',
+  'group',
+  'badge',
+  'avatar',
+  'icon',
+  'label',
+  'input',
+  'select',
+  'textarea',
+  'form',
+  'dialog',
+  'modal',
+  'menu',
+  'tooltip',
+  'popover',
+  'table',
+  'tab',
+  'alert',
+  'spinner',
+  'sheet',
+  'separator',
+  'command',
+  'calendar',
+  'combobox',
+  'dropdown',
+  'accordion',
+  'tabs',
+  'progress',
+  'switch',
+  'slider',
+  'field',
+  'content',
+  'title',
+  'description',
+  'text',
+  'link',
+  'image',
+  'avatar',
+  // Layout/utility classes — a file matching one of these by name is weak
+  // evidence, never ownership.
+  'flex',
+  'grid',
+  'block',
+  'inline',
+  'relative',
+  'absolute',
+  'fixed',
+  'sticky',
+  'main',
+  'aside',
+  'article',
+  'status',
+  'banner',
+]);
+
+/** Generic DOM identifiers that never imply ownership. */
+const GENERIC_IDENTIFIERS = new Set([
+  'app',
+  'root',
+  'main',
+  'content',
+  'wrapper',
+  'container',
+  'page',
+  'header',
+  'footer',
+  'nav',
+  'body',
+]);
 
 function shError(code: string, message: string, cause?: string, recovery?: string): ViskodError {
   return {
@@ -59,16 +186,22 @@ function shError(code: string, message: string, cause?: string, recovery?: strin
   };
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
 function djb2(str: string): string {
   let hash = 5381;
   for (let i = 0; i < str.length; i++) {
     hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
   }
   return (hash >>> 0).toString(16);
+}
+
+/** Safety: a candidate path must be repo-relative and inside the root. */
+function isSafeRelativePath(relPath: string): boolean {
+  if (!relPath) return false;
+  if (path.posix.isAbsolute(relPath)) return false;
+  if (/^[A-Za-z]:[\\/]/.test(relPath)) return false;
+  const normalized = path.posix.normalize(relPath);
+  if (normalized === '..' || normalized.startsWith('../')) return false;
+  return true;
 }
 
 function resolvePathWithCase(
@@ -117,17 +250,6 @@ function findAdjacentStyleFiles(
   return results;
 }
 
-function scoreHint(evidence: HintEvidence[]): number {
-  if (evidence.length === 0) return 0;
-  let weightedSum = 0;
-  let totalWeight = 0;
-  for (const e of evidence) {
-    weightedSum += e.weight * e.confidence;
-    totalWeight += e.weight;
-  }
-  return totalWeight > 0 ? clamp(weightedSum / totalWeight, 0, 1) : 0;
-}
-
 function buildCacheKey(input: HintInput): string {
   const rt = input.route;
   const dc = input.domContext;
@@ -142,41 +264,412 @@ function buildHintId(filePath: string, evidence: HintEvidence[]): string {
   return `${encodeURIComponent(filePath)}#${evidenceHash}`;
 }
 
-// ---- Existence + case-insensitive aware class-name matching ----
+// ---------------------------------------------------------------------------
+// Visible-text word extraction
+// ---------------------------------------------------------------------------
 
-interface ResolvedCandidate {
-  filePath: string;
-  exists: boolean;
-  matchType:
-    | 'exact'
-    | 'case-insensitive'
-    | 'style-adjacent'
-    | 'generated-non-existing'
-    | 'generated'
-    | 'usage-site';
-  reason: string;
-  relatedSelector?: string;
-  confidence: number;
-  discoveryMethod: DiscoveryMethod;
+const UTILITY_BLACKLIST = new Set([
+  'flex',
+  'grid',
+  'inline',
+  'block',
+  'items',
+  'justify',
+  'content',
+  'self',
+  'place',
+  'auto',
+  'min',
+  'max',
+  'none',
+  'full',
+  'size',
+  'text',
+  'font',
+  'tracking',
+  'leading',
+  'align',
+  'break',
+  'whitespace',
+  'truncate',
+  'overflow',
+  'scroll',
+  'visible',
+  'hidden',
+  'absolute',
+  'relative',
+  'fixed',
+  'sticky',
+  'static',
+  'inset',
+  'start',
+  'end',
+  'left',
+  'right',
+  'top',
+  'bottom',
+  'zindex',
+  'order',
+  'col',
+  'row',
+  'cols',
+  'rows',
+  'float',
+  'clear',
+  'object',
+  'aspect',
+  'basis',
+  'grow',
+  'shrink',
+  'shadow',
+  'opacity',
+  'cursor',
+  'select',
+  'pointer',
+  'resize',
+  'transition',
+  'duration',
+  'ease',
+  'delay',
+  'animate',
+  'scale',
+  'rotate',
+  'translate',
+  'skew',
+  'transform',
+  'origin',
+  'ring',
+  'filter',
+  'backdrop',
+  'divide',
+  'space',
+  'gap',
+  'between',
+  'around',
+  'evenly',
+  'children',
+  'first',
+  'last',
+  'odd',
+  'even',
+  'visited',
+  'checked',
+  'focus',
+  'hover',
+  'active',
+  'disabled',
+  'group',
+  'peer',
+  'dark',
+  'light',
+  'motion',
+  'supports',
+  'aria',
+  'data',
+  'state',
+  'open',
+  'closed',
+  'selected',
+  'expanded',
+  'border',
+  'rounded',
+  'outline',
+  'decoration',
+  'underline',
+  'capitalize',
+  'italic',
+  'bold',
+  'semibold',
+  'extrabold',
+  'black',
+  'thin',
+  'extralight',
+  'light',
+  'medium',
+  'normal',
+  'wght',
+  'bgcard',
+  'surface',
+  'muted',
+  'destructive',
+  'primary',
+  'secondary',
+  'accent',
+  'chart',
+  'foreground',
+  'background',
+  'input',
+  'popover',
+  'sidebar',
+  'linethrough',
+  'overline',
+  'normalcase',
+  'lowercase',
+  'uppercase',
+]);
+
+/** Extract meaningful visible-text words (deduplicated, lowercase). */
+function extractTextWords(text: string): string[] {
+  const words = text
+    .split(/[\s\n]+/)
+    .map((w) => w.replace(/[^a-zA-Z0-9]/g, ''))
+    .filter(
+      (w) => w.length >= 4 && !UTILITY_BLACKLIST.has(w.toLowerCase()) && Number.isNaN(Number(w)),
+    );
+  return [...new Set(words.map((w) => w.toLowerCase()))];
 }
 
-function collectResolvedCandidates(input: HintInput): ResolvedCandidate[] {
-  const candidates: ResolvedCandidate[] = [];
+// ---------------------------------------------------------------------------
+// Project file scan (one deterministic pass, budget-bounded)
+// ---------------------------------------------------------------------------
+
+interface FileSignals {
+  /** Visible-text words found in the file content. */
+  matchedWords: string[];
+  /** Stable identifiers (id/testid) literally defined in the file. */
+  stableIdHits: string[];
+  /** Explicitly observed component names referenced in the file. */
+  componentRefHits: string[];
+}
+
+interface ScanContext {
+  files: number;
+  startMs: number;
+  budget: ScanBudget;
+}
+
+function touchScan(ctx: ScanContext): void {
+  ctx.files++;
+  if (ctx.files > ctx.budget.maxFiles || Date.now() - ctx.startMs > ctx.budget.maxTimeMs) {
+    throw new ScanBudgetExceededError();
+  }
+}
+
+const SKIP_DIRS = new Set([
+  'node_modules',
+  'dist',
+  'build',
+  '.next',
+  '.output',
+  '.nuxt',
+  '.cache',
+  'coverage',
+  '.git',
+]);
+
+function walkCodeFiles(
+  rootPath: string,
+  dir: string,
+  ctx: ScanContext,
+  visit: (relPath: string, fullPath: string) => void,
+  depth = 0,
+): void {
+  if (depth > 10) return;
+  const dirPath = path.join(rootPath, dir.replace(/\//g, path.sep));
+  let items: fs.Dirent[];
+  try {
+    items = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  // Deterministic enumeration: filesystem order must never influence output.
+  items.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of items) {
+    if (entry.name.startsWith('.')) continue;
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      walkCodeFiles(rootPath, `${dir}/${entry.name}`, ctx, visit, depth + 1);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const ext = path.extname(entry.name).toLowerCase();
+    if (!EXTENSION_PATTERNS.includes(ext)) continue;
+    touchScan(ctx);
+    visit(`${dir}/${entry.name}`, fullPath);
+  }
+}
+
+function scanProjectFiles(input: HintInput, ctx: ScanContext): Map<string, FileSignals> {
+  const result = new Map<string, FileSignals>();
   const rootPath = input.project.metadata.rootPath;
   const dirs = input.project.componentIndex?.directories ?? [];
   const dc = input.domContext;
-  if (!rootPath || dirs.length === 0) return candidates;
+  const textWords = extractTextWords(dc.text ?? '');
+  // Word-boundary matching: 'save' must NOT match the identifier 'SaveButton'.
+  const textPattern =
+    textWords.length > 0
+      ? new RegExp(`\\b(?:${textWords.map(escapeRegExp).join('|')})\\b`, 'gi')
+      : null;
+  const stableIds: string[] = [];
+  const id = (dc.id ?? '').trim();
+  const testId = (dc.testId ?? '').trim();
+  if (id && id.length >= 4 && !GENERIC_IDENTIFIERS.has(id.toLowerCase())) stableIds.push(id);
+  if (testId && testId.length >= 4 && !GENERIC_IDENTIFIERS.has(testId.toLowerCase()))
+    stableIds.push(testId);
+  const componentNames = extractComponentNames(input);
+  const uniqueDirs = [...new Set([...dirs, ...USAGE_SITE_DIRS])];
 
-  const searchTerms: string[] = [];
-  if (dc.className) {
-    searchTerms.push(...dc.className.split(/\s+/).filter(Boolean));
+  for (const dir of uniqueDirs) {
+    walkCodeFiles(rootPath, dir, ctx, (relPath, fullPath) => {
+      let content: string;
+      try {
+        content = fs.readFileSync(fullPath, 'utf-8');
+      } catch {
+        return;
+      }
+      const matchedWords: string[] = [];
+      if (textPattern) {
+        const seenWords = new Set<string>();
+        for (const m of content.matchAll(textPattern)) {
+          const word = (m[0] ?? '').toLowerCase();
+          if (textWords.includes(word)) seenWords.add(word);
+        }
+        matchedWords.push(...seenWords);
+      }
+      const stableIdHits: string[] = [];
+      for (const s of stableIds) {
+        if (
+          content.includes(`id="${s}"`) ||
+          content.includes(`id='${s}'`) ||
+          content.includes(`data-testid="${s}"`) ||
+          content.includes(`data-testid='${s}'`)
+        ) {
+          stableIdHits.push(s);
+        }
+      }
+      const componentRefHits: string[] = [];
+      for (const name of componentNames) {
+        // JSX tag, call, or export reference to an explicitly observed name.
+        if (new RegExp(`\\b${escapeRegExp(name)}\\b`).test(content)) {
+          componentRefHits.push(name);
+        }
+      }
+      if (matchedWords.length > 0 || stableIdHits.length > 0 || componentRefHits.length > 0) {
+        result.set(relPath, { matchedWords, stableIdHits, componentRefHits });
+      }
+    });
+  }
+  return result;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Component names derived ONLY from explicit DOM instrumentation
+ * (data-component/data-slot attributes). A generic `div` or ARIA role never
+ * produces a component name (VISKOD-AUDIT-008 Card regression).
+ */
+function extractComponentNames(input: HintInput): string[] {
+  const attrs = input.domContext.dataAttributes ?? {};
+  const names = new Set<string>();
+  for (const key of ['data-component', 'data-slot', 'data-layer']) {
+    const value = attrs[key];
+    if (!value) continue;
+    for (const token of value.split(/[\s,]+/)) {
+      const clean = token.trim();
+      if (clean && /^[A-Za-z][A-Za-z0-9]*$/.test(clean)) names.add(clean);
+    }
+  }
+  return [...names];
+}
+
+// ---------------------------------------------------------------------------
+// Evidence assembly per candidate file
+// ---------------------------------------------------------------------------
+
+interface CandidateEvidence {
+  filePath: string;
+  exists: boolean;
+  matchType: SourceHint['matchType'];
+  discoveryMethod: DiscoveryMethod;
+  families: Array<{ family: EvidenceFamily; reason: string }>;
+  uniqueText?: boolean;
+  isRouteFile?: boolean;
+  relatedSelector?: string;
+}
+
+function collectCandidates(input: HintInput, ctx: ScanContext): CandidateEvidence[] {
+  const rootPath = input.project.metadata.rootPath;
+  const dc = input.domContext;
+  const matchedRoute = input.route.matchedRoute;
+  const byPath = new Map<string, CandidateEvidence>();
+
+  const add = (candidate: CandidateEvidence): void => {
+    if (!isSafeRelativePath(candidate.filePath)) return;
+    const key = candidate.filePath.toLowerCase();
+    const existing = byPath.get(key);
+    if (existing) {
+      // MERGE independent signals for the same file: a route file that also
+      // contains the visible text carries BOTH evidence families.
+      const existingFamilies = new Set(existing.families.map((f) => f.family));
+      for (const family of candidate.families) {
+        if (!existingFamilies.has(family.family)) {
+          existing.families.push(family);
+          existingFamilies.add(family.family);
+        }
+      }
+      existing.uniqueText = existing.uniqueText || candidate.uniqueText;
+      existing.isRouteFile = existing.isRouteFile || candidate.isRouteFile;
+      return;
+    }
+    byPath.set(key, candidate);
+  };
+
+  // 1. Current route owner (strong).
+  if (matchedRoute?.file && isSafeRelativePath(matchedRoute.file)) {
+    add({
+      filePath: matchedRoute.file,
+      exists: true,
+      matchType: 'usage-site',
+      discoveryMethod: 'route-correlation',
+      isRouteFile: true,
+      families: [
+        {
+          family: 'route-ownership',
+          reason: `current route ${matchedRoute.path ?? ''} maps to this file`,
+        },
+      ],
+    });
   }
 
-  const seenPaths = new Set<string>();
+  // 2. Import-closure of the current route (strong corroboration).
+  let importClosure: Set<string> | null = null;
+  if (matchedRoute?.file && isSafeRelativePath(matchedRoute.file)) {
+    try {
+      importClosure = buildLocalDependencyClosure(rootPath, matchedRoute.file, ctx.budget);
+    } catch (error) {
+      if (error instanceof ScanBudgetExceededError) throw error;
+      importClosure = null;
+    }
+    if (importClosure) {
+      for (const file of importClosure) {
+        if (file === matchedRoute.file) continue;
+        if (!isSafeRelativePath(file)) continue;
+        add({
+          filePath: file,
+          exists: true,
+          matchType: 'usage-site',
+          discoveryMethod: 'import-graph',
+          families: [
+            {
+              family: 'import-path',
+              reason: 'imported (directly or transitively) by the current route',
+            },
+          ],
+        });
+      }
+    }
+  }
 
-  for (const term of searchTerms) {
+  // 3. Class-name file existence (moderate/weak depending on specificity).
+  const classTokens = (dc.className ?? '').split(/\s+/).filter(Boolean);
+  for (const term of classTokens) {
     const lowerTerm = term.toLowerCase();
-    // Generate candidate file paths from class name patterns
+    const generic = GENERIC_TOKENS.has(lowerTerm);
+    const dirs = input.project.componentIndex?.directories ?? [];
     const generatedPaths: string[] = [];
     for (const dir of dirs) {
       for (const ext of EXTENSION_PATTERNS) {
@@ -185,412 +678,114 @@ function collectResolvedCandidates(input: HintInput): ResolvedCandidate[] {
         generatedPaths.push(`${dir}/components/${lowerTerm}${ext}`);
       }
     }
-
     for (const genPath of generatedPaths) {
-      if (seenPaths.has(genPath)) continue;
-      seenPaths.add(genPath);
-
       const { resolved, matchType } = resolvePathWithCase(rootPath, genPath);
-
-      if (resolved) {
-        // File exists (exact or case-insensitive)
-        const relPath = path.relative(rootPath, resolved).replace(/\\/g, '/');
-        const ci = matchType === 'case-insensitive';
-        const confidence = ci ? 0.85 : 0.95;
-        candidates.push({
-          filePath: relPath,
+      if (!resolved) continue;
+      const relPath = path.relative(rootPath, resolved).replace(/\\/g, '/');
+      const family: EvidenceFamily = generic ? 'generic-class' : 'class-file';
+      const ci = matchType === 'case-insensitive';
+      add({
+        filePath: relPath,
+        exists: true,
+        matchType: ci ? 'case-insensitive' : 'exact',
+        discoveryMethod: ci ? 'case-insensitive' : 'file-exists',
+        relatedSelector: term,
+        families: [
+          {
+            family,
+            reason: generic
+              ? `generic class '${term}' matches a file — weak evidence`
+              : `file exists matching class '${term}'`,
+          },
+        ],
+      });
+      // Adjacent style files (dependent evidence, weak).
+      const componentName = path.basename(resolved);
+      const relativeDir = path.dirname(relPath).replace(/\\/g, '/');
+      const styleFiles = findAdjacentStyleFiles(rootPath, relativeDir, componentName);
+      for (const sf of styleFiles) {
+        add({
+          filePath: sf,
           exists: true,
-          matchType: ci ? 'case-insensitive' : 'exact',
-          reason: ci
-            ? `Case-insensitive match: generated "${genPath}" resolved to "${relPath}"`
-            : `File exists: ${relPath} (matched from class "${term}")`,
+          matchType: 'style-adjacent',
+          discoveryMethod: 'style-adjacent',
           relatedSelector: term,
-          confidence,
-          discoveryMethod: ci ? 'case-insensitive' : 'file-exists',
-        });
-
-        // Adjacent style files
-        const componentName = path.basename(resolved);
-        const relativeDir = path.dirname(relPath).replace(/\\/g, '/');
-        const styleFiles = findAdjacentStyleFiles(rootPath, relativeDir, componentName);
-        for (const sf of styleFiles) {
-          if (seenPaths.has(sf)) continue;
-          seenPaths.add(sf);
-          candidates.push({
-            filePath: sf,
-            exists: true,
-            matchType: 'style-adjacent',
-            reason: `Style file adjacent to component "${relPath}": ${sf}`,
-            relatedSelector: term,
-            confidence: 0.8,
-            discoveryMethod: 'style-adjacent',
-          });
-        }
-      } else {
-        // Generated candidate does not exist
-        const confidence = 0.3;
-        candidates.push({
-          filePath: genPath,
-          exists: false,
-          matchType: 'generated-non-existing',
-          reason: `Generated from class "${term}": ${genPath} (file does not exist)`,
-          relatedSelector: term,
-          confidence,
-          discoveryMethod: 'class-name-match',
+          families: [
+            {
+              family: 'style-adjacent',
+              reason: `style file adjacent to ${relPath}`,
+            },
+          ],
         });
       }
     }
   }
 
-  return candidates;
-}
+  // 4. Project file scan: visible text, stable identifiers, component refs.
+  const textWords = extractTextWords(dc.text ?? '');
+  const signals = scanProjectFiles(input, ctx);
 
-// ---- Usage-site matcher (finds files containing visible text + component references) ----
-
-interface UsageSiteCandidate {
-  filePath: string;
-  reason: string;
-  confidence: number;
-  matchedText: string[];
-}
-
-function findUsageSiteCandidates(input: HintInput): UsageSiteCandidate[] {
-  const candidates: UsageSiteCandidate[] = [];
-  const rootPath = input.project.metadata.rootPath;
-  const dirs = input.project.componentIndex?.directories ?? [];
-  const dc = input.domContext;
-  if (!rootPath || dirs.length === 0) return [];
-
-  // Extract meaningful visible text from the DOM (skip short fragments)
-  const visibleText = (dc.text || '').trim();
-  if (!visibleText || visibleText.length < 5) return [];
-
-  // Collect significant phrases (exclude common Tailwind utility prefix words)
-  const UTILITY_BLACKLIST = new Set([
-    'flex',
-    'grid',
-    'inline',
-    'block',
-    'items',
-    'justify',
-    'content',
-    'self',
-    'place',
-    'auto',
-    'min',
-    'max',
-    'none',
-    'full',
-    'size',
-    'text',
-    'font',
-    'tracking',
-    'leading',
-    'align',
-    'break',
-    'whitespace',
-    'truncate',
-    'overflow',
-    'scroll',
-    'visible',
-    'hidden',
-    'absolute',
-    'relative',
-    'fixed',
-    'sticky',
-    'static',
-    'inset',
-    'start',
-    'end',
-    'left',
-    'right',
-    'top',
-    'bottom',
-    'zindex',
-    'order',
-    'col',
-    'row',
-    'cols',
-    'rows',
-    'float',
-    'clear',
-    'object',
-    'aspect',
-    'basis',
-    'grow',
-    'shrink',
-    'shadow',
-    'opacity',
-    'cursor',
-    'select',
-    'pointer',
-    'resize',
-    'transition',
-    'duration',
-    'ease',
-    'delay',
-    'animate',
-    'scale',
-    'rotate',
-    'translate',
-    'skew',
-    'transform',
-    'origin',
-    'ring',
-    'filter',
-    'backdrop',
-    'divide',
-    'space',
-    'gap',
-    'between',
-    'around',
-    'evenly',
-    'children',
-    'first',
-    'last',
-    'odd',
-    'even',
-    'visited',
-    'checked',
-    'focus',
-    'hover',
-    'active',
-    'disabled',
-    'group',
-    'peer',
-    'dark',
-    'light',
-    'motion',
-    'supports',
-    'aria',
-    'data',
-    'state',
-    'open',
-    'closed',
-    'selected',
-    'expanded',
-    'border',
-    'rounded',
-    'outline',
-    'decoration',
-    'underline',
-    'capitalize',
-    'italic',
-    'bold',
-    'semibold',
-    'extrabold',
-    'black',
-    'thin',
-    'extralight',
-    'light',
-    'medium',
-    'normal',
-    'wght',
-    'bgcard',
-    'surface',
-    'muted',
-    'destructive',
-    'primary',
-    'secondary',
-    'accent',
-    'chart',
-    'foreground',
-    'background',
-    'input',
-    'popover',
-    'sidebar',
-    'linethrough',
-    'overline',
-    'normalcase',
-    'lowercase',
-    'uppercase',
-    'linethrough',
-  ]);
-  const words = visibleText
-    .split(/[\s\n]+/)
-    .map((w) => w.replace(/[^a-zA-Z0-9]/g, ''))
-    .filter(
-      (w) => w.length >= 4 && !UTILITY_BLACKLIST.has(w.toLowerCase()) && Number.isNaN(Number(w)),
-    );
-  const uniqueWords = [...new Set(words.map((w) => w.toLowerCase()))];
-  if (uniqueWords.length === 0) return candidates;
-
-  // Collect component names from the hierarchy hint (data-slot, tag names)
-  const componentNames: string[] = [];
-  // data-slot attributes often contain component family names
-  if (dc.role === 'card' || dc.className?.includes('card') || dc.tagName === 'div') {
-    componentNames.push('Card');
-  }
-
-  const seenPaths = new Set<string>();
-
-  // Also search common page/feature directories where usage sites typically live
-  const usageSiteDirs = [
-    ...dirs,
-    'src/features',
-    'src/pages',
-    'src/routes',
-    'src/app',
-    'features',
-    'pages',
-    'routes',
-    'app',
-  ];
-  const uniqueDirs = [...new Set(usageSiteDirs)];
-
-  // Search project files in component AND page directories
-  for (const dir of uniqueDirs) {
-    const dirPath = path.join(rootPath, dir.replace(/\//g, path.sep));
-    if (!fs.existsSync(dirPath)) continue;
-
-    try {
-      const walkDir = (dir: string) => {
-        let items: fs.Dirent[];
-        try {
-          items = fs.readdirSync(dir, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        for (const entry of items) {
-          const fullPath = path.join(dir, entry.name);
-          if (entry.isDirectory()) {
-            walkDir(fullPath);
-            continue;
-          }
-          if (!entry.isFile()) continue;
-          const ext = path.extname(entry.name).toLowerCase();
-          if (!EXTENSION_PATTERNS.includes(ext) && !STYLE_EXTENSIONS.includes(ext)) continue;
-
-          const relPath = path.relative(rootPath, fullPath).replace(/\\/g, '/');
-          if (seenPaths.has(relPath)) continue;
-
-          try {
-            const content = fs.readFileSync(fullPath, 'utf-8');
-            const contentLower = content.toLowerCase();
-            const matchedWords = uniqueWords.filter((w) => contentLower.includes(w));
-            if (matchedWords.length === 0) continue;
-
-            const hasComponentRef =
-              componentNames.length === 0 ||
-              componentNames.some((cn) => content.includes(`<${cn}`) || content.includes(cn));
-
-            if (hasComponentRef) {
-              seenPaths.add(relPath);
-              const matchRatio = matchedWords.length / uniqueWords.length;
-              // Base 0.9 to beat generic class-name exact matches (max 0.95)
-              const confidence = 0.9 + matchRatio * 0.09;
-              candidates.push({
-                filePath: relPath,
-                reason: `Usage-site: file contains visible text "${matchedWords.slice(0, 3).join(', ')}"${componentNames.length > 0 ? ` and references ${componentNames[0]}` : ''}`,
-                confidence: Math.min(confidence, 0.95),
-                matchedText: matchedWords,
-              });
-            }
-          } catch {
-            // skip unreadable files
-          }
-        }
-      };
-      walkDir(dirPath);
-    } catch {
-      // skip unreadable directories
+  // Word frequency across the scanned scope — duplicate text is weak.
+  const wordFrequency = new Map<string, number>();
+  for (const [, fileSig] of signals) {
+    for (const w of fileSig.matchedWords) {
+      wordFrequency.set(w, (wordFrequency.get(w) ?? 0) + 1);
     }
   }
 
-  return candidates;
-}
+  for (const [relPath, fileSig] of [...signals.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0]),
+  )) {
+    const families: Array<{ family: EvidenceFamily; reason: string }> = [];
+    let uniqueText = false;
 
-// ---- Legacy matchers (used for non-existence-based evidence) ----
-
-function matchRoute(input: HintInput): HintEvidence[] {
-  const evidence: HintEvidence[] = [];
-  const matched = input.route.matchedRoute;
-  if (matched) {
-    evidence.push({
-      type: 'route-match',
-      weight: 0.35,
-      detail: `Route matched: ${matched.path} -> ${matched.file}`,
-      confidence: matched.isDynamic ? 0.6 : 0.9,
+    if (fileSig.matchedWords.length > 0 && textWords.length > 0) {
+      const anyDuplicate = fileSig.matchedWords.some((w) => (wordFrequency.get(w) ?? 0) > 1);
+      uniqueText = !anyDuplicate;
+      const sample = fileSig.matchedWords.slice(0, 3).join(', ');
+      families.push({
+        family: 'usage-text',
+        reason: uniqueText
+          ? `visible text (${sample}) found only in this file`
+          : `visible text (${sample}) also appears in other files — weak evidence`,
+      });
+    }
+    for (const s of fileSig.stableIdHits) {
+      families.push({
+        family: 'stable-identifier',
+        reason: `file defines the target's stable identifier '${s}'`,
+      });
+    }
+    for (const name of fileSig.componentRefHits) {
+      families.push({
+        family: 'component-ref',
+        reason: `file references observed component '${name}'`,
+      });
+    }
+    if (families.length === 0) continue;
+    add({
+      filePath: relPath,
+      exists: true,
+      matchType: 'usage-site',
+      discoveryMethod: fileSig.stableIdHits.length > 0 ? 'test-id-match' : 'usage-site',
+      families,
+      uniqueText,
     });
   }
-  return evidence;
+
+  return [...byPath.values()];
 }
 
-function matchComponentName(input: HintInput): HintEvidence[] {
-  const evidence: HintEvidence[] = [];
-  const dirs = input.project.componentIndex?.directories;
-  const dc = input.domContext;
-  if (!dirs || dirs.length === 0) return evidence;
-  if (!dc.className) return evidence;
-
-  const names = dc.className.split(/\s+/).filter(Boolean);
-  for (const name of names) {
-    for (const dir of dirs) {
-      const lowerDir = dir.toLowerCase();
-      const lowerName = name.toLowerCase();
-      if (lowerDir.includes(lowerName) || lowerName.includes(dirBasename(lowerDir))) {
-        evidence.push({
-          type: 'component-name-match',
-          weight: 0.25,
-          detail: `Class "${name}" matches component directory "${dir}"`,
-          confidence: 0.7,
-        });
-      }
-    }
-  }
-  return evidence;
-}
-
-function matchClassNameLegacy(input: HintInput): HintEvidence[] {
-  const evidence: HintEvidence[] = [];
-  const dirs = input.project.componentIndex?.directories;
-  const dc = input.domContext;
-  if (!dirs || dirs.length === 0) return evidence;
-
-  const searchTerms: string[] = [];
-  if (dc.className) {
-    searchTerms.push(...dc.className.split(/\s+/).filter(Boolean));
-  }
-  if (dc.classList) {
-    searchTerms.push(...dc.classList);
-  }
-
-  for (const term of searchTerms) {
-    const patterns = [
-      `${term}.tsx`,
-      `${term}.jsx`,
-      `${term}.vue`,
-      `${term}.svelte`,
-      `components/${term}/index.tsx`,
-      `components/${term}.tsx`,
-      `${term}/index.tsx`,
-      `${term}/index.jsx`,
-      `${term}.component.tsx`,
-      `${term}.component.jsx`,
-    ];
-    for (const pattern of patterns) {
-      for (const dir of dirs) {
-        const candidate = `${dir}/${pattern}`.toLowerCase();
-        const searchTerm = term.toLowerCase();
-        if (candidate.includes(searchTerm)) {
-          evidence.push({
-            type: 'class-name-match',
-            weight: 0.2,
-            detail: `Class "${term}" matches file pattern "${pattern}" in directory "${dir}"`,
-            confidence: 0.65,
-          });
-        }
-      }
-    }
-  }
-  return evidence;
-}
+// ---------------------------------------------------------------------------
+// SourceHintEngine
+// ---------------------------------------------------------------------------
 
 export class SourceHintEngine {
   private cache = new Map<string, SourceHint[]>();
   private importGraphCache = new Map<string, ImportGraphEntry[]>();
   private hintsGenerated = 0;
   private hintsFailed = 0;
+  private hintsUnavailable = 0;
   private processingTimes: number[] = [];
   private eventBus: EventBus;
 
@@ -601,15 +796,20 @@ export class SourceHintEngine {
   async resolveUsageSiteHints(
     input: HintInput,
     maxHints?: number,
-    options?: { useImportGraph?: boolean },
+    options?: { useImportGraph?: boolean; budget?: Partial<ScanBudget> },
   ): Promise<Result<RankingResult>> {
     const startTime = performance.now();
 
     try {
       // Generate base hints first
-      const hintResult = await this.generateHints(input);
+      const hintResult = await this.generateHints(input, options);
       if (!hintResult.ok) {
-        return ok({ status: 'missing', topHints: [], warnings: [hintResult.error.message] });
+        return ok({
+          status: 'missing',
+          resolution: 'unavailable',
+          topHints: [],
+          warnings: [hintResult.error.message],
+        });
       }
 
       const hints = hintResult.value;
@@ -621,8 +821,20 @@ export class SourceHintEngine {
       let importGraph =
         options?.useImportGraph === false ? undefined : this.importGraphCache.get(graphKey);
       if (!importGraph && options?.useImportGraph !== false && rootPath && dirs.length > 0) {
-        importGraph = buildImportGraph(rootPath, dirs);
-        this.importGraphCache.set(graphKey, importGraph);
+        try {
+          importGraph = buildImportGraph(rootPath, dirs, this.resolveBudget(options?.budget));
+          this.importGraphCache.set(graphKey, importGraph);
+        } catch (error) {
+          if (error instanceof ScanBudgetExceededError) {
+            return ok({
+              status: 'missing',
+              resolution: 'unavailable',
+              topHints: [],
+              warnings: ['Source scan budget exceeded — source resolution unavailable'],
+            });
+          }
+          importGraph = undefined;
+        }
       }
 
       // Rank hints
@@ -653,6 +865,7 @@ export class SourceHintEngine {
         correlationId: input.captureId ?? crypto.randomUUID(),
         payload: {
           status: rankingResult.status,
+          resolution: rankingResult.resolution,
           hintCount: rankingResult.topHints.length,
           processingTimeMs: Math.round(performance.now() - startTime),
         },
@@ -671,8 +884,16 @@ export class SourceHintEngine {
     }
   }
 
-  async generateHints(input: HintInput): Promise<Result<SourceHint[]>> {
+  private resolveBudget(partial?: Partial<ScanBudget>): ScanBudget {
+    return { ...DEFAULT_SCAN_BUDGET, ...(partial ?? {}) };
+  }
+
+  async generateHints(
+    input: HintInput,
+    options?: { budget?: Partial<ScanBudget> },
+  ): Promise<Result<SourceHint[]>> {
     const startTime = performance.now();
+    const budget = this.resolveBudget(options?.budget);
 
     try {
       if (!input.project?.metadata?.projectId) {
@@ -701,157 +922,99 @@ export class SourceHintEngine {
       const cached = this.cache.get(cacheKey);
       if (cached) return ok(cached);
 
-      // Phase 1: existence-aware resolution (new)
-      const resolvedCandidates = collectResolvedCandidates(input);
+      // Budget-bounded evidence collection (Phase 30 latency guard).
+      const ctx: ScanContext = { files: 0, startMs: Date.now(), budget };
+      const candidates = collectCandidates(input, ctx);
 
-      // Phase 2: legacy evidence collection for additional context
-      const legacyCandidates: Array<{ filePath: string; evidence: HintEvidence[] }> = [];
-      const matched = input.route.matchedRoute;
-      const routeEvidence = matchRoute(input);
-      if (routeEvidence.length > 0 && matched) {
-        legacyCandidates.push({ filePath: matched.file, evidence: routeEvidence });
-      }
-      const componentEvidence = matchComponentName(input);
-      if (componentEvidence.length > 0) {
-        const seen = new Set<string>();
-        for (const ev of componentEvidence) {
-          const fp = ev.detail.match(/"(.+?)"/)?.[1] ?? '';
-          if (fp && !seen.has(fp)) {
-            seen.add(fp);
-            legacyCandidates.push({ filePath: fp, evidence: [ev] });
-          }
-        }
-      }
-      const legacyClassNameEvidence = matchClassNameLegacy(input);
-      if (legacyClassNameEvidence.length > 0) {
-        const seen = new Set<string>();
-        for (const ev of legacyClassNameEvidence) {
-          const match = ev.detail.match(/"(.*?)"/g);
-          const fp = match?.[1]?.replace(/^"|"$/g, '') ?? '';
-          if (fp && !seen.has(fp)) {
-            seen.add(fp);
-            legacyCandidates.push({ filePath: fp, evidence: [ev] });
-          }
-        }
-      }
-
-      // Phase 3: usage-site candidates (visible text + component reference matching)
-      const usageSiteCandidates = findUsageSiteCandidates(input);
-
-      // Merge existence-aware candidates with legacy evidence and usage-site candidates
-      // Priority: usage-site > exact existing > case-insensitive > style-adjacent > generated (legacy evidence only fills paths missed by existence checks)
-      const existingPaths = new Set(
-        resolvedCandidates.filter((c) => c.exists).map((c) => c.filePath.toLowerCase()),
-      );
-
-      const scoredMap = new Map<string, ResolvedCandidate>();
-
-      // Insert usage-site candidates FIRST (highest priority)
-      for (const uc of usageSiteCandidates) {
-        const key = uc.filePath.toLowerCase();
-        const confidence = uc.confidence;
-        scoredMap.set(key, {
-          filePath: uc.filePath,
-          exists: true,
-          matchType: 'usage-site',
-          reason: uc.reason,
-          confidence,
-          discoveryMethod: 'usage-site',
+      // Score every candidate from its evidence families.
+      const scored: Array<{
+        candidate: CandidateEvidence;
+        confidence: number;
+        qualification: SourceQualification;
+        reasons: string[];
+      }> = [];
+      for (const candidate of candidates) {
+        const { confidence, qualification, reasons } = scoreEvidence({
+          families: candidate.families,
+          uniqueText: candidate.uniqueText,
+          isRouteFile: candidate.isRouteFile,
         });
-      }
-
-      for (const rc of resolvedCandidates) {
-        const key = rc.filePath.toLowerCase();
-        if (!scoredMap.has(key) || rc.confidence > (scoredMap.get(key)?.confidence ?? 0)) {
-          scoredMap.set(key, rc);
-        }
-      }
-
-      // Add legacy candidates that weren't found by existence check
-      for (const lc of legacyCandidates) {
-        const key = lc.filePath.toLowerCase();
-        if (!existingPaths.has(key) && !scoredMap.has(key)) {
-          const confidence = scoreHint(lc.evidence);
-          scoredMap.set(key, {
-            filePath: lc.filePath,
-            exists: false,
-            matchType: 'generated',
-            reason: `Generated from evidence: ${lc.evidence.map((e) => e.type).join(', ')}`,
-            confidence,
-            discoveryMethod: 'class-name-match',
-          });
-        }
-      }
-
-      const scored: SourceHint[] = [];
-      for (const [, hint] of scoredMap) {
-        if (hint.confidence < MIN_CONFIDENCE) continue;
-        const evidence: HintEvidence[] = [
-          {
-            type: 'file-exists',
-            weight: 0.5,
-            detail: hint.reason,
-            confidence: hint.confidence,
-          },
-        ];
-        scored.push({
-          hintId: buildHintId(hint.filePath, evidence),
-          filePath: hint.filePath,
-          confidence: Math.round(hint.confidence * 10000) / 10000,
-          evidence,
-          discoveryMethod: hint.discoveryMethod,
-          framework: input.framework?.framework ?? input.project.framework?.primary ?? undefined,
-          isPrimary: false,
-          timestamp: new Date().toISOString(),
-          schemaVersion: SCHEMA_VERSION,
-          exists: hint.exists,
-          matchType: hint.matchType,
-          reason: hint.reason,
-          relatedSelector: hint.relatedSelector,
-        });
+        if (confidence < MIN_CONFIDENCE) continue;
+        scored.push({ candidate, confidence, qualification, reasons });
       }
 
       if (scored.length === 0) {
-        this.hintsFailed++;
+        this.hintsUnavailable++;
         return err(
           shError(
             'SH_INSUFFICIENT_EVIDENCE',
-            'No hints met the minimum confidence threshold.',
+            'No source candidate met the minimum evidence threshold.',
             `All candidates scored below ${MIN_CONFIDENCE}.`,
             'Provide additional DOM evidence or re-scan the project.',
           ),
         );
       }
 
-      // Sort by priority tier first, then confidence within tier
-      // Tiers: usage-site (0) > existing exact (1) > existing case-insensitive (2) > existing style (3) > generated (4)
-      const matchTypeTier: Record<string, number> = {
-        'usage-site': 0,
-        exact: 1,
-        'case-insensitive': 2,
-        'style-adjacent': 3,
-        generated: 4,
-        'generated-non-existing': 4,
+      // Deterministic ordering: qualification tier → confidence → strong
+      // evidence count → stable relative path.
+      const tier: Record<SourceQualification, number> = {
+        exact: 4,
+        probable: 3,
+        possible: 2,
+        weak: 1,
       };
+      const strongFamilyCount = (c: CandidateEvidence): number =>
+        c.families.filter((f) =>
+          ['route-ownership', 'import-path', 'stable-identifier'].includes(f.family),
+        ).length;
       scored.sort((a, b) => {
-        const tierA = matchTypeTier[a.matchType] ?? 99;
-        const tierB = matchTypeTier[b.matchType] ?? 99;
-        if (tierA !== tierB) return tierA - tierB;
-        return b.confidence - a.confidence;
+        const tierDiff = (tier[b.qualification] ?? 0) - (tier[a.qualification] ?? 0);
+        if (tierDiff !== 0) return tierDiff;
+        const confDiff = b.confidence - a.confidence;
+        if (Math.abs(confDiff) >= 0.0001) return confDiff;
+        const strongDiff = strongFamilyCount(b.candidate) - strongFamilyCount(a.candidate);
+        if (strongDiff !== 0) return strongDiff;
+        return a.candidate.filePath.localeCompare(b.candidate.filePath);
       });
 
-      const deduped: SourceHint[] = [];
-      const seenFilePaths = new Set<string>();
-      for (const hint of scored) {
-        if (seenFilePaths.has(hint.filePath.toLowerCase())) continue;
-        seenFilePaths.add(hint.filePath.toLowerCase());
-        deduped.push(hint);
-        if (deduped.length >= MAX_HINTS) break;
+      const hints: SourceHint[] = [];
+      const seenPaths = new Set<string>();
+      for (const entry of scored) {
+        const filePath = entry.candidate.filePath;
+        const key = filePath.toLowerCase();
+        if (seenPaths.has(key)) continue;
+        seenPaths.add(key);
+        const { candidate, confidence, qualification, reasons } = entry;
+        const evidence: HintEvidence[] = candidate.families.map((f) => ({
+          type: evidenceTypeForFamily(f.family),
+          weight: 0.5,
+          detail: f.reason,
+          confidence,
+          observed: true,
+        }));
+        hints.push({
+          hintId: buildHintId(filePath, evidence),
+          filePath,
+          confidence,
+          qualification,
+          reasons,
+          evidence,
+          discoveryMethod: candidate.discoveryMethod,
+          framework: input.framework?.framework ?? input.project.framework?.primary ?? undefined,
+          isPrimary: false,
+          timestamp: new Date().toISOString(),
+          schemaVersion: SCHEMA_VERSION,
+          exists: candidate.exists,
+          matchType: candidate.matchType,
+          reason: reasons[0] ?? candidate.families[0]?.reason ?? '',
+          relatedSelector: candidate.relatedSelector,
+        });
+        if (hints.length >= MAX_HINTS) break;
       }
 
-      if (deduped[0]) deduped[0].isPrimary = true;
+      if (hints[0]) hints[0].isPrimary = true;
 
-      this.cache.set(cacheKey, deduped);
+      this.cache.set(cacheKey, hints);
       this.hintsGenerated++;
 
       this.eventBus.publish({
@@ -862,14 +1025,25 @@ export class SourceHintEngine {
         source: 'source-hint-engine',
         correlationId: input.captureId ?? crypto.randomUUID(),
         payload: {
-          hintCount: deduped.length,
-          primaryHint: deduped[0]?.filePath ?? null,
+          hintCount: hints.length,
+          primaryHint: hints[0]?.filePath ?? null,
           processingTimeMs: Math.round(performance.now() - startTime),
         },
       });
 
-      return ok(deduped);
+      return ok(hints);
     } catch (e) {
+      if (e instanceof ScanBudgetExceededError) {
+        this.hintsUnavailable++;
+        return err(
+          shError(
+            'SH_BUDGET_EXCEEDED',
+            'Source scan budget exceeded.',
+            `Scan exceeded ${budget.maxFiles} files or ${budget.maxTimeMs}ms.`,
+            'Source resolution is unavailable for this repository. Reduce repository size or wait for Phase 33 async scanning.',
+          ),
+        );
+      }
       this.hintsFailed++;
       return err(
         shError(
@@ -883,7 +1057,7 @@ export class SourceHintEngine {
   }
 
   async explainHint(hint: SourceHint): Promise<Result<string>> {
-    if (!hint.evidence || hint.evidence.length === 0) {
+    if (!hint.reasons || hint.reasons.length === 0) {
       return err(
         shError(
           'SH_NO_EVIDENCE',
@@ -896,43 +1070,44 @@ export class SourceHintEngine {
     const lines: string[] = [];
     lines.push(`## Source Hint: \`${hint.filePath}\``);
     lines.push('');
+    lines.push(`- **Qualification:** ${hint.qualification ?? 'unknown'}`);
     lines.push(`- **Confidence:** ${(hint.confidence * 100).toFixed(1)}%`);
     lines.push(`- **Exists:** ${hint.exists ? 'Yes' : 'No'}`);
     lines.push(`- **Match Type:** ${hint.matchType}`);
     lines.push(`- **Discovery Method:** ${hint.discoveryMethod}`);
-    lines.push(`- **Reason:** ${hint.reason}`);
     if (hint.relatedSelector) lines.push(`- **Related Selector:** ${hint.relatedSelector}`);
     lines.push(`- **Primary Hint:** ${hint.isPrimary ? 'Yes' : 'No'}`);
     lines.push('');
-    lines.push('### Evidence');
+    lines.push('### Why this file was suggested');
     lines.push('');
-    lines.push('| Type | Confidence | Weight | Detail |');
-    lines.push('|------|-----------|--------|--------|');
-    for (const ev of hint.evidence) {
-      lines.push(
-        `| ${ev.type} | ${(ev.confidence * 100).toFixed(0)}% | ${ev.weight} | ${ev.detail} |`,
-      );
+    for (const reason of hint.reasons) {
+      lines.push(`- ${reason}`);
     }
     lines.push('');
     lines.push('### Interpretation');
-    if (hint.exists && hint.matchType === 'exact') {
+    const qualification = hint.qualification ?? 'weak';
+    if (qualification === 'exact') {
       lines.push(
-        'File confirmed on disk with exact name match. High confidence this is the correct source file.',
+        'Direct, stable association between the target and this file (multiple independent signals agree).',
       );
-    } else if (hint.exists && hint.matchType === 'case-insensitive') {
-      lines.push('File found on disk via case-insensitive match. Likely the correct source file.');
-    } else if (hint.exists && hint.matchType === 'style-adjacent') {
-      lines.push('Style file adjacent to a confirmed component. Likely the correct style source.');
+    } else if (qualification === 'probable') {
+      lines.push(
+        'Independent evidence corroborates this file. Treat as the likely source, not proof.',
+      );
+    } else if (qualification === 'possible') {
+      lines.push(
+        'One moderate signal points here without corroboration. Treat as a suggestion only.',
+      );
     } else {
       lines.push(
-        'Low confidence. Treat this as a suggestion only — the file does not exist on disk.',
+        'Weak evidence only. Do not treat this as the source without further investigation.',
       );
     }
     return ok(lines.join('\n'));
   }
 
   health(): HintEngineHealth {
-    const total = this.hintsGenerated + this.hintsFailed;
+    const total = this.hintsGenerated + this.hintsFailed + this.hintsUnavailable;
     const avgMs =
       this.processingTimes.length > 0
         ? Math.round(this.processingTimes.reduce((a, b) => a + b, 0) / this.processingTimes.length)
@@ -955,5 +1130,28 @@ export class SourceHintEngine {
   async clearCache(): Promise<Result<void>> {
     this.cache.clear();
     return ok(undefined);
+  }
+}
+
+function evidenceTypeForFamily(family: EvidenceFamily): EvidenceType {
+  switch (family) {
+    case 'route-ownership':
+      return 'route-match';
+    case 'import-path':
+      return 'import-graph-match';
+    case 'stable-identifier':
+      return 'testid-match';
+    case 'usage-text':
+      return 'text-content-match';
+    case 'class-file':
+      return 'class-name-match';
+    case 'generic-class':
+      return 'class-name-match';
+    case 'component-ref':
+      return 'component-name-match';
+    case 'style-adjacent':
+      return 'style-adjacent';
+    default:
+      return 'heuristic';
   }
 }

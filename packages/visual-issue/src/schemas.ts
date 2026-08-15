@@ -48,6 +48,8 @@ export const RedactedTargetSummarySchema = z.object({
 
 export const IssueEvidenceSummarySchema = z.object({
   contextPacketId: z.string().optional(),
+  /** Durable persisted capture id (Phase 29): survives Studio/MCP restarts. */
+  captureId: z.string().optional(),
   sourceHintCount: z.number().int().nonnegative().optional(),
   hasConsoleEvidence: z.boolean().optional(),
   hasNetworkEvidence: z.boolean().optional(),

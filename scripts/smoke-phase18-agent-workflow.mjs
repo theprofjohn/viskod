@@ -23,22 +23,9 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const FIXTURE_CSS = join(
-  ROOT,
-  'examples',
-  'phase12-source-hint-app',
-  'src',
-  'components',
-  'TargetCard.css',
-);
-const FIXTURE_CSS_BROKEN = join(
-  ROOT,
-  'examples',
-  'phase12-source-hint-app',
-  'src',
-  'components',
-  'TargetCard.css.broken',
-);
+const FIXTURE_HTML = join(ROOT, 'examples', 'phase12-source-hint-app', 'index.html');
+const FIXTURE_HTML_BROKEN = join(ROOT, 'examples', 'phase12-source-hint-app', 'index.html.stale');
+const STALE_COPY = 'STALE stale stale card copy for the smoke regression fixture';
 
 const FIXTURE_URL = 'http://127.0.0.1:3000';
 const STUDIO_URL = 'http://127.0.0.1:3001';
@@ -154,21 +141,21 @@ function checkNoLeaks(name, payload, keys) {
 }
 
 // ---------------------------------------------------------------------------
-// Setup: broken fixture CSS (description hidden), fixture server, Studio
+// Setup: stale fixture description copy, fixture server, Studio
 // ---------------------------------------------------------------------------
 
 console.log('=== Viskod UI Issue → Verified Fix Smoke ===\n');
 
-let cssBackup = null;
-if (existsSync(FIXTURE_CSS)) {
-  cssBackup = readFileSync(FIXTURE_CSS, 'utf-8');
-  const brokenCss = cssBackup.replace(
-    /\.target-card-description\s*\{[\s\S]*?\}/,
-    '.target-card-description{display:none}',
+let htmlBackup = null;
+if (existsSync(FIXTURE_HTML)) {
+  htmlBackup = readFileSync(FIXTURE_HTML, 'utf-8');
+  const staleHtml = htmlBackup.replace(
+    'This card is the target for source hint validation. Select it with .phase12-source-target-card.',
+    STALE_COPY,
   );
-  writeFileSync(FIXTURE_CSS_BROKEN, brokenCss, 'utf-8');
-  writeFileSync(FIXTURE_CSS, brokenCss, 'utf-8');
-  console.log('Fixture CSS set to broken (description hidden)');
+  writeFileSync(FIXTURE_HTML_BROKEN, staleHtml, 'utf-8');
+  writeFileSync(FIXTURE_HTML, staleHtml, 'utf-8');
+  console.log('Fixture description set to stale copy');
 }
 
 const fixtureProc = spawnProc('node', ['examples/phase12-source-hint-app/server.cjs'], ROOT);
@@ -192,7 +179,7 @@ try {
 
   const studioReady = await waitForLog(
     studioProc,
-    'Viskod Studio running on http://localhost:3001',
+    'Viskod Studio running on http://(localhost|127\\.0\\.0\\.1):3001',
     90000,
     'studio',
   );
@@ -248,15 +235,15 @@ try {
   // Negative: missing expected result must be rejected with 400.
   const badIssue = await httpJson(`${STUDIO_URL}/workflow/issue`, {
     method: 'POST',
-    body: JSON.stringify({ problem: 'Description is hidden', expected: '' }),
+    body: JSON.stringify({ problem: 'Description is stale', expected: '' }),
   });
   check('missing expected result is rejected (400)', badIssue.status === 400);
 
   const issue = await httpJson(`${STUDIO_URL}/workflow/issue`, {
     method: 'POST',
     body: JSON.stringify({
-      problem: 'The card description is hidden',
-      expected: 'The description should be visible below the title',
+      problem: 'The card description copy is stale',
+      expected: 'The description should describe the target card',
       severity: 'high',
     }),
   });
@@ -281,10 +268,10 @@ try {
     WORKFLOW_FORBIDDEN_KEYS,
   );
 
-  // Apply the fix: restore visible CSS before verification.
-  if (cssBackup) {
-    writeFileSync(FIXTURE_CSS, cssBackup, 'utf-8');
-    console.log('Fixture CSS restored (description visible)');
+  // Apply the fix: restore the correct description copy before verification.
+  if (htmlBackup) {
+    writeFileSync(FIXTURE_HTML, htmlBackup, 'utf-8');
+    console.log('Fixture description copy restored');
   }
 
   const verifyStart = await httpJson(`${STUDIO_URL}/workflow/verify/start`, {
@@ -458,13 +445,13 @@ try {
   console.error(`\nSMOKE FAILED: ${e.message}`);
   exitCode = 1;
 } finally {
-  // Restore original CSS
-  if (cssBackup) {
-    writeFileSync(FIXTURE_CSS, cssBackup, 'utf-8');
+  // Restore original fixture HTML
+  if (htmlBackup) {
+    writeFileSync(FIXTURE_HTML, htmlBackup, 'utf-8');
   }
-  // Clean up broken variant
+  // Clean up stale variant
   try {
-    if (existsSync(FIXTURE_CSS_BROKEN)) rmSync(FIXTURE_CSS_BROKEN, { force: true });
+    if (existsSync(FIXTURE_HTML_BROKEN)) rmSync(FIXTURE_HTML_BROKEN, { force: true });
   } catch {}
   // Clean up temp files
   try {

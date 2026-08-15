@@ -261,34 +261,30 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
   }
 
   console.log(`Selecting element: ${selector}...`);
+  // Bare selector: no target geometry is available (Phase 28A). The box is
+  // omitted entirely — multi-match selectors fail closed with
+  // SELECTOR_AMBIGUOUS instead of being disambiguated by a synthetic default.
   const selection: {
     selector: string;
-    boundingBox: { x: number; y: number; width: number; height: number };
     source: 'mcp';
   } = {
     selector,
-    boundingBox: { x: 0, y: 0, width: 100, height: 100 },
     source: 'mcp',
   };
 
-  if (runtime.selectionEngine) {
-    const resolved = await runtime.selectionEngine.resolveTarget({
-      ...selection,
-      boundingBox: selection.boundingBox,
-      source: 'mcp',
-      timestamp: new Date().toISOString(),
-    });
-    if (resolved.ok) {
-      console.log(`Element resolved: ${resolved.value.selector}`);
-    }
-  }
-
+  // "Element resolved" is only claimed after browser-backed capture succeeds
+  // (VISKOD-AUDIT-015): generatePacket fails closed on malformed, missing,
+  // detached, or ambiguous selectors instead of fabricating an "unknown" target.
   console.log('Capturing context...');
   const result = await runtime.vce.generatePacket(selection, profile);
   if (!result.ok) {
     console.error(`Capture failed: ${result.error.message}`);
     process.exit(1);
   }
+
+  console.log(
+    `Element resolved: ${result.value.selection.selector} (${result.value.selection.tagName})`,
+  );
 
   console.log(
     JSON.stringify(
@@ -315,14 +311,26 @@ async function cmdServe(): Promise<void> {
   const targetUrlIdx = process.argv.indexOf('--url');
   const targetUrl = targetUrlIdx >= 0 ? process.argv[targetUrlIdx + 1] : undefined;
 
+  // Phase 30: the MCP server establishes project context ONLY from this
+  // explicit root — never by guessing from cwd.
+  const projectRootIdx = process.argv.indexOf('--project-root');
+  const projectRootPath = projectRootIdx >= 0 ? process.argv[projectRootIdx + 1] : undefined;
+
   if (targetUrl) {
     console.error(`Starting Viskod MCP server with browser (${targetUrl})...`);
   } else {
     console.error('Starting Viskod MCP server...');
   }
+  if (projectRootPath) {
+    console.error(`Project root: ${projectRootPath} (source resolution enabled)`);
+  } else {
+    console.error(
+      'No --project-root provided: source resolution will report unavailable (never guessed).',
+    );
+  }
 
   // Use the full MCP tool set (30 tools) registered by @viskod/mcp-server
-  const server = buildViskodServer({ targetUrl });
+  const server = buildViskodServer({ targetUrl, projectRootPath });
   await server.start();
 }
 async function cmdStatus(): Promise<void> {
@@ -544,7 +552,7 @@ function printHelp(): void {
 Usage:
   viskod start [url]     Start persistent runtime session
   viskod capture <sel>   Capture context (reuses session if available)
-  viskod serve [--url]   Start MCP server (with optional browser)
+  viskod serve [--url] [--project-root <dir>]   Start MCP server (with optional browser + explicit project root)
   viskod install [ide]   Install Viskod MCP config into your IDE (opencode|cursor|claude)
   viskod status          Show session status
   viskod stop            Stop the runtime session

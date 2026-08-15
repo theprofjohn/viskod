@@ -22,6 +22,13 @@ import type {
 } from './types';
 
 export type { ScannerHealth } from './types';
+export type {
+  ScanResult,
+  ProjectMetadata,
+  RouteMap,
+  ComponentIndex,
+  FrameworkDetection,
+} from './types';
 
 export class ProjectScanner {
   private eventBus: EventBus;

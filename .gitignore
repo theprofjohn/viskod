@@ -42,6 +42,10 @@ tests/**/*.d.ts
 tests/**/*.js.map
 tests/**/*.d.ts.map
 
+# Vite config cache (written next to vite.config.ts on dev-server boot;
+# nested gitignore alone is not honored by biome — VISKOD-AUDIT-018)
+**/vite.config.ts.timestamp-*.mjs
+
 # pnpm temp files
 pnpm-lock.yaml.*
 
@@ -78,3 +82,6 @@ examples/dogfood-app/**/*.js
 examples/dogfood-app/**/*.d.ts
 examples/dogfood-app/**/*.js.map
 examples/dogfood-app/**/*.d.ts.map
+
+# Dogfood test output evidence (regenerated on every run)
+phase21-dogfood-evidence/

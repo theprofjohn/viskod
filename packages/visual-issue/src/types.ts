@@ -37,6 +37,8 @@ export interface RedactedTargetSummary {
 
 export interface IssueEvidenceSummary {
   contextPacketId?: string;
+  /** Durable persisted capture id (Phase 29): survives Studio/MCP restarts. */
+  captureId?: string;
   sourceHintCount?: number;
   hasConsoleEvidence?: boolean;
   hasNetworkEvidence?: boolean;

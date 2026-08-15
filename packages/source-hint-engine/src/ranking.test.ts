@@ -10,10 +10,12 @@ function makeHint(overrides: Partial<SourceHint> & { filePath: string }): Source
     discoveryMethod: 'file-exists',
     isPrimary: false,
     timestamp: new Date().toISOString(),
-    schemaVersion: '1.0.0',
+    schemaVersion: '2.0.0',
     exists: true,
     matchType: 'exact',
     reason: 'File exists',
+    qualification: 'probable',
+    reasons: ['file exists matching the target class'],
     ...overrides,
   };
 }

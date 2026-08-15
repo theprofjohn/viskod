@@ -5,9 +5,18 @@ import type { ContextPacket } from './index';
 function mockPacket(overrides: Partial<ContextPacket> = {}): ContextPacket {
   return {
     packetId: 'test-packet-123',
-    schemaVersion: '1.0.0',
+    schemaVersion: '1.1.0',
     timestamp: '2026-07-29T00:00:00Z',
     captureId: 'capture-1',
+    captureStatus: 'partial',
+    evidence: {
+      dom: { state: 'collected' },
+      hierarchy: { state: 'collected' },
+      styles: { state: 'collected' },
+      screenshot: { state: 'omitted_sensitive' },
+      runtime: { state: 'collected' },
+      sourceHints: { state: 'collected' },
+    },
     browser: {
       url: 'http://localhost:3000',
       viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
@@ -146,9 +155,18 @@ describe('AgentContextExporter', () => {
     it('handles missing optional fields gracefully', () => {
       const minimal: ContextPacket = {
         packetId: 'minimal',
-        schemaVersion: '1.0.0',
+        schemaVersion: '1.1.0',
         timestamp: 'now',
         captureId: 'c1',
+        captureStatus: 'complete',
+        evidence: {
+          dom: { state: 'collected' },
+          hierarchy: { state: 'collected' },
+          styles: { state: 'disabled' },
+          screenshot: { state: 'disabled' },
+          runtime: { state: 'disabled' },
+          sourceHints: { state: 'unavailable' },
+        },
         browser: {
           url: '',
           viewport: { width: 0, height: 0, deviceScaleFactor: 1 },

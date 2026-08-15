@@ -1,0 +1,4 @@
+# Vite writes a timestamped config cache next to vite.config.ts on every
+# dev-server boot; it must never enter the repo (it breaks biome check in
+# release:check — VISKOD-AUDIT-018).
+vite.config.ts.timestamp-*.mjs

@@ -100,15 +100,19 @@ export class HandoffServiceImpl implements HandoffService {
       input.userInstruction,
       input.includeSourceHints === false ? undefined : input.sourceHints,
       input.includeSourceHints === false ? undefined : input.sourceHintStatus,
+      input.includeSourceHints === false ? undefined : input.sourceHintResolution,
     );
     const constraints = getDefaultConstraints();
 
     // Persisted issue evidence populates the handoff context; raw packet
-    // paths are never exposed here.
+    // paths are never exposed here. The reference is the DURABLE persisted
+    // capture (opaque captureId), so it resolves after Studio/MCP restart
+    // (VISKOD-AUDIT-003).
     const packetRefs: AgentHandoff['context']['packetRefs'] = [];
     if (issue.evidence?.contextPacketId) {
       packetRefs.push({
         packetId: issue.evidence.contextPacketId,
+        captureId: issue.evidence.captureId,
         type: 'capture',
         label: 'issue capture',
       });

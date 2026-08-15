@@ -1,3 +1,10 @@
+import type {
+  ReviewArtifactComparison,
+  ReviewArtifactsPreview,
+  TargetCropCapture,
+} from './artifact-types';
+export type { ReviewArtifactComparison, ReviewArtifactsPreview, TargetCropCapture };
+
 export type VisualReviewStatus =
   | 'draft'
   | 'capturing_after'
@@ -11,6 +18,8 @@ export type VisualReviewStatus =
 export type VisualComparisonStatus =
   | 'changed'
   | 'unchanged'
+  | 'incomparable'
+  | 'visual_unavailable'
   | 'missing_after'
   | 'ambiguous_after'
   | 'stale_before'
@@ -66,6 +75,15 @@ export interface ReviewSnapshotRef {
     confidence: number;
     resolutionStatus: 'resolved' | 'ambiguous' | 'stale' | 'missing';
   };
+  /**
+   * Phase 28B stable identity of the target (Phase 31): presentation labels
+   * are NOT identity. When present, same-target determination uses these
+   * fields; display labels are change evidence only.
+   */
+  identity?: {
+    targetId?: string;
+    stableAttributes?: Record<string, string>;
+  };
   visualEvidence?: {
     screenshotId?: string;
     thumbnailId?: string;
@@ -97,6 +115,12 @@ export interface VisualComparison {
     boundingBoxDelta?: RectDelta;
     screenshotDiffId?: string;
     diffThumbnailId?: string;
+    /** Phase 31: real pixel-comparison evidence (persisted artifacts). */
+    artifactComparison?: ReviewArtifactComparison;
+    /** Phase 31: opaque diff artifact id for the Studio UI. */
+    diffArtifactId?: string;
+    /** Phase 31: viewport/DPR compatibility between the two captures. */
+    viewportCompatible?: boolean;
   };
   evidence?: {
     sourceHintDelta?: string;
@@ -128,6 +152,11 @@ export interface VisualReview {
   after?: ReviewSnapshotRef;
   comparison?: VisualComparison;
   decision?: VisualReviewDecision;
+  /**
+   * Phase 31: sanitized local-sensitive review artifact state (opaque ids
+   * only, no paths). Present when the artifact store is composed.
+   */
+  artifacts?: ReviewArtifactsPreview;
   lifecycle: VisualReviewEvent[];
   redaction: {
     applied: boolean;
@@ -187,6 +216,14 @@ export interface RecaptureResult {
   url: string;
   viewport: { width: number; height: number; deviceScaleFactor?: number };
   screenshotPath?: string;
+  /**
+   * Phase 31: local-sensitive target crop captured through the Phase 28B
+   * exact-target pipeline. Persisted only when the visual-review artifact
+   * policy is enabled; NEVER part of the agent-safe packet.
+   */
+  elementScreenshot?: TargetCropCapture;
+  /** Phase 28B stable identity of the resolved element at capture time. */
+  identity?: { targetId?: string; stableAttributes?: Record<string, string> };
   sourceHints?: Array<{ filePath: string; confidence: number; evidence: string }>;
   runtimeEvidence?: Record<string, unknown>;
   consoleEvidence?: Array<{ level: string; text: string; url?: string; line?: number }>;
@@ -204,7 +241,9 @@ export interface VisualReviewRecaptureInput {
 
 export interface ResolvedRecaptureTarget {
   selector: string;
-  boundingBox: { x: number; y: number; width: number; height: number };
+  /** Observed target geometry (persisted overlay crop/rect); absent = no
+   *  trusted disambiguation available for a multi-match selector. */
+  boundingBox?: { x: number; y: number; width: number; height: number };
   source: 'review-recapture';
   resolvedFrom: 'stable-attribute' | 'ancestor-path' | 'geometry-fallback';
   confidence: number;
@@ -235,6 +274,7 @@ export interface VisualReviewGetOutput {
   after?: ReviewSnapshotRef;
   comparison?: VisualComparison;
   decision?: VisualReviewDecision;
+  artifacts?: ReviewArtifactsPreview;
 }
 
 export interface VisualReviewDecisionInput {

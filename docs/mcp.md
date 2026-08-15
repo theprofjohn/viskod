@@ -141,7 +141,7 @@ Avoid tools that combine unrelated operations.
 
 # Core Tools
 
-Implemented tools (30 total, registered by `packages/mcp-server/src/entry.ts`):
+Implemented tools (31 total, registered by `packages/mcp-server/src/entry.ts`):
 
 ```text
 viskod_navigate
@@ -154,6 +154,7 @@ get_agent_handoff
 list_agent_handoffs
 update_agent_handoff_status
 cancel_agent_handoff
+get_handoff_context
 create_visual_review
 get_visual_review
 list_visual_reviews
@@ -326,6 +327,40 @@ Each packet contains:
 * confidence scores
 
 Packets represent a point-in-time snapshot.
+
+---
+
+# Handoff Context Retrieval
+
+`get_handoff_context(handoffId)` resolves a handoff's durable persisted
+capture(s) into a compact agent-safe context projection by opaque ID. The
+projection is derived from the schema-validated safe capture on disk —
+never from in-memory objects — so it survives Studio/MCP restarts and fresh
+coding-agent connections. It includes the selected target (selector, text,
+redacted attributes), page URL (redacted), viewport, compact hierarchy,
+budgeted computed styles, runtime evidence summary, per-provider evidence
+statuses, screenshot status, issue intent, and — when source resolution was
+available at capture time — a bounded set of QUALIFIED source candidates
+(Phase 30): each candidate carries a repository-relative path, a semantic
+qualification (`exact | probable | possible | weak`), a calibrated
+confidence, and concise reasons. The overall `resolution` field is
+`resolved | ambiguous | unavailable` and — for captures made since Phase 30A —
+is the PERSISTED capture-time conclusion: the packet records a
+`sourceHintsResolution` snapshot (`status` + `modelVersion` + optional
+`topCandidate`) and the projection reports it verbatim (`resolutionSource:
+"persisted"`) together with the `modelVersion` that produced it. The fresh
+agent process never recomputes source hints and never reranks historical
+candidates: qualification, confidence, and ordering are the capture-time
+values. Legacy packets that predate the snapshot are derived
+deterministically with an explicit `resolutionSource: "derived"` marker —
+never presented as the original capture-time conclusion. Duplicate-text
+targets persist as `ambiguous` with both bounded candidates and neither
+presented as confirmed. Returns typed errors for missing/corrupt/mismatched
+handoff or capture state; structurally invalid persisted source data
+(invalid qualification, out-of-range confidence, absolute/traversal paths)
+is rejected as corrupt — never returned as normal agent context. Never
+exposes raw packet JSON, absolute filesystem paths, or raw screenshot
+pixels.
 
 ---
 

@@ -44,6 +44,29 @@ export interface StudioWorkflowState {
   reviewId?: string;
   handoff?: HandoffPreview | null;
   review?: ReviewPreview | null;
+  /**
+   * Phase 30: compact source-resolution status for the captured target.
+   * Repository-relative candidate paths only; ambiguity is shown as
+   * ambiguity, never a confirmed first candidate.
+   */
+  source?: {
+    resolution: 'resolved' | 'ambiguous' | 'unavailable';
+    status: string;
+    count: number;
+    candidates: Array<{
+      path: string;
+      qualification: 'exact' | 'probable' | 'possible' | 'weak';
+      confidence: number;
+      reasons: string[];
+    }>;
+  };
+  /**
+   * Phase 31: local-sensitive visual review artifact policy. `asked` is true
+   * once the user has answered the one-time consent prompt — the normal
+   * report flow never re-asks.
+   */
+  visualReviewPolicy?: 'disabled' | 'local-sensitive-target-crop';
+  visualReviewPolicyAsked?: boolean;
   /** Single user-facing recovery message; cleared on the next successful step. */
   error?: string;
 }
@@ -57,6 +80,7 @@ export interface CreateIssueInput {
 /** Narrow structural view of SelectionOverlayController used by the workflow. */
 export interface SelectionController {
   enterSelectionMode(): Promise<Result<void>>;
+  exitSelectionMode(): Promise<Result<void>>;
   getActiveSelection(): Promise<Result<VisualSelection | null>>;
   clearSelection(): Promise<Result<void>>;
   isActive(): boolean;
@@ -76,6 +100,20 @@ export interface StudioWorkflowOptions {
   userFacingHandoff: UserFacingHandoff;
   userFacingReview: UserFacingReview;
   reviewService: ReviewService;
+  /**
+   * Phase 31: capture and persist the pre-change visual-review baseline for
+   * the issue. Invoked when the agent handoff is prepared — before the
+   * coding agent modifies the UI. Best-effort: failure degrades to a
+   * warning, never blocks the handoff.
+   */
+  captureBaselineArtifact?: (input: {
+    issueId: string;
+    selector: string;
+    boundingBox?: { x: number; y: number; width: number; height: number };
+  }) => Promise<Result<{ baselineStored: boolean }>>;
+  /** Phase 31: current visual-review artifact policy (for the consent banner). */
+  visualReviewPolicy?: 'disabled' | 'local-sensitive-target-crop';
+  visualReviewPolicyAsked?: boolean;
 }
 
 const RECOVERY_RESEARCH = 'Select the element again.';
@@ -90,6 +128,9 @@ export class StudioWorkflow {
   private userFacingHandoff: UserFacingHandoff;
   private userFacingReview: UserFacingReview;
   private reviewService: ReviewService;
+  private captureBaselineArtifact?: StudioWorkflowOptions['captureBaselineArtifact'];
+  private visualReviewPolicy?: 'disabled' | 'local-sensitive-target-crop';
+  private visualReviewPolicyAsked?: boolean;
 
   private stage: StudioWorkflowStage = 'idle';
   private activeSelection: VisualSelection | null = null;
@@ -99,6 +140,18 @@ export class StudioWorkflow {
   private reviewId?: string;
   private reviewPreview?: ReviewPreview;
   private error?: string;
+  /**
+   * Workflow generation. Bumped on every transient reset (begin/cancel/
+   * reselect/reset) so late async completions from a previous generation can
+   * never mutate the active workflow (VISKOD-AUDIT-013/014).
+   */
+  private epoch = 0;
+  /**
+   * In-flight create-issue → prepare-handoff operation. Concurrent or
+   * repeated submissions share the same promise, so rapid double-clicks or
+   * repeated HTTP requests produce exactly one issue and one handoff.
+   */
+  private preparing: Promise<Result<StudioWorkflowState>> | null = null;
 
   constructor(options: StudioWorkflowOptions) {
     this.pageId = options.pageId;
@@ -109,10 +162,28 @@ export class StudioWorkflow {
     this.userFacingHandoff = options.userFacingHandoff;
     this.userFacingReview = options.userFacingReview;
     this.reviewService = options.reviewService;
+    this.captureBaselineArtifact = options.captureBaselineArtifact;
+    this.visualReviewPolicy = options.visualReviewPolicy;
+    this.visualReviewPolicyAsked = options.visualReviewPolicyAsked;
+  }
+
+  /**
+   * Phase 31A: reflect an answered consent choice in the LIVE workflow so
+   * the one-time banner disappears immediately (the workflow snapshot would
+   * otherwise stay stale until the next navigation).
+   */
+  setVisualReviewPolicy(policy: 'disabled' | 'local-sensitive-target-crop', asked: boolean): void {
+    this.visualReviewPolicy = policy;
+    this.visualReviewPolicyAsked = asked;
   }
 
   /** Enter overlay selection mode and move to `selecting`. */
   async beginReport(): Promise<Result<StudioWorkflowState>> {
+    // A new report is a clean transient boundary: the previous report's
+    // selection, capture, and issue/handoff identifiers must not leak into
+    // the new workflow (VISKOD-AUDIT-014). Persisted domain entities are
+    // never touched here.
+    this.clearTransientState();
     const modeResult = await this.controller.enterSelectionMode();
     if (!modeResult.ok) {
       return this.fail(
@@ -158,6 +229,7 @@ export class StudioWorkflow {
       );
     }
 
+    const epoch = this.epoch;
     const captureResult = await this.vce.generatePacket({
       selector,
       boundingBox: target.geometry.viewportRect,
@@ -165,6 +237,19 @@ export class StudioWorkflow {
     });
     if (!captureResult.ok) {
       return this.fail(this.stage, RECOVERY_REFRESH);
+    }
+    if (epoch !== this.epoch) {
+      // The workflow was reset/replaced mid-capture; never commit stale state.
+      return ok(this.buildState());
+    }
+
+    // Close selection mode atomically with acceptance: stop overlay polling
+    // and page interception so later overlay events cannot replace the
+    // frozen selection while the user describes the issue (VISKOD-AUDIT-013).
+    // Polling is stopped synchronously inside the controller before any
+    // awaited work, so acceptance proceeds even if overlay teardown fails.
+    if (this.controller.isActive()) {
+      await this.controller.exitSelectionMode();
     }
 
     this.activeSelection = selection;
@@ -223,7 +308,12 @@ export class StudioWorkflow {
 
     const sourceHints = this.buildSourceHintInput();
     const result = await this.userFacingHandoff.sendToAgent(
-      { issueId: this.issueId, sourceHints, sourceHintStatus: this.sourceHintStatus() },
+      {
+        issueId: this.issueId,
+        sourceHints,
+        sourceHintStatus: this.sourceHintStatus(),
+        sourceHintResolution: this.sourceResolution(),
+      },
       this.sessionId,
       this.pageId,
     );
@@ -232,12 +322,137 @@ export class StudioWorkflow {
     }
     this.handoffId = result.handoffId;
     const preview = await this.userFacingHandoff.getPreview(result.handoffId);
-    if (result.warnings && result.warnings.length > 0) {
+    const warnings: string[] =
+      result.warnings && result.warnings.length > 0 ? [...result.warnings] : [];
+    const baseline = await this.captureBaselineForIssue(this.issueId);
+    if (baseline && !baseline.ok) {
+      warnings.push(baseline.error.message);
+    }
+    if (warnings.length > 0) {
       // Warnings propagate to the user-facing state; they do not block.
-      this.error = result.warnings.join(' ');
+      this.error = warnings.join(' ');
     } else {
       this.error = undefined;
     }
+    this.stage = 'handoff_ready';
+    return ok(this.buildState(preview));
+  }
+
+  /**
+   * The single user-facing "Prepare agent handoff" action
+   * (VISKOD-AUDIT-001): create the issue if not already created for this
+   * submission, prepare the agent handoff for that issue, and move to
+   * `handoff_ready`.
+   *
+   * Idempotency (VISKOD-AUDIT duplicate submission):
+   * - repeated submit after success returns the existing handoff-ready state;
+   * - concurrent/repeated submits share one in-flight operation;
+   * - retry after a handoff failure reuses the persisted issue ID and never
+   *   creates a second issue.
+   *
+   * Partial failure: issue created but handoff failed keeps the issue ID in
+   * workflow state, stays at `describe` with an actionable error, and never
+   * falsely transitions to `handoff_ready`. If issue creation itself fails,
+   * no handoff is attempted.
+   */
+  async prepareAgentHandoffFromDescription(
+    input: CreateIssueInput,
+  ): Promise<Result<StudioWorkflowState>> {
+    const problem = input.problem?.trim();
+    const expected = input.expected?.trim();
+    if (!problem || !expected) {
+      return this.fail(this.stage, 'Both "What is wrong?" and "What should happen?" are required.');
+    }
+    if (this.handoffId) {
+      // Already prepared: repeated submission is a no-op returning the state.
+      return ok(this.buildState());
+    }
+    if (this.stage !== 'describe' || !this.activeSelection) {
+      return this.fail(this.stage, RECOVERY_RESEARCH);
+    }
+    if (this.preparing) {
+      return this.preparing;
+    }
+    const operation = this.doPrepareAgentHandoff(input, problem, expected).finally(() => {
+      this.preparing = null;
+    });
+    this.preparing = operation;
+    return operation;
+  }
+
+  private async doPrepareAgentHandoff(
+    input: CreateIssueInput,
+    problem: string,
+    expected: string,
+  ): Promise<Result<StudioWorkflowState>> {
+    const epoch = this.epoch;
+    if (this.stage !== 'describe' || !this.activeSelection) {
+      return this.fail(this.stage, RECOVERY_RESEARCH);
+    }
+
+    if (!this.issueId) {
+      const description = `Problem:\n${problem}\n\nExpected result:\n${expected}`;
+      const title = problem.length > 80 ? `${problem.slice(0, 79)}…` : problem;
+      const createResult = await this.issueService.createIssue(
+        this.activeSelection,
+        this.sessionId,
+        this.pageId,
+        title,
+        description,
+        input.severity ?? 'medium',
+        this.buildEvidenceSummary(this.capturedPacket),
+      );
+      if (!createResult.ok) {
+        // Issue creation failed: no handoff attempt, remain recoverable at
+        // describe with the entered description preserved in the UI.
+        return this.fail(
+          this.stage,
+          `The issue could not be created. ${createResult.error.message}`,
+        );
+      }
+      if (epoch !== this.epoch) {
+        return ok(this.buildState());
+      }
+      this.issueId = createResult.value.issueId;
+    }
+
+    const sourceHints = this.buildSourceHintInput();
+    const result = await this.userFacingHandoff.sendToAgent(
+      {
+        issueId: this.issueId,
+        sourceHints,
+        sourceHintStatus: this.sourceHintStatus(),
+        sourceHintResolution: this.sourceResolution(),
+      },
+      this.sessionId,
+      this.pageId,
+    );
+    if (!result.ok || !result.handoffId) {
+      // Handoff failed after the issue was persisted: preserve the issue ID,
+      // stay at describe, and let a retry reuse the same issue.
+      return this.fail(
+        this.stage,
+        `The handoff could not be prepared. ${result.error ?? 'Try again.'}`,
+      );
+    }
+    if (epoch !== this.epoch) {
+      return ok(this.buildState());
+    }
+
+    this.handoffId = result.handoffId;
+    const preview = await this.userFacingHandoff.getPreview(result.handoffId);
+    const warnings: string[] =
+      result.warnings && result.warnings.length > 0 ? [...result.warnings] : [];
+
+    // Phase 31: capture the pre-change visual baseline NOW — before the
+    // coding agent modifies the UI. Best-effort: a failure degrades to a
+    // warning; the review later reports visual comparison unavailable.
+    const baseline = await this.captureBaselineForIssue(this.issueId);
+    if (baseline && !baseline.ok) {
+      warnings.push(baseline.error.message);
+    }
+
+    this.error = warnings.length > 0 ? warnings.join(' ') : undefined;
     this.stage = 'handoff_ready';
     return ok(this.buildState(preview));
   }
@@ -317,13 +532,62 @@ export class StudioWorkflow {
     return ok(this.buildState());
   }
 
+  /**
+   * Re-enter selection mode from a pre-handoff stage (VISKOD-AUDIT-014).
+   * Obsolete transient state — active selection, capture, and any pending
+   * issue/handoff identifiers — is cleared so a new selection replaces the
+   * old one deterministically. The description text lives in the UI and is
+   * preserved by the client across the reselect round trip.
+   */
+  async reselect(): Promise<Result<StudioWorkflowState>> {
+    if (this.controller.isActive()) {
+      await this.controller.exitSelectionMode();
+    }
+    await this.controller.clearSelection();
+    this.clearTransientState();
+
+    const modeResult = await this.controller.enterSelectionMode();
+    if (!modeResult.ok) {
+      return this.fail(
+        this.stage,
+        'Selection mode could not be restarted. Select again after refreshing the page.',
+      );
+    }
+    this.stage = 'selecting';
+    this.error = undefined;
+    return ok(this.buildState());
+  }
+
+  /**
+   * Abandon the active report and return to `idle` (VISKOD-AUDIT-014).
+   * If handoff preparation partially succeeded, the persisted issue is
+   * intentionally NOT deleted — it remains in the local store and the
+   * active workflow is simply reset.
+   */
+  async cancel(): Promise<Result<StudioWorkflowState>> {
+    if (this.controller.isActive()) {
+      await this.controller.exitSelectionMode();
+    }
+    this.clearTransientState();
+    this.stage = 'idle';
+    this.error = undefined;
+    return ok(this.buildState());
+  }
+
   /** Invalidate the workflow (navigation, reselect). */
   reset(): void {
+    this.clearTransientState();
     this.stage = 'idle';
+  }
+
+  /** Transient reset boundary: clears everything that must not leak across reports. */
+  private clearTransientState(): void {
+    this.epoch++;
     this.activeSelection = null;
     this.capturedPacket = null;
     this.issueId = undefined;
     this.handoffId = undefined;
+    this.reviewId = undefined;
     this.reviewPreview = undefined;
     this.error = undefined;
   }
@@ -367,15 +631,44 @@ export class StudioWorkflow {
       reviewId: this.reviewId,
       handoff: handoff ?? null,
       review: review ?? this.reviewPreview ?? null,
+      source: this.buildSourceStatus(),
+      visualReviewPolicy: this.visualReviewPolicy,
+      visualReviewPolicyAsked: this.visualReviewPolicyAsked,
     };
     if (this.error) state.error = this.error;
     return state;
+  }
+
+  /**
+   * Phase 30: compact user-facing source status derived from the capture.
+   * Repository-relative paths only; resolution is truthful — ambiguous
+   * captures are never presented as a confirmed top candidate.
+   */
+  private buildSourceStatus(): StudioWorkflowState['source'] {
+    const packet = this.capturedPacket;
+    if (!packet) return undefined;
+    const hints = packet.sourceHints ?? [];
+    const resolution = packet.sourceHintsResolution?.status ?? 'unavailable';
+    return {
+      resolution,
+      status: packet.evidence?.sourceHints?.state ?? 'unavailable',
+      count: hints.length,
+      candidates: hints.slice(0, 5).map((h) => ({
+        path: h.displayPath ?? h.filePath,
+        qualification: h.qualification ?? 'weak',
+        confidence: h.confidence,
+        reasons: (h.reasons ?? []).slice(0, 3),
+      })),
+    };
   }
 
   private buildEvidenceSummary(packet: ContextPacket | null) {
     if (!packet) return undefined;
     return {
       contextPacketId: packet.packetId,
+      // Durable persisted capture reference (Phase 29): the handoff points at
+      // the capture on disk, not an in-memory packet.
+      captureId: packet.captureId,
       sourceHintCount: (packet.sourceHints ?? []).length,
       hasConsoleEvidence: (packet.runtimeEvidence?.console?.length ?? 0) > 0,
       hasNetworkEvidence: (packet.runtimeEvidence?.network?.length ?? 0) > 0,
@@ -390,6 +683,7 @@ export class StudioWorkflow {
     score?: number;
     reasons?: string[];
     warnings?: string[];
+    qualification?: 'exact' | 'probable' | 'possible' | 'weak';
   }> {
     const hints = this.capturedPacket?.sourceHints ?? [];
     return hints.map((hint) => ({
@@ -397,17 +691,47 @@ export class StudioWorkflow {
       confidence: hint.confidence,
       kind: hint.kind,
       score: hint.ranking?.score,
-      reasons: hint.ranking?.reasons,
+      reasons: hint.ranking?.reasons ?? hint.reasons,
       warnings: hint.ranking?.penalties,
+      qualification: hint.qualification,
     }));
   }
 
   private sourceHintStatus(): 'ranked' | 'ambiguous' | 'low_confidence' | 'missing' {
-    const hints = this.capturedPacket?.sourceHints ?? [];
+    const packet = this.capturedPacket;
+    if (!packet) return 'missing';
+    const hints = packet.sourceHints ?? [];
     if (hints.length === 0) return 'missing';
+    const resolution = packet.sourceHintsResolution?.status ?? 'unavailable';
+    if (resolution === 'ambiguous') return 'ambiguous';
     const top = hints[0];
-    if (top && top.confidence < 0.6) return 'low_confidence';
+    if (!top) return 'missing';
+    if (top.qualification === 'possible' || top.qualification === 'weak') {
+      return 'low_confidence';
+    }
     return 'ranked';
+  }
+
+  private sourceResolution(): 'resolved' | 'ambiguous' | 'unavailable' {
+    return this.capturedPacket?.sourceHintsResolution?.status ?? 'unavailable';
+  }
+
+  /**
+   * Phase 31: capture the pre-change visual-review baseline for an issue
+   * using the exact resolved target of the accepted selection. No-op when
+   * the workflow has no captured target or no baseline capturer is wired.
+   */
+  private async captureBaselineForIssue(
+    issueId: string,
+  ): Promise<Result<{ baselineStored: boolean }> | null> {
+    if (!this.captureBaselineArtifact) return null;
+    const selector = this.capturedPacket?.selection.selector;
+    if (!selector) return null;
+    return this.captureBaselineArtifact({
+      issueId,
+      selector,
+      boundingBox: this.capturedPacket?.selection.boundingBox,
+    });
   }
 
   private fail(stage: StudioWorkflowStage, message: string): Result<StudioWorkflowState> {

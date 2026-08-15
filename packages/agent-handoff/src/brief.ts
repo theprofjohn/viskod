@@ -26,8 +26,10 @@ export function generateAgentBrief(
     score?: number;
     reasons?: string[];
     warnings?: string[];
+    qualification?: 'exact' | 'probable' | 'possible' | 'weak';
   }>,
   sourceHintStatus?: 'ranked' | 'ambiguous' | 'low_confidence' | 'missing',
+  sourceHintResolution?: 'resolved' | 'ambiguous' | 'unavailable',
 ): AgentIssueBrief {
   const title = issue.title;
   const summary = buildSummary(issue);
@@ -69,6 +71,7 @@ export function generateAgentBrief(
     brief.sourceHints = {
       count: sourceHints.length,
       status: sourceHintStatus ?? 'ranked',
+      resolution: sourceHintResolution ?? 'resolved',
       topHints: sourceHints.slice(0, 5),
     };
   }

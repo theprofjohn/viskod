@@ -13,7 +13,7 @@ export interface CompactPacket {
   tagName: string;
   boundingBox: { x: number; y: number; width: number; height: number };
   visibleText: string;
-  screenshots: Array<{ type: string; path: string; sizeBytes: number }>;
+  screenshots: Array<{ type: string; path: string | null; sizeBytes: number }>;
   profile: string;
   sourceHints: Array<{
     filePath: string;
@@ -107,7 +107,12 @@ function toAgentBriefMarkdown(packet: ContextPacket): string {
     lines.push('## Screenshots');
     lines.push('');
     for (const s of packet.screenshots) {
-      lines.push(`- \`${s.path}\` (${s.type}, ${s.sizeBytes} bytes)`);
+      const ref = s.path
+        ? `\`${s.path}\``
+        : s.status === 'omitted_sensitive' || s.sensitive
+          ? '(omitted — sensitive pixels are not persisted)'
+          : '(omitted)';
+      lines.push(`- ${ref} (${s.type}, ${s.sizeBytes} bytes)`);
     }
     lines.push('');
   }
@@ -201,12 +206,14 @@ function toAgentBriefMarkdown(packet: ContextPacket): string {
 
   // Confidence
   const confidence = packet.confidence ?? {};
+  const fmt = (v: number | null | undefined): string =>
+    v === null || v === undefined ? 'n/a' : `${(v * 100).toFixed(0)}%`;
   lines.push('## Confidence');
   lines.push('');
-  lines.push(`- Source Mapping: ${((confidence.sourceMapping ?? 0) * 100).toFixed(0)}%`);
-  lines.push(`- Semantic Labeling: ${((confidence.semanticLabeling ?? 0) * 100).toFixed(0)}%`);
-  lines.push(`- Layout Analysis: ${((confidence.layoutAnalysis ?? 0) * 100).toFixed(0)}%`);
-  lines.push(`- Framework Detection: ${((confidence.frameworkDetection ?? 0) * 100).toFixed(0)}%`);
+  lines.push(`- Source Mapping: ${fmt(confidence.sourceMapping)}`);
+  lines.push(`- Semantic Labeling: ${fmt(confidence.semanticLabeling)}`);
+  lines.push(`- Layout Analysis: ${fmt(confidence.layoutAnalysis)}`);
+  lines.push(`- Framework Detection: ${fmt(confidence.frameworkDetection)}`);
   lines.push('');
 
   // Suggested next steps

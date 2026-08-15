@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -97,7 +97,12 @@ try {
     15000,
     'Fixture server',
   );
-  await waitForReady(studio, 'Viskod Studio running on http://localhost:3001', 90000, 'Studio');
+  await waitForReady(
+    studio,
+    'Viskod Studio running on http://(localhost|127\\.0\\.0\\.1):3001',
+    90000,
+    'Studio',
+  );
 
   console.log(`Fixture: ${FIXTURE_URL}`);
   console.log(`Studio: ${STUDIO_URL}`);

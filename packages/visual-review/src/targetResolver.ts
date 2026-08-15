@@ -133,8 +133,7 @@ export function resolveRecaptureTarget(
   if (storedTarget.selector && storedTarget.selector.length > 0) {
     return {
       selector: storedTarget.selector,
-      boundingBox: geometry ??
-        storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
+      boundingBox: geometry ?? storedTarget.geometry?.viewportRect,
       source: 'review-recapture',
       resolvedFrom: 'stable-attribute',
       confidence: 0.95,
@@ -147,8 +146,7 @@ export function resolveRecaptureTarget(
     if (selector) {
       return {
         selector,
-        boundingBox: geometry ??
-          storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
+        boundingBox: geometry ?? storedTarget.geometry?.viewportRect,
         source: 'review-recapture',
         resolvedFrom: 'stable-attribute',
         confidence: 0.9,
@@ -163,8 +161,7 @@ export function resolveRecaptureTarget(
     if (selector) {
       return {
         selector,
-        boundingBox: geometry ??
-          storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
+        boundingBox: geometry ?? storedTarget.geometry?.viewportRect,
         source: 'review-recapture',
         resolvedFrom: 'ancestor-path',
         confidence: 0.7,
@@ -176,8 +173,7 @@ export function resolveRecaptureTarget(
   if (semanticSelector) {
     return {
       selector: semanticSelector,
-      boundingBox: geometry ??
-        storedTarget.geometry?.viewportRect ?? { x: 0, y: 0, width: 100, height: 100 },
+      boundingBox: geometry ?? storedTarget.geometry?.viewportRect,
       source: 'review-recapture',
       resolvedFrom: 'stable-attribute',
       confidence: 0.6,

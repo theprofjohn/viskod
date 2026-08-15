@@ -9,11 +9,12 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@viskod/shared": "workspace:*",
-    "@viskod/event-bus": "workspace:*",
-    "@viskod/visual-selection": "workspace:*",
-    "@viskod/visual-issue": "workspace:*",
     "@viskod/agent-handoff": "workspace:*",
+    "@viskod/event-bus": "workspace:*",
+    "@viskod/shared": "workspace:*",
+    "@viskod/visual-issue": "workspace:*",
+    "@viskod/visual-selection": "workspace:*",
+    "pngjs": "^7.0.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

@@ -752,6 +752,13 @@ logs/        (optional)
 session.json
 ```
 
+`reviews/` holds one directory per review (`review.json` + Phase 31
+local-sensitive visual artifacts `before.png`/`after.png`/`diff.png` and a
+`manifest.json` pairing contract) plus `reviews/baselines/<issueId>/` —
+pre-change target crops captured when the agent handoff is prepared. These
+raw images are marked sensitive/localOnly and are never part of the
+agent-safe packet or handoff context.
+
 Everything remains inside one hidden directory.
 
 Easy to remove.

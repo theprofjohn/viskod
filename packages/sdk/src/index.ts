@@ -60,9 +60,11 @@ export class Viskod {
     selector: string,
     boundingBox?: { x: number; y: number; width: number; height: number },
   ): Promise<SelectionTarget> {
+    // Phase 28A: caller-provided geometry is trusted target evidence; a bare
+    // selector carries no geometry and multi-match selectors fail closed.
     const resolved = await this.selectionEngine.resolveTarget({
       selector,
-      boundingBox: boundingBox ?? { x: 0, y: 0, width: 100, height: 100 },
+      ...(boundingBox ? { boundingBox } : {}),
       source: 'mcp',
       timestamp: new Date().toISOString(),
     });

@@ -1,3 +1,4 @@
+import type { ReviewArtifactsPreview } from './artifact-types';
 import type { ReviewService } from './service';
 import type { VisualReviewListItem, VisualReviewStatus } from './types';
 
@@ -37,12 +38,30 @@ export interface ReviewPreview {
     confidence: number;
     summary: string;
     warnings: string[];
+    /** Phase 31: real visual comparison evidence (opaque ids only). */
+    visual?: {
+      changedPixelRatio?: number;
+      diffArtifactId?: string;
+      viewportCompatible?: boolean;
+      artifactComparison?: {
+        status: string;
+        changedPixelRatio?: number;
+        changedPixels?: number;
+        totalPixels?: number;
+        geometry?: { xDelta?: number; yDelta?: number; widthDelta?: number; heightDelta?: number };
+        geometryChanged?: boolean;
+        viewportCompatible?: boolean;
+        reason?: string;
+      };
+    };
   };
   decision?: {
     decision: string;
     decidedAt: string;
     note?: string;
   };
+  /** Phase 31: sanitized local-sensitive review artifacts (opaque ids). */
+  artifacts?: ReviewArtifactsPreview;
   warnings: string[];
 }
 
@@ -128,6 +147,14 @@ export class UserFacingReview {
             confidence: review.comparison.confidence,
             summary: review.comparison.summary,
             warnings: review.comparison.warnings,
+            visual: review.comparison.visual
+              ? {
+                  changedPixelRatio: review.comparison.visual.changedPixelRatio,
+                  diffArtifactId: review.comparison.visual.diffArtifactId,
+                  viewportCompatible: review.comparison.visual.viewportCompatible,
+                  artifactComparison: review.comparison.visual.artifactComparison,
+                }
+              : undefined,
           }
         : undefined,
       decision: review.decision
@@ -137,6 +164,7 @@ export class UserFacingReview {
             note: review.decision.note,
           }
         : undefined,
+      artifacts: review.artifacts,
       warnings,
     };
   }

@@ -1,6 +1,20 @@
 export interface SelectionTarget {
   selector: string;
-  boundingBox: { x: number; y: number; width: number; height: number };
+  /**
+   * Observed target evidence (Phase 28A geometry trust contract).
+   *
+   * When present this bounding box is treated as TRUSTED target evidence and
+   * MAY disambiguate a multi-match selector (see BrowserRuntime.resolveSelector):
+   * it is either captured from an actual overlay-selected element, persisted
+   * from a real previous selection, or explicitly supplied by a caller whose
+   * API contract identifies it as target evidence.
+   *
+   * When absent there is NO trusted disambiguation available: a selector that
+   * matches multiple elements MUST fail with SELECTOR_AMBIGUOUS. Entry points
+   * MUST NOT manufacture a default/placeholder box merely because a schema
+   * once required one; provenance is never inferred from numeric values.
+   */
+  boundingBox?: { x: number; y: number; width: number; height: number };
   source: 'studio' | 'mcp' | 'overlay' | 'keyboard' | 'automation';
 }
 

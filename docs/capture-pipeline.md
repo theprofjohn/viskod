@@ -230,6 +230,27 @@ Examples:
 
 Persistence occurs only after successful assembly.
 
+### Atomic capture commit (Phase 29)
+
+A persisted capture appears either complete and schema-valid, or not
+committed at all:
+
+1. the FINAL normalized, redacted packet (already safe on disk) is validated
+   against `PersistedPacketSchema` before any write;
+2. all artifacts are written into a sibling temporary directory whose name
+   is not a valid capture id (never listable);
+3. the temporary directory is atomically renamed to the final opaque capture
+   directory.
+
+A failed write at any stage removes the temporary directory and returns a
+typed persistence error; `listCaptures`/`getCapture` never expose partial
+captures. Screenshots follow the agent-safe policy by default (raw pixels
+are not persisted; the packet records `omitted_sensitive`), with an explicit
+`persist-raw` opt-in that marks artifacts sensitive. Persisted packets carry
+durable opaque capture ids and schema/privacy versioning (`schemaVersion`
+`1.1.0`), and can be loaded by opaque capture id or resolved from a packet
+id after restart.
+
 ---
 
 # Stage 8 — Publication

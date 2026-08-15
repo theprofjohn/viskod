@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import { generateExport } from '@viskod/context-engine';
 import type { ContextPacket } from '@viskod/context-engine';
 import { describe, expect, it } from 'vitest';
@@ -5,9 +6,25 @@ import { describe, expect, it } from 'vitest';
 function mockPacket(overrides: Partial<ContextPacket> = {}): ContextPacket {
   return {
     packetId: 'capture-ctx-test',
-    schemaVersion: '1.0.0',
+    schemaVersion: '1.1.0',
     timestamp: 'now',
     captureId: 'c1',
+    captureStatus: 'partial',
+    evidence: {
+      dom: { state: 'collected' },
+      hierarchy: { state: 'collected' },
+      styles: { state: 'collected' },
+      screenshot: {
+        state: 'omitted_sensitive',
+        diagnostic: {
+          provider: 'screenshot',
+          code: 'SCREENSHOT_OMITTED_SENSITIVE',
+          reason: 'privacy',
+        },
+      },
+      runtime: { state: 'collected' },
+      sourceHints: { state: 'unavailable' },
+    },
     browser: {
       url: 'http://localhost:3000',
       viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
@@ -90,12 +107,11 @@ describe('capture_context response shape', () => {
   it('includes packetId, profile, and brief', () => {
     const packet = mockPacket();
     const brief = generateExport(packet, { format: 'markdown' });
-    const captureDir = packet.captureDir ?? '';
-    const packetPath = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
+    // Phase 29: the agent-facing surface exposes opaque IDs and capture-
+    // relative artifact references only — never absolute local paths.
     const response = {
       packetId: packet.packetId,
-      packetPath,
-      captureDir,
+      captureId: packet.captureId,
       profile: 'debug',
       briefFormat: 'markdown',
       brief,
@@ -109,6 +125,7 @@ describe('capture_context response shape', () => {
     };
 
     expect(response.packetId).toBe('capture-ctx-test');
+    expect(response.captureId).toBe('c1');
     expect(response.brief).toContain('.target-card');
     expect(response.brief).toContain('TargetCard.jsx');
     expect(response.sourceHintCount).toBe(1);
@@ -118,26 +135,25 @@ describe('capture_context response shape', () => {
     expect(response.screenshotPaths).toContain('selection.png');
   });
 
-  it('capture_context returns packetPath and captureDir', () => {
-    const packet = mockPacket({ captureDir: '/tmp/.viskod/captures/test-uuid' });
-    const captureDir = packet.captureDir ?? '';
-    const packetPath = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
-    expect(packetPath).toBe('/tmp/.viskod/captures/test-uuid/packet.json');
-    expect(captureDir).toBe('/tmp/.viskod/captures/test-uuid');
+  it('agent surface never exposes absolute capture directories', () => {
+    // The legacy shape that embedded packetPath/captureDir is gone: agents
+    // reference captures by opaque id only.
+    const packet = mockPacket();
+    const json = JSON.stringify(packet);
+    expect(json).not.toContain('captureDir');
+    expect(json).not.toContain('absoluteCaptureDir');
+    expect(json).not.toContain('/tmp/');
+    expect(json).not.toContain('packet.json');
   });
 
-  it('capture_context packetPath points to packet.json', () => {
-    const packet = mockPacket({ captureDir: '/tmp/.viskod/captures/test-uuid' });
-    const packetPath = `${(packet.captureDir ?? '').replace(/\\/g, '/')}/packet.json`;
-    expect(packetPath.endsWith('/packet.json')).toBe(true);
-  });
-
-  it('capture_context handles missing captureDir gracefully', () => {
-    const packet = mockPacket({ captureDir: undefined });
-    const captureDir = packet.captureDir ?? '';
-    const packetPath = captureDir ? `${captureDir.replace(/\\/g, '/')}/packet.json` : '';
-    expect(captureDir).toBe('');
-    expect(packetPath).toBe('');
+  it('screenshot references are capture-relative filenames or null', () => {
+    const packet = mockPacket();
+    for (const s of packet.screenshots) {
+      if (s.path !== null) {
+        expect(s.path).not.toContain(path.sep);
+        expect(s.path).toMatch(/^\w+\.\w+$/);
+      }
+    }
   });
 
   it('no daemon token in MCP output', () => {

@@ -1,30 +1,28 @@
-import { spawn, spawnSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { FIXTURE_URL, ROOT, STUDIO_URL, killTree, sleep, spawnProc, waitForHttp } from './harness';
 
 /**
  * End-to-end Studio flow: Report UI issue → Prepare agent handoff → Verify fix.
  *
  * Starts its own deterministic fixture server and Studio (launches Playwright
- * Chromium), drives the observable user path through http://localhost:3001,
- * and proves a changed screenshot is evidence, not truth: the flow reaches
- * the review_ready stage with comparison.status 'changed' and the UI presents
+ * Chromium), drives the observable user path through http://127.0.0.1:3001,
+ * and proves a changed result is evidence, not truth: the flow reaches the
+ * review_ready stage with comparison.status 'changed' and the UI presents
  * Accept fix rather than auto-accepting.
+ *
+ * Phase 31 note: the simulated "fix" is a REAL text change (the fixture
+ * description copy is swapped), which the metadata comparison detects
+ * truthfully. The previous hidden↔visible swap produced its "changed" via the
+ * tagName-as-label false positive (VISKOD-AUDIT-005), which Phase 31 fixes —
+ * display labels are presentation, never target identity.
  */
 
-const ROOT = resolve(__dirname, '../..');
-const FIXTURE_CSS = join(
-  ROOT,
-  'examples',
-  'phase12-source-hint-app',
-  'src',
-  'components',
-  'TargetCard.css',
-);
-const FIXTURE_URL = 'http://127.0.0.1:3000';
-const STUDIO_URL = 'http://127.0.0.1:3001';
+const FIXTURE_HTML = join(ROOT, 'examples', 'phase12-source-hint-app', 'index.html');
 const SIMULATE_QUERY = '?viskodSimulate=target-card-description';
+const STALE_COPY = 'STALE stale stale card copy for the review regression fixture';
 
 const FORBIDDEN_STATE_KEYS = [
   'selector',
@@ -35,44 +33,9 @@ const FORBIDDEN_STATE_KEYS = [
   'captureDir',
 ];
 
-let cssBackup: string | null = null;
-let fixtureProc: ReturnType<typeof spawn> | null = null;
-let studioProc: ReturnType<typeof spawn> | null = null;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function spawnProc(cmd: string, args: string[]): ReturnType<typeof spawn> {
-  return spawn(cmd, args, { cwd: ROOT, stdio: 'pipe', shell: true });
-}
-
-function killTree(proc: ReturnType<typeof spawn> | null): void {
-  if (!proc || proc.killed) return;
-  try {
-    if (process.platform === 'win32') {
-      spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
-    } else {
-      proc.kill('SIGTERM');
-    }
-  } catch {
-    /* already gone */
-  }
-}
-
-async function waitForHttp(url: string, timeoutMs: number, label: string): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      /* not up yet */
-    }
-    await sleep(500);
-  }
-  throw new Error(`timeout waiting for ${label} at ${url}`);
-}
+let htmlBackup: string | null = null;
+let fixtureProc: ChildProcess | null = null;
+let studioProc: ChildProcess | null = null;
 
 async function post(url: string, body: unknown): Promise<{ status: number; data: unknown }> {
   const res = await fetch(url, {
@@ -138,13 +101,16 @@ async function waitForSelection(timeoutMs: number): Promise<WorkflowState> {
 }
 
 beforeAll(async () => {
-  if (existsSync(FIXTURE_CSS)) {
-    cssBackup = readFileSync(FIXTURE_CSS, 'utf-8');
-    const brokenCss = cssBackup.replace(
-      /\.target-card-description\s*\{[\s\S]*?\}/,
-      '.target-card-description{display:none}',
+  if (existsSync(FIXTURE_HTML)) {
+    htmlBackup = readFileSync(FIXTURE_HTML, 'utf-8');
+    writeFileSync(
+      FIXTURE_HTML,
+      htmlBackup.replace(
+        'This card is the target for source hint validation. Select it with .phase12-source-target-card.',
+        STALE_COPY,
+      ),
+      'utf-8',
     );
-    writeFileSync(FIXTURE_CSS, brokenCss, 'utf-8');
   }
 
   fixtureProc = spawnProc('node', ['examples/phase12-source-hint-app/server.cjs']);
@@ -155,10 +121,19 @@ beforeAll(async () => {
 
   await waitForHttp(`${FIXTURE_URL}/`, 20000, 'fixture server');
   await waitForHttp(`${STUDIO_URL}/health`, 120000, 'Studio server');
+
+  // Hermetic Phase 31 boundary: this legacy metadata-review journey runs with
+  // local visual review DISABLED (the Phase 29 privacy default), regardless
+  // of any settings file left by other E2E files.
+  await fetch(`${STUDIO_URL}/settings/visual-review-policy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ policy: 'disabled' }),
+  });
 }, 180000);
 
 afterAll(() => {
-  if (cssBackup) writeFileSync(FIXTURE_CSS, cssBackup, 'utf-8');
+  if (htmlBackup) writeFileSync(FIXTURE_HTML, htmlBackup, 'utf-8');
   killTree(studioProc);
   killTree(fixtureProc);
 });
@@ -189,7 +164,7 @@ describe('Studio E2E — UI issue to verified fix', () => {
   });
 
   it('walks the observable user path through report, handoff, verify, and decision', async () => {
-    // 1. Open the app (description hidden via broken fixture CSS)
+    // 1. Open the app (description copy is stale via fixture mutation)
     const nav = await post(`${STUDIO_URL}/navigate`, {
       url: `${FIXTURE_URL}${SIMULATE_QUERY}`,
     });
@@ -220,14 +195,14 @@ describe('Studio E2E — UI issue to verified fix', () => {
 
     // 5. Both fields are required; then the issue is created
     const badIssue = await post(`${STUDIO_URL}/workflow/issue`, {
-      problem: 'Description is hidden',
+      problem: 'Description is stale',
       expected: '',
     });
     expect(badIssue.status).toBe(400);
 
     const issue = await post(`${STUDIO_URL}/workflow/issue`, {
-      problem: 'The card description is hidden',
-      expected: 'The description should be visible below the title',
+      problem: 'The card description copy is stale',
+      expected: 'The description should describe the target card',
       severity: 'high',
     });
     expect(issue.status).toBe(200);
@@ -243,8 +218,8 @@ describe('Studio E2E — UI issue to verified fix', () => {
     expect(handoffState.handoff?.whatAgentReceives.length).toBeGreaterThan(0);
     expect(findForbiddenKeys(handoffState)).toEqual([]);
 
-    // 7. Apply the fix: restore visible CSS
-    if (cssBackup) writeFileSync(FIXTURE_CSS, cssBackup, 'utf-8');
+    // 7. Apply the fix: restore the correct description copy
+    if (htmlBackup) writeFileSync(FIXTURE_HTML, htmlBackup, 'utf-8');
 
     // 8. Start verification, then recapture with reload + cache-bust
     const verifyStart = await post(`${STUDIO_URL}/workflow/verify/start`, {
@@ -259,7 +234,7 @@ describe('Studio E2E — UI issue to verified fix', () => {
     expect(recapture.status).toBe(200);
     const reviewState = asWorkflowState(asRecord(recapture.data).state);
     expect(reviewState.stage).toBe('review_ready');
-    // The rendered result changed — the fix is visible again.
+    // The rendered result changed — the description copy was corrected.
     expect(reviewState.review?.comparison?.status).toBe('changed');
     // Evidence, not truth: still awaiting the human decision.
     expect(reviewState.stage).not.toBe('decided');

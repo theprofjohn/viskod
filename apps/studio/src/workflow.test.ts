@@ -107,10 +107,19 @@ class FakeSelectionController implements SelectionController {
   selection: VisualSelection | null = null;
   modeActive = false;
   enterError: ViskodError | null = null;
+  exitCalls = 0;
+  clearCalls = 0;
 
   async enterSelectionMode(): Promise<Result<void>> {
     if (this.enterError) return err(this.enterError);
     this.modeActive = true;
+    return ok(undefined);
+  }
+
+  async exitSelectionMode(): Promise<Result<void>> {
+    this.exitCalls++;
+    this.modeActive = false;
+    this.selection = null;
     return ok(undefined);
   }
 
@@ -119,6 +128,7 @@ class FakeSelectionController implements SelectionController {
   }
 
   async clearSelection(): Promise<Result<void>> {
+    this.clearCalls++;
     this.selection = null;
     return ok(undefined);
   }
@@ -231,6 +241,7 @@ class FakeIssueService implements IssueService {
 class FakeHandoffService implements HandoffService {
   warningCount = 0;
   fail = false;
+  createCount = 0;
   created: AgentHandoffCreateOutput | null = null;
   stored: AgentHandoff | null = null;
 
@@ -239,6 +250,7 @@ class FakeHandoffService implements HandoffService {
     _sessionId: string,
     _pageId: string,
   ): Promise<Result<AgentHandoffCreateOutput>> {
+    this.createCount++;
     if (this.fail) return err(makeError('PERSISTENCE_WRITE_FAILED', 'handoff write failed'));
     this.created = {
       handoffId: 'handoff_1',
@@ -794,5 +806,240 @@ describe('StudioWorkflow', () => {
     expect(serialized).not.toContain('packetId');
     expect(serialized).not.toContain('captureDir');
     expect(serialized).not.toContain('sessionToken');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 28 — single "Prepare agent handoff" action (VISKOD-AUDIT-001)
+// ---------------------------------------------------------------------------
+
+describe('StudioWorkflow prepareAgentHandoffFromDescription', () => {
+  it('creates exactly one issue, prepares one handoff, and reaches handoff_ready', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    const result = await h.workflow.prepareAgentHandoffFromDescription({
+      problem: 'The card description is hidden',
+      expected: 'It should be visible below the title',
+      severity: 'high',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stage).toBe('handoff_ready');
+      expect(result.value.issueId).toBe('issue_1');
+      expect(result.value.handoffId).toBe('handoff_1');
+    }
+    expect(h.issues.issues).toHaveLength(1);
+    expect(h.handoffs.createCount).toBe(1);
+    expect(h.issues.issues[0]?.severity).toBe('high');
+    expect(h.issues.issues[0]?.description).toContain('The card description is hidden');
+  });
+
+  it('rejects empty description and never creates an issue', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    const result = await h.workflow.prepareAgentHandoffFromDescription({
+      problem: '',
+      expected: 'It should work',
+    });
+    expect(result.ok).toBe(false);
+    expect(h.issues.issues).toHaveLength(0);
+    expect(h.handoffs.createCount).toBe(0);
+  });
+
+  it('does not attempt a handoff when issue creation fails and stays recoverable', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    h.issues.failCreate = true;
+    const result = await h.workflow.prepareAgentHandoffFromDescription({
+      problem: 'Broken layout',
+      expected: 'Fixed layout',
+    });
+    expect(result.ok).toBe(false);
+    expect(h.handoffs.createCount).toBe(0);
+    expect(h.workflow.getState().stage).toBe('describe');
+    if (!result.ok) {
+      expect(result.error.message).toContain('could not be created');
+    }
+  });
+
+  it('preserves the issue on handoff failure and retry reuses it', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    h.handoffs.fail = true;
+    const failed = await h.workflow.prepareAgentHandoffFromDescription({
+      problem: 'Broken layout',
+      expected: 'Fixed layout',
+    });
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.error.message).toContain('handoff could not be prepared');
+    }
+    const afterFailure = h.workflow.getState();
+    expect(afterFailure.stage).toBe('describe');
+    expect(afterFailure.issueId).toBe('issue_1');
+
+    h.handoffs.fail = false;
+    const retry = await h.workflow.prepareAgentHandoffFromDescription({
+      problem: 'Broken layout',
+      expected: 'Fixed layout',
+    });
+    expect(retry.ok).toBe(true);
+    if (retry.ok) {
+      expect(retry.value.stage).toBe('handoff_ready');
+      expect(retry.value.issueId).toBe('issue_1');
+      expect(retry.value.handoffId).toBe('handoff_1');
+    }
+    // Exactly one issue was persisted across failure and retry.
+    expect(h.issues.issues).toHaveLength(1);
+    expect(h.handoffs.createCount).toBe(2);
+  });
+
+  it('merges concurrent double submits into one issue and one handoff', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    const [a, b] = await Promise.all([
+      h.workflow.prepareAgentHandoffFromDescription({
+        problem: 'Broken layout',
+        expected: 'Fixed layout',
+      }),
+      h.workflow.prepareAgentHandoffFromDescription({
+        problem: 'Broken layout',
+        expected: 'Fixed layout',
+      }),
+    ]);
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    expect(h.issues.issues).toHaveLength(1);
+    expect(h.handoffs.createCount).toBe(1);
+    if (a.ok) expect(a.value.handoffId).toBe('handoff_1');
+    if (b.ok) expect(b.value.handoffId).toBe('handoff_1');
+  });
+
+  it('repeated submit after success is a no-op returning handoff-ready state', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    const first = await h.workflow.prepareAgentHandoffFromDescription({
+      problem: 'Broken layout',
+      expected: 'Fixed layout',
+    });
+    expect(first.ok).toBe(true);
+    const repeat = await h.workflow.prepareAgentHandoffFromDescription({
+      problem: 'Broken layout',
+      expected: 'Fixed layout',
+    });
+    expect(repeat.ok).toBe(true);
+    if (repeat.ok) {
+      expect(repeat.value.stage).toBe('handoff_ready');
+      expect(repeat.value.handoffId).toBe('handoff_1');
+    }
+    expect(h.issues.issues).toHaveLength(1);
+    expect(h.handoffs.createCount).toBe(1);
+  });
+
+  it('acceptSelection exits selection mode so the overlay stops intercepting', async () => {
+    const h = makeHarness();
+    await h.workflow.beginReport();
+    h.controller.selection = makeSelection();
+    const result = await h.workflow.acceptSelection();
+    expect(result.ok).toBe(true);
+    expect(h.controller.exitCalls).toBe(1);
+    expect(h.controller.isActive()).toBe(false);
+  });
+
+  it('reselect clears obsolete state and re-enters selection mode', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    await h.workflow.prepareAgentHandoffFromDescription({
+      problem: 'Broken layout',
+      expected: 'Fixed layout',
+    });
+    expect(h.workflow.getState().stage).toBe('handoff_ready');
+
+    const reselect = await h.workflow.reselect();
+    expect(reselect.ok).toBe(true);
+    if (reselect.ok) {
+      expect(reselect.value.stage).toBe('selecting');
+      expect(reselect.value.selection).toBeNull();
+      expect(reselect.value.issueId).toBeUndefined();
+      expect(reselect.value.handoffId).toBeUndefined();
+    }
+    expect(h.controller.isActive()).toBe(true);
+    // A fresh selection fully replaces the old one (no stale capture reused).
+    h.controller.selection = makeSelection('resolved', {
+      selector: '[id="other-button"]',
+    });
+    const accept = await h.workflow.acceptSelection();
+    expect(accept.ok).toBe(true);
+    expect(h.capture.lastSelection?.selector).toBe('[id="other-button"]');
+    if (accept.ok) {
+      expect(accept.value.stage).toBe('describe');
+      expect(accept.value.issueId).toBeUndefined();
+    }
+  });
+
+  it('cancel returns to idle without deleting a persisted issue', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    const prepared = await h.workflow.prepareAgentHandoffFromDescription({
+      problem: 'Broken layout',
+      expected: 'Fixed layout',
+    });
+    expect(prepared.ok).toBe(true);
+
+    const cancelled = await h.workflow.cancel();
+    expect(cancelled.ok).toBe(true);
+    if (cancelled.ok) {
+      expect(cancelled.value.stage).toBe('idle');
+      expect(cancelled.value.selection).toBeNull();
+      expect(cancelled.value.issueId).toBeUndefined();
+    }
+    expect(h.controller.isActive()).toBe(false);
+    // The persisted issue is intentionally preserved, not deleted.
+    expect(h.issues.issues).toHaveLength(1);
+  });
+
+  it('beginReport after a finished report shows no stale selection', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    await h.workflow.prepareAgentHandoffFromDescription({
+      problem: 'Broken layout',
+      expected: 'Fixed layout',
+    });
+    h.workflow.reset();
+    const begin = await h.workflow.beginReport();
+    expect(begin.ok).toBe(true);
+    if (begin.ok) {
+      expect(begin.value.stage).toBe('selecting');
+      expect(begin.value.selection).toBeNull();
+      expect(begin.value.issueId).toBeUndefined();
+      expect(begin.value.handoffId).toBeUndefined();
+    }
+  });
+
+  it('reset clears review state too (no leak into the next report)', async () => {
+    const h = makeHarness();
+    await reachDescribe(h);
+    await h.workflow.createIssue({ problem: 'Broken', expected: 'Fixed' });
+    await h.workflow.prepareAgent();
+    await h.workflow.startVerification();
+    expect(h.workflow.getState().reviewId).toBeTruthy();
+    h.workflow.reset();
+    const state = h.workflow.getState();
+    expect(state.reviewId).toBeUndefined();
+    expect(state.stage).toBe('idle');
+    expect(state.selection).toBeNull();
+  });
+
+  it('late reselect/cancel cannot resurrect a stale capture in a fresh report', async () => {
+    const h = makeHarness();
+    await h.workflow.beginReport();
+    h.controller.selection = makeSelection();
+    await h.workflow.acceptSelection();
+    // Cancel mid-report, then begin a fresh report: the old selection is gone.
+    await h.workflow.cancel();
+    await h.workflow.beginReport();
+    const state = h.workflow.getState();
+    expect(state.selection).toBeNull();
+    expect(state.stage).toBe('selecting');
   });
 });

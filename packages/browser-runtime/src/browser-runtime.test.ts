@@ -12,10 +12,26 @@ describe('BrowserRuntime', () => {
     expect(health.pageCount).toBe(0);
   });
 
+  it('resolveSelector returns error for invalid handle', async () => {
+    const bus = new EventBus();
+    const br = new BrowserRuntime(bus);
+    const result = await br.resolveSelector({ contextId: 'invalid' }, '.foo');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('Handle not found');
+  });
+
   it('getDOMSnapshot returns error for invalid handle', async () => {
     const bus = new EventBus();
     const br = new BrowserRuntime(bus);
-    const result = await br.getDOMSnapshot({ contextId: 'invalid' }, '.foo');
+    // A resolved ref is required by the new signature; the handle lookup
+    // fails before the reference is ever touched.
+    const ref = {
+      selector: '.foo',
+      status: 'resolved' as const,
+      matchCount: 1,
+      element: {} as never,
+    };
+    const result = await br.getDOMSnapshot({ contextId: 'invalid' }, ref);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toContain('Handle not found');
   });
@@ -23,7 +39,49 @@ describe('BrowserRuntime', () => {
   it('getElementHierarchy returns error for invalid handle', async () => {
     const bus = new EventBus();
     const br = new BrowserRuntime(bus);
-    const result = await br.getElementHierarchy({ contextId: 'invalid' }, '.foo');
+    const ref = {
+      selector: '.foo',
+      status: 'resolved' as const,
+      matchCount: 1,
+      element: {} as never,
+    };
+    const result = await br.getElementHierarchy({ contextId: 'invalid' }, ref);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('Handle not found');
+  });
+
+  it('getComputedStyles returns error for invalid handle', async () => {
+    const bus = new EventBus();
+    const br = new BrowserRuntime(bus);
+    const ref = {
+      selector: '.foo',
+      status: 'resolved' as const,
+      matchCount: 1,
+      element: {} as never,
+    };
+    const result = await br.getComputedStyles({ contextId: 'invalid' }, ref);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('Handle not found');
+  });
+
+  it('getSelectedElementInfo returns error for invalid handle', async () => {
+    const bus = new EventBus();
+    const br = new BrowserRuntime(bus);
+    const ref = {
+      selector: '.foo',
+      status: 'resolved' as const,
+      matchCount: 1,
+      element: {} as never,
+    };
+    const result = await br.getSelectedElementInfo({ contextId: 'invalid' }, ref);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('Handle not found');
+  });
+
+  it('resolveElement returns error for invalid handle', async () => {
+    const bus = new EventBus();
+    const br = new BrowserRuntime(bus);
+    const result = await br.resolveElement({ contextId: 'invalid' }, '.foo');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toContain('Handle not found');
   });

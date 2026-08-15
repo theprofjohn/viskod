@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.setConfig({ testTimeout: 60000 });
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,6 +69,23 @@ const state: SharedState = {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Kill the whole process tree. `proc.kill()` alone leaves orphaned children
+ * (e.g. vite under pnpm dev) on Windows, leaking ports across runs.
+ */
+function killTree(proc: ChildProcess): void {
+  if (proc.exitCode !== null) return;
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      proc.kill('SIGTERM');
+    }
+  } catch {
+    /* already gone */
+  }
+}
+
 beforeAll(async () => {
   if (!fs.existsSync(TARGET_DIR)) {
     throw new Error(
@@ -125,7 +142,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (browser) await browser.close();
-  if (devProc) devProc.kill();
+  if (devProc) killTree(devProc);
   try {
     fs.rmSync(ISSUE_STORAGE, { recursive: true, force: true });
   } catch {}

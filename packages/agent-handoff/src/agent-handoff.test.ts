@@ -476,11 +476,21 @@ describe('Brief Generation', () => {
       redaction: { applied: false, rules: [], strippedFields: [], warnings: [] },
     };
 
-    const hints = [{ displayName: 'src/components/Button.tsx', confidence: 0.85 }];
-    const brief = generateAgentBrief(issue, undefined, hints);
+    const hints = [
+      {
+        displayName: 'src/components/Button.tsx',
+        confidence: 0.85,
+        qualification: 'probable' as const,
+        reasons: ['unique visible text', 'imported by current route'],
+      },
+    ];
+    const brief = generateAgentBrief(issue, undefined, hints, 'ranked', 'resolved');
     expect(brief.sourceHints).toBeDefined();
     expect(brief.sourceHints?.count).toBe(1);
     expect(brief.sourceHints?.topHints[0]?.displayName).toBe('src/components/Button.tsx');
+    // Phase 30: qualification + resolution survive brief generation.
+    expect(brief.sourceHints?.topHints[0]?.qualification).toBe('probable');
+    expect(brief.sourceHints?.resolution).toBe('resolved');
   });
 
   it('brief does not contain packet paths', () => {

@@ -12,6 +12,8 @@ function makeHint(displayPath: string): UsageSiteSourceHint {
     evidence: [],
     ranking: { score: 0.8, confidence: 0.8, rank: 1, reasons: [], penalties: [] },
     safety: { redactionApplied: false, userVisible: true, containsAbsolutePath: false },
+    qualification: 'probable',
+    reasons: ['test reason'],
   };
 }
 

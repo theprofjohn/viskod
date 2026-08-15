@@ -6,26 +6,34 @@ import {
   HandoffPersistence,
   HandoffServiceImpl,
 } from '@viskod/agent-handoff';
-import { BrowserRuntime, resolveProfile } from '@viskod/browser-runtime';
+import { BrowserRuntime, type ResolvedElementRef, resolveProfile } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
 import { VisualContextEngine } from '@viskod/context-engine';
 import type { SelectionTarget as VCESelectionTarget } from '@viskod/context-engine';
 import { EventBus } from '@viskod/event-bus';
 import { ProjectScanner } from '@viskod/project-scanner';
+import type { ScanResult } from '@viskod/project-scanner';
 import { SelectionEngine } from '@viskod/selection-engine';
 import type { SelectionTarget } from '@viskod/selection-engine';
 import { SourceHintEngine } from '@viskod/source-hint-engine';
 import { IssuePersistence, IssueServiceImpl } from '@viskod/visual-issue';
-import { ReviewPersistence, ReviewServiceImpl } from '@viskod/visual-review';
-import type { RecaptureAdapter } from '@viskod/visual-review';
+import { ReviewArtifactStore, ReviewPersistence, ReviewServiceImpl } from '@viskod/visual-review';
+import type { RecaptureAdapter, RecaptureResult } from '@viskod/visual-review';
+import { resolveHandoffCaptureContexts } from './handoff-context';
 import type { MCPToolDefinition } from './index';
 import { MCPServer } from './server';
 
 export interface BuildViskodServerOptions {
   targetUrl?: string;
+  /**
+   * Phase 30: EXPLICIT target project root. The MCP server never guesses the
+   * project from `process.cwd()`. When omitted, source resolution is
+   * truthfully unavailable (never a cwd-walk guess).
+   */
+  projectRootPath?: string;
 }
 
-export function buildViskodServer(_options?: BuildViskodServerOptions) {
+export function buildViskodServer(options?: BuildViskodServerOptions) {
   const eventBus = new EventBus({ enableHistory: true, historySize: 100 });
   const browserRuntime = new BrowserRuntime(eventBus);
   const capturePipeline = new CapturePipeline();
@@ -33,6 +41,7 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
   const projectScanner = new ProjectScanner(eventBus);
   const sourceHintEngine = new SourceHintEngine(eventBus);
   const STUDIO_URL = 'http://localhost:3001';
+  const configuredProjectRoot = options?.projectRootPath;
 
   const vce = new VisualContextEngine({
     browserRuntime,
@@ -42,11 +51,46 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
     sourceHintEngine,
   });
 
+  /**
+   * Phase 30: project scan established from the EXPLICIT root at startup.
+   * `null` = not yet scanned; `{ ok: false }` = no trustworthy project
+   * context (never guessed from cwd).
+   */
+  let currentScan: { ok: true; scan: ScanResult } | { ok: false } | null = null;
+
+  async function ensureProjectScan(): Promise<void> {
+    if (currentScan !== null) return;
+    if (!configuredProjectRoot) {
+      currentScan = { ok: false };
+      return;
+    }
+    const result = await projectScanner.scan(configuredProjectRoot);
+    if (!result.ok) {
+      currentScan = { ok: false };
+      return;
+    }
+    currentScan = { ok: true, scan: result.value };
+    vce.setProjectContext({
+      rootPath: result.value.metadata.rootPath,
+      projectId: result.value.metadata.projectId,
+      name: result.value.metadata.name,
+      directories: result.value.components.directories,
+      primaryFramework: result.value.framework.primary,
+      detectedFrameworks: result.value.framework.detected,
+      frameworkConfidence: result.value.framework.confidence,
+      routeMap: { routes: result.value.routes.routes },
+    });
+  }
+
   const issuePersistence = new IssuePersistence();
   const issueService = new IssueServiceImpl(eventBus, issuePersistence);
   const handoffPersistence = new HandoffPersistence();
   const handoffService = new HandoffServiceImpl(eventBus, issueService, handoffPersistence);
   const reviewPersistence = new ReviewPersistence();
+  // Phase 31: MCP defaults to the disabled artifact policy (Phase 29 privacy
+  // stance). Review artifacts are a Studio-level opt-in; even when enabled
+  // they never enter the agent-safe packet or handoff context.
+  const reviewArtifactStore = new ReviewArtifactStore();
 
   const mcpRecaptureAdapter: RecaptureAdapter = async (options) => {
     const selector = options.selector;
@@ -68,11 +112,12 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
         }
       }
 
-      const boundingBox = options.boundingBox ?? { x: 0, y: 0, width: 100, height: 100 };
-
+      // Phase 28A: only caller-provided/persisted geometry is trusted. When
+      // the review service has no observed bounding box, pass none — a
+      // multi-match selector then fails closed as ambiguous.
       const selectionTarget: VCESelectionTarget = {
         selector,
-        boundingBox,
+        ...(options.boundingBox ? { boundingBox: options.boundingBox } : {}),
         source: 'mcp',
       };
 
@@ -80,6 +125,23 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
       if (!packetResult.ok) return null;
 
       const packet = packetResult.value;
+
+      // Phase 31: local-sensitive target crop through the Phase 28B exact
+      // target pipeline. Persisted only when the artifact policy is enabled
+      // (Studio opt-in); never part of the agent-safe packet.
+      let elementScreenshot: RecaptureResult['elementScreenshot'];
+      const handle = vce.getBrowserHandle();
+      if (handle) {
+        const shot = await vce
+          .getBrowserRuntime()
+          .captureElementScreenshot(handle, selector, options.boundingBox);
+        if (shot.ok && shot.value.resolutionStatus === 'resolved') {
+          const buffer = shot.value.buffer;
+          if (buffer) {
+            elementScreenshot = { ...shot.value, buffer };
+          }
+        }
+      }
 
       return {
         packetId: packet.packetId,
@@ -89,7 +151,8 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
         text: packet.selection.text,
         url: packet.browser.url,
         viewport: packet.browser.viewport,
-        screenshotPath: packet.screenshots?.[0]?.path,
+        screenshotPath: packet.screenshots?.[0]?.path ?? undefined,
+        elementScreenshot,
         sourceHints: packet.sourceHints?.map((h) => ({
           filePath: h.filePath,
           confidence: h.confidence,
@@ -108,9 +171,18 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
     handoffService,
     reviewPersistence,
     mcpRecaptureAdapter,
+    reviewArtifactStore,
   );
 
   let currentTarget: SelectionTarget | null = null;
+  /**
+   * Phase 28B: the resolved element reference for `currentTarget`, parked
+   * between viskod_select_element and the next capture. `generatePacket`
+   * consumes and releases it; replacing the selection (or an explicit-
+   * selector capture) releases the previous one. Browser close also
+   * auto-disposes any handle that was never captured.
+   */
+  let currentResolvedRef: ResolvedElementRef | null = null;
 
   const server = new MCPServer();
 
@@ -128,19 +200,23 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
         },
         x: {
           type: 'number',
-          description: 'X coordinate of the element bounding box (viewport-relative)',
+          description:
+            'Observed X coordinate of the intended element (viewport-relative). Supplying x/y/width/height together marks the box as trusted target evidence that may disambiguate a multi-match selector; omit them for a bare selector.',
         },
         y: {
           type: 'number',
-          description: 'Y coordinate of the element bounding box (viewport-relative)',
+          description:
+            'Observed Y coordinate of the intended element (viewport-relative). Supplying x/y/width/height together marks the box as trusted target evidence; omit for a bare selector.',
         },
         width: {
           type: 'number',
-          description: 'Width of the element bounding box',
+          description:
+            'Observed width of the intended element. Supplying x/y/width/height together marks the box as trusted target evidence; omit for a bare selector.',
         },
         height: {
           type: 'number',
-          description: 'Height of the element bounding box',
+          description:
+            'Observed height of the intended element. Supplying x/y/width/height together marks the box as trusted target evidence; omit for a bare selector.',
         },
       },
       required: ['selector'],
@@ -201,17 +277,27 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
 
   server.registerTool(selectElementTool, async (args) => {
     const selector = (args.selector as string) ?? 'body';
-    const boundingBox = {
-      x: (args.x as number) ?? 0,
-      y: (args.y as number) ?? 0,
-      width: (args.width as number) ?? 100,
-      height: (args.height as number) ?? 100,
-    };
+    // Phase 28A: coordinates are treated as TRUSTED target evidence only when
+    // the caller explicitly supplies the full box. A bare selector carries no
+    // geometry, so multi-match selectors fail closed as ambiguous.
+    const x = args.x as number | undefined;
+    const y = args.y as number | undefined;
+    const width = args.width as number | undefined;
+    const height = args.height as number | undefined;
+    const boundingBox =
+      x !== undefined && y !== undefined && width !== undefined && height !== undefined
+        ? { x, y, width, height }
+        : undefined;
 
+    // Phase 28B: resolve the actual DOM element once. Every element-scoped
+    // evidence query (this validation and the later capture) uses this
+    // exact element, so geometry-disambiguated candidates stay the target
+    // and a detached element never silently falls back to another match.
+    let resolvedRef: ResolvedElementRef | null = null;
     try {
       const resolved = await selectionEngine.resolveTarget({
         selector,
-        boundingBox,
+        ...(boundingBox ? { boundingBox } : {}),
         source: 'mcp',
         timestamp: new Date().toISOString(),
       });
@@ -231,9 +317,31 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
       currentTarget = resolved.value;
 
       const browserHandle = vce.getBrowserHandle() ?? undefined;
-      const validated = await selectionEngine.validateSelection(resolved.value, browserHandle);
+
+      if (browserHandle) {
+        const refResult = await vce.resolveTargetElement(resolved.value);
+        if (!refResult.ok) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ ok: false, error: refResult.error.message }, null, 2),
+              },
+            ],
+            isError: true,
+          };
+        }
+        resolvedRef = refResult.value;
+      }
+
+      const validated = await selectionEngine.validateSelection(
+        resolved.value,
+        browserHandle,
+        resolvedRef ?? undefined,
+      );
 
       if (!validated.ok) {
+        if (resolvedRef) await browserRuntime.releaseElement(resolvedRef);
         return {
           content: [
             {
@@ -244,6 +352,13 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
           isError: true,
         };
       }
+
+      // Park the resolved element for the next capture; replace any
+      // previously parked reference (that one was never captured).
+      if (currentResolvedRef && currentResolvedRef !== resolvedRef) {
+        await browserRuntime.releaseElement(currentResolvedRef);
+      }
+      currentResolvedRef = resolvedRef;
 
       const snapshot = validated.value;
       return {
@@ -275,6 +390,9 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
         ],
       };
     } catch (error) {
+      if (resolvedRef) {
+        await browserRuntime.releaseElement(resolvedRef).catch(() => {});
+      }
       return {
         content: [
           { type: 'text', text: JSON.stringify({ ok: false, error: String(error) }, null, 2) },
@@ -293,7 +411,6 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
       if (selector) {
         const resolved = await selectionEngine.resolveTarget({
           selector,
-          boundingBox: { x: 0, y: 0, width: 100, height: 100 },
           source: 'mcp',
           timestamp: new Date().toISOString(),
         });
@@ -319,6 +436,12 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
         }
 
         currentTarget = resolved.value;
+        // An explicit-selector capture replaces the selection: the previously
+        // parked resolved element is no longer the target — release it.
+        if (currentResolvedRef) {
+          await browserRuntime.releaseElement(currentResolvedRef);
+          currentResolvedRef = null;
+        }
         selection = {
           selector: resolved.value.selector,
           boundingBox: resolved.value.boundingBox,
@@ -351,7 +474,12 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
         };
       }
 
-      const result = await vce.generatePacket(selection);
+      // Phase 28B: capture through the resolved element reference parked by
+      // viskod_select_element when it exists — never by re-running the
+      // selector. generatePacket consumes and releases the reference.
+      const captureRef = currentResolvedRef;
+      currentResolvedRef = null;
+      const result = await vce.generatePacket(selection, undefined, captureRef ?? undefined);
 
       if (!result.ok) {
         return {
@@ -424,21 +552,29 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
 
   server.registerTool(getProjectInfoTool, async () => {
     try {
-      const result = await projectScanner.scan();
-
-      if (!result.ok) {
+      await ensureProjectScan();
+      if (!currentScan?.ok) {
+        // Phase 30: never guess the project from cwd. Explicit unavailable.
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ ok: false, error: result.error.message }, null, 2),
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  error:
+                    'No project root configured. Start the server with --project-root <path> so source resolution can be established.',
+                },
+                null,
+                2,
+              ),
             },
           ],
           isError: true,
         };
       }
 
-      const scan = result.value;
+      const scan = currentScan.scan;
       return {
         content: [
           {
@@ -768,13 +904,16 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
           }>
         | undefined;
       let sourceHintStatus: 'ranked' | 'ambiguous' | 'low_confidence' | 'missing' | undefined;
+      let sourceHintResolution: 'resolved' | 'ambiguous' | 'unavailable' | undefined;
 
       try {
         const issueResult = await issueService.getIssue(issueId);
         if (issueResult.ok) {
           const issue = issueResult.value;
-          const scanResult = await projectScanner.scan();
-          const scan = scanResult.ok ? scanResult.value : null;
+          // Phase 30: use the EXPLICIT startup project scan — never guess the
+          // project from cwd.
+          await ensureProjectScan();
+          const scan = currentScan?.ok ? currentScan.scan : null;
 
           const snapshot = issue.source.selectionSnapshot as Record<string, unknown> | undefined;
           const target = snapshot?.targets as Array<Record<string, unknown>> | undefined;
@@ -819,6 +958,7 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
           const hintResult = await sourceHintEngine.resolveUsageSiteHints(hintInput, 5);
           if (hintResult.ok) {
             sourceHintStatus = hintResult.value.status;
+            sourceHintResolution = hintResult.value.resolution;
             sourceHints = hintResult.value.topHints.map((h) => ({
               displayName: h.file.displayPath,
               confidence: h.ranking.confidence,
@@ -826,6 +966,7 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
               score: h.ranking.score,
               reasons: h.ranking.reasons,
               warnings: hintResult.value.warnings,
+              qualification: h.qualification,
             }));
           }
         }
@@ -839,6 +980,7 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
           userInstruction: args.userInstruction as string | undefined,
           sourceHints,
           sourceHintStatus,
+          sourceHintResolution,
         },
         'mcp-session',
         'mcp-page',
@@ -900,6 +1042,51 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
       const result = await handoffService.cancelHandoff(handoffId);
       if (!result.ok) return mcpError(result.error.message);
       return mcpOk({ ok: true, handoffId: result.value.handoffId, status: result.value.status });
+    } catch (error) {
+      return mcpError(String(error));
+    }
+  });
+
+  // =========================================================================
+  // Phase 29: Handoff Context Retrieval
+  // =========================================================================
+
+  const getHandoffContextTool: MCPToolDefinition = {
+    name: 'get_handoff_context',
+    description:
+      'Retrieve the compact agent-safe context for a handoff: the selected target of the persisted capture, page state, evidence, and statuses — resolved by opaque handoff ID from durable storage. Returns typed errors for missing/corrupt handoff or capture state. Never exposes raw packet JSON or local filesystem paths.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handoffId: {
+          type: 'string',
+          description: 'The opaque handoff ID to retrieve context for',
+        },
+      },
+      required: ['handoffId'],
+    },
+  };
+
+  server.registerTool(getHandoffContextTool, async (args) => {
+    try {
+      const handoffId = args.handoffId as string;
+      if (!handoffId) return mcpError('handoffId is required');
+      // Opaque id validation: traversal/absolute-path shapes never reach the
+      // persistence layer (also enforced inside HandoffPersistence).
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(handoffId)) {
+        return mcpError(`Invalid handoff ID: ${handoffId}`);
+      }
+
+      const handoffResult = await handoffService.getHandoff(handoffId);
+      if (!handoffResult.ok) {
+        return mcpError(handoffResult.error.message);
+      }
+      const handoff = handoffResult.value;
+
+      const contexts = await resolveHandoffCaptureContexts(handoff, capturePipeline);
+      if (!contexts.ok) return mcpError(contexts.error.message);
+
+      return mcpOk({ ok: true, handoffId, issueId: handoff.issueId, captures: contexts.value });
     } catch (error) {
       return mcpError(String(error));
     }
@@ -1690,15 +1877,25 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
     },
     async (_uri) => {
       try {
-        const result = await projectScanner.scan();
+        await ensureProjectScan();
+        if (!currentScan?.ok) {
+          return {
+            uri: 'viskod://project/info',
+            mimeType: 'application/json',
+            text: JSON.stringify(
+              {
+                available: false,
+                error: 'No project root configured. Start the server with --project-root <path>.',
+              },
+              null,
+              2,
+            ),
+          };
+        }
         return {
           uri: 'viskod://project/info',
           mimeType: 'application/json',
-          text: JSON.stringify(
-            result.ok ? result.value.metadata : { error: result.error.message },
-            null,
-            2,
-          ),
+          text: JSON.stringify(currentScan.scan.metadata, null, 2),
         };
       } catch {
         return {
@@ -1710,12 +1907,17 @@ export function buildViskodServer(_options?: BuildViskodServerOptions) {
     },
   );
 
-  if (_options?.targetUrl) {
+  if (options?.targetUrl) {
     server.setStartup(async () => {
+      await ensureProjectScan();
       const browser = await vce.start();
       if (!browser.ok) throw new Error(browser.error.message);
-      const navigation = await vce.navigate(_options.targetUrl as string);
+      const navigation = await vce.navigate(options.targetUrl as string);
       if (!navigation.ok) throw new Error(navigation.error.message);
+    });
+  } else {
+    server.setStartup(async () => {
+      await ensureProjectScan();
     });
   }
 

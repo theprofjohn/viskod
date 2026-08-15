@@ -371,9 +371,13 @@ const OVERLAY_SCRIPT = `
     }
   }
 
+  // Document-order index of an element among all elements under <body>.
+  // Traverse with SHOW_ELEMENT (1) so nodes are compared against elements;
+  // the previous SHOW_TEXT (4) mask never yielded an element, so every
+  // connected element returned -1.
   function getDocumentOrder(el) {
     var order = 0;
-    var walker = document.createTreeWalker(document.body, 4, null, false);
+    var walker = document.createTreeWalker(document.body, 1, null, false);
     var node;
     while (node = walker.nextNode()) {
       if (node === el) return order;

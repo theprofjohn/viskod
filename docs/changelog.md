@@ -222,6 +222,66 @@ This example illustrates the preferred release style.
 
 # Release Log
 
+## Version 0.3.0-alpha
+
+Release Date: 2026-08-15
+
+Summary
+
+Phase 31: true safe before/after visual review. Review verification now
+captures real target crops, compares actual pixels, renders BEFORE/AFTER/DIFF
+in Studio, and keeps the raw images strictly local-sensitive — never part of
+the agent-safe packet.
+
+Added
+
+- Local-sensitive visual review artifacts (target crop + bounded context
+  padding) captured through the Phase 28B exact-target pipeline
+- Real pixel comparison (PNG decode + per-pixel diff) with a highlighted
+  diff image and persisted metrics (changed pixels, ratio, config version)
+- Geometry comparison as separate evidence (position/size deltas)
+- Studio review screen renders BEFORE / AFTER / DIFF images from protected
+  opaque artifact endpoints (`/review/artifact/<id>`)
+- One-time local visual review consent banner; policy persisted in
+  `.viskod/settings.json` (default disabled — Phase 29 privacy stance)
+- Optional decision note textarea; note persists with the decision
+- New `unchanged`/`incomparable`/`visual_unavailable` comparison semantics —
+  a `possible`-strength identity or environment mismatch is never reported
+  as a confident change
+
+Changed
+
+- Target identity in review comparisons uses the Phase 28B stable-identity
+  model (display labels are presentation, never identity) — fixes
+  VISKOD-AUDIT-005 unchanged-false-positives
+- The before baseline is captured when the agent handoff is prepared — before
+  the coding agent modifies the page — and tied durably to the issue lineage
+- Review artifacts are atomic (temp write → validate → rename) and paired by
+  explicit artifact ids that survive Studio restarts
+
+Fixed
+
+- VISKOD-AUDIT-004: before/after review now persists and compares actual
+  screenshots instead of metadata only
+- VISKOD-AUDIT-005: unchanged targets no longer report changed
+- VISKOD-AUDIT-023: decision notes entered in Studio are persisted
+- Phase 31A closure: a BEFORE baseline captured before the fix survives
+  Studio restart and is reused byte-identical for post-restart verification
+  (never recaptured); missing/corrupt baselines fail closed with typed
+  errors; consent enable/decline persist across restarts; malformed
+  settings fail closed to disabled; corrupt artifact-file reads now
+  classify as `ARTIFACT_INVALID_IMAGE`; consent saves retry transient
+  Windows rename locks so the preference is never silently dropped
+
+Security
+
+- Review images are marked sensitive/localOnly, never enter
+  `get_handoff_context` or the agent-safe packet, and are served only through
+  validated opaque Studio endpoints (traversal/malformed ids rejected)
+- Visual review artifact policy defaults disabled; enabling requires the
+  explicit one-time consent; persisted consent never changes the Phase 29
+  agent-safe screenshot policy (regression-tested after restart)
+
 ## Version 0.2.3-alpha
 
 Release Date: 2026-08-12

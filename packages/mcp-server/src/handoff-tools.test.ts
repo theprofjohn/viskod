@@ -90,13 +90,14 @@ afterEach(() => {
 // MCP Tool Definitions — tools/list
 // =============================================================================
 describe('MCP tools/list — handoff tools present', () => {
-  it('lists all 5 handoff tools', () => {
+  it('lists all 6 handoff tools', () => {
     const toolNames = [
       'create_agent_handoff',
       'get_agent_handoff',
       'list_agent_handoffs',
       'update_agent_handoff_status',
       'cancel_agent_handoff',
+      'get_handoff_context',
     ];
 
     // Verify tool definitions have correct shape

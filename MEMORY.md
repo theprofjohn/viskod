@@ -1237,3 +1237,761 @@ None.
 Supersedes:
 
 None.
+
+---
+
+## Decision 017
+
+Date:
+
+2026-08-15
+
+Status:
+
+Accepted
+
+Category:
+
+Security
+
+Title:
+
+Studio local control boundary: loopback bind + origin allowlist
+
+Context:
+
+VISKOD-AUDIT-006 found Studio's HTTP/WebSocket server bound to all
+interfaces, answered every request with `Access-Control-Allow-Origin: *`,
+and accepted WebSocket connections from any origin — a LAN-reachable local
+control channel with no boundary. The fix had to protect a local developer
+tool without introducing a full authentication framework.
+
+Decision:
+
+Studio binds explicitly to `127.0.0.1` (port 3001 default) and enforces an
+origin allowlist on both HTTP and WebSocket:
+
+- no Origin header (CLI, tests, curl) → allowed; local processes already
+  have machine access;
+- loopback origins (`localhost`, `127.0.0.1`, `::1`) → allowed (Studio UI,
+  extension content scripts on loopback app pages);
+- `chrome-extension://` → allowed (extension sidepanel/background);
+- anything else (remote web pages, DNS-rebinding hosts, LAN hosts) → HTTP
+  403, WebSocket close 1008.
+
+CORS is only echoed for allowed origins (`Vary: Origin`), never `*`. The
+existing daemon token model in `runtime-session` is unchanged; Studio is a
+loopback-only surface and does not need tokens.
+
+Alternatives Considered:
+
+- Session-token challenge for every request: heavier than needed for a
+  loopback-bound tool; rejected.
+- Keeping `Access-Control-Allow-Origin: *` with loopback bind: still lets
+  arbitrary web pages drive Studio via simple (non-preflighted) requests;
+  rejected.
+
+Reason for Rejection:
+
+Loopback binding alone does not stop a malicious web page in the user's
+browser from POSTing to localhost; the origin allowlist closes that path
+and DNS rebinding in one rule.
+
+Consequences:
+
+Positive:
+
+- LAN hosts cannot reach Studio; foreign web origins cannot read or mutate
+  Studio state; WebSocket control requires a local/extension origin.
+- All legitimate flows (Studio UI, extension, tests, demo, smoke) keep
+  working; the extension's manifest already restricts content scripts to
+  loopback pages.
+
+Negative:
+
+- Studio is no longer reachable from other machines on the LAN; remote
+  control of Studio would need an explicit, authenticated path later.
+
+Future Review:
+
+None.
+
+Supersedes:
+
+None.
+---
+
+## Decision 042
+
+Date:
+
+2026-08-15
+
+Status:
+
+Accepted
+
+Category:
+
+UI / Architecture
+
+Title:
+
+Single "Prepare agent handoff" action with workflow-level idempotency
+
+Context:
+
+Phase 28 (VISKOD-AUDIT-001) found the Studio's rendered "Prepare agent
+handoff" button only created a VisualIssue; the AgentHandoff required an
+undocumented second API call. Repeated clicks could also create duplicate
+issues because issue creation was not idempotent at the workflow boundary.
+
+Decision:
+
+The StudioWorkflow owns a coordinated operation,
+`prepareAgentHandoffFromDescription()`: create the issue if not already
+created for the current report, prepare the handoff for that issue, then
+transition to `handoff_ready`. Idempotency is enforced in the workflow
+service (not by button disabling):
+
+- repeated submit after success returns the existing handoff-ready state;
+- concurrent submits share one in-flight promise;
+- handoff failure keeps the persisted issue ID and retry reuses it;
+- a workflow generation counter (epoch) prevents late async completions
+  from mutating a reset/replaced workflow.
+
+The UI disables the button and preserves the entered description across
+re-renders as UX protection only; correctness comes from the workflow
+boundary.
+
+Alternatives Considered:
+
+- Deleting the persisted issue on partial failure ("rollback").
+- A generalized distributed idempotency framework.
+- Keeping the two-step API and adding a second UI button.
+
+Reason for Rejection:
+
+Destructive rollback loses user data and there is no safe transaction
+primitive; a general framework is overkill for one workflow; a second
+button keeps the invisible step the audit flagged.
+
+Consequences:
+
+Positive:
+
+- The rendered UI performs the full select → describe → prepare journey.
+- Exactly one issue and one logical handoff per submission, including
+  rapid double-clicks and retried HTTP requests.
+- Partial failures are resumable: retry reuses the same issue.
+
+Negative:
+
+- Two workflow entry points exist (the coordinated prepare action and the
+  lower-level createIssue/prepareAgent methods retained for API-level
+  tests); the lower-level pair must not be re-exposed as the primary UI.
+
+Future Review:
+
+Phase 29+ may move orchestration into a dedicated service.
+
+Supersedes:
+
+None.
+
+---
+
+## Decision 043
+
+Date:
+
+2026-08-15
+
+Status:
+
+Accepted
+
+Category:
+
+Architecture / Security
+
+Title:
+
+Fail-closed browser-backed target validation for captures
+
+Context:
+
+Phase 28 (VISKOD-AUDIT-015) showed invalid/nonexistent selectors produced
+successful context packets whose core target was fabricated as "unknown".
+SelectionEngine also fabricated stub hierarchies when browser resolution
+failed.
+
+Decision:
+
+Core targets are validated against the live DOM before any capture work:
+
+- BrowserRuntime gains `resolveSelector()`, which distinguishes malformed,
+  zero-match, detached, ambiguous (multi-match without a geometry anchor),
+  and resolved selectors. Viskod's own overlay elements are excluded from
+  ambiguity resolution.
+- VisualContextEngine.generatePacket fails closed with typed errors
+  (`SELECTOR_MALFORMED` / `SELECTOR_NO_MATCH` / `SELECTOR_DETACHED` /
+  `SELECTOR_AMBIGUOUS`) when a provided selection does not resolve; the
+  "unknown" fallback remains only for selection-less whole-page captures.
+- SelectionEngine.validateSelection with a browser handle fails closed
+  instead of returning stub snapshots; the stub remains only for
+  no-browser contexts (unit tests).
+- Ambiguity is resolved with the selection bounding box when exactly one
+  match contains its center; otherwise the selector is reported ambiguous
+  rather than silently picking the first match.
+
+Alternatives Considered:
+
+- Silently picking the first DOM match.
+- Treating optional-evidence failures as core-target failures.
+
+Reason for Rejection:
+
+First-match selection can target the wrong element; the phase explicitly
+separates INVALID CORE TARGET (fail) from VALID TARGET + OPTIONAL EVIDENCE
+FAILURE (partial capture allowed in Phase 29).
+
+Consequences:
+
+Positive:
+
+- CLI, MCP, and Studio capture paths fail closed on invalid targets.
+- Ambiguity is detected and surfaced instead of silently resolved.
+
+Negative:
+
+- Captures of slow-hydrating SPA elements may fail earlier than before;
+  resolveSelector waits for the element (5s, same as getDOMSnapshot) to
+  preserve hydration tolerance.
+
+Future Review:
+
+Phase 29 may refine optional-evidence partial-capture semantics.
+
+Supersedes:
+
+None.
+
+---
+
+## Decision 044
+
+Status: Accepted
+Date: 2026-08-15
+Context: Phase 28A — bare selector ambiguity closure.
+
+Phase 28 introduced `BrowserRuntime.resolveSelector()` which disambiguates a
+multi-match selector when a bounding box is supplied (the single match whose
+rect contains the box center wins). CLI/MCP/SDK/RuntimeSession/Studio
+entry points manufactured a default `{0,0,100,100}` box for bare selectors,
+so a bare selector matching multiple elements could silently resolve to
+whichever match contained `(50,50)` — synthetic geometry acting as if it were
+observed target evidence.
+
+Decision:
+
+- `SelectionTarget.boundingBox` is OPTIONAL and contractually TRUSTED target
+  evidence only: overlay-observed rects, persisted selection geometry, or
+  explicitly supplied caller coordinates whose API contract says so.
+- Bare-selector entry points (CLI capture, MCP select_element/capture_context,
+  MCP review recapture, RuntimeSession.capture, SDK selectElement/capture,
+  Studio selection endpoints, VCE SE_EVENT handler) no longer manufacture any
+  default/placeholder box. When no trusted geometry exists the field is
+  omitted entirely.
+- Invariant: MULTIPLE SELECTOR MATCHES + NO TRUSTED DISAMBIGUATION =
+  SELECTOR_AMBIGUOUS. resolveSelector still disambiguates ONLY when a box is
+  passed; no caller passes a synthetic one.
+- Review recapture (`resolveRecaptureTarget`) passes persisted observed
+  geometry through unchanged and no longer falls back to `{0,0,100,100}`.
+- Provenance is NEVER inferred from numeric values: `{0,0,100,100}` from an
+  overlay or an explicit caller remains trusted.
+
+Alternatives Considered:
+
+- Adding an explicit `geometryTrust: 'observed' | 'synthetic'` provenance
+  field to every target.
+- Requiring selectors to always be unique.
+
+Reason for Rejection:
+
+Optionality removes the fabrication at the source (the preferred direction);
+a provenance enum would keep manufacturing boxes just to label them
+untrusted. Requiring unique selectors would break legitimate overlay
+geometry disambiguation (Phase 21/28 selections).
+
+Consequences:
+
+Positive:
+
+- Bare multi-match selectors always fail closed with SELECTOR_AMBIGUOUS.
+- Genuine overlay/persisted/explicit geometry still disambiguates (Case E),
+  stays ambiguous when covering multiple candidates (Case F), and never
+  silently picks the first match.
+- No large evidence-provenance framework was added.
+
+Negative:
+
+- Selection snapshots without geometry report a zero box in
+  `SelectionGeometry` (metadata only — never used for disambiguation).
+- `viskod_select_element` now requires all four coordinates to disambiguate;
+  partial coordinate sets are ignored (bare-selector semantics).
+
+Future Review:
+
+- resolveSelector disambiguated evidence collection still uses
+  `querySelector` (first match) for the DOM snapshot/hierarchy; collecting
+  evidence from the specific disambiguated candidate is out of Phase 28A
+  scope.
+
+Supersedes:
+
+The Phase 28 ambiguity note in Decision 043 that allowed geometry-based
+disambiguation with a default `{0,0,100,100}` box.
+
+## Decision 045
+
+Status: Accepted
+Date: 2026-08-15
+Context: Phase 28B — resolved target evidence consistency.
+
+After Phase 28A, selector resolution classified a target (resolved / missing /
+malformed / ambiguous / detached) but never returned WHICH element it picked.
+Every target-scoped evidence collector (DOM snapshot, hierarchy, computed
+styles, selected-element info; SelectionEngine hierarchy/visibility/center)
+re-ran the original selector via `querySelector`, which returns the FIRST
+match. When trusted geometry disambiguated candidate B, resolution said "B"
+but evidence described A. If B then detached, re-resolution silently picked A.
+
+Decision:
+
+- BrowserRuntime gains `resolveElement(handle, selector, boundingBox?)` which
+  runs the unchanged Phase 28A resolution algorithm inside
+  `page.evaluateHandle` and returns a `ResolvedElementRef` holding the live
+  Playwright ElementHandle of the specific resolved candidate. Selector
+  re-queries are never used for evidence again.
+- All element-scoped evidence collectors take the resolved reference
+  (`getDOMSnapshot(handle, ref)`, `getElementHierarchy(handle, ref)`,
+  `getComputedStyles(handle, ref)`, `getSelectedElementInfo(handle, ref)`).
+  `resolveSelector` remains as the status-only validation API (thin wrapper
+  that disposes the handle it does not return).
+- `VisualContextEngine.generatePacket(selection?, profile?, resolvedRef?)`
+  resolves once per capture and collects through the reference; it releases
+  the consumed reference (owned or caller-provided) in a `finally`.
+  `SelectionEngine.validateSelection` accepts a caller reference (not owned);
+  when it resolves its own it releases it.
+- MCP `viskod_select_element` parks the resolved reference;
+  `viskod_capture_context` consumes it, so a detached element between select
+  and capture yields a typed `SELECTOR_DETACHED` failure instead of silently
+  re-resolving to another match.
+- Resolved references are internal, capture-scoped, and NEVER serialized:
+  they cannot appear in persisted packets, MCP payloads, or SDK contracts.
+  No generalized DOM identity framework; no candidate-ordinal identity.
+- Detached resolved elements fail typed (`BR_ELEMENT_DETACHED` →
+  `SELECTOR_DETACHED`); never fall back to another selector match.
+- Page-function bodies must not contain named inner functions: esbuild/tsx
+  keepNames transforms wrap them with the module-scope `__name` helper,
+  which is undefined in the page context (vitest does not enable keepNames,
+  so this only failed under the tsx-run MCP/Studio servers). Iterative code
+  or inline arrows only.
+
+Alternatives Considered:
+
+- Tagging the resolved element with a unique attribute and re-selecting by
+  it (mutation-based identity).
+- Persisting `selector + candidateIndex` and re-running
+  `querySelectorAll(selector)[index]`.
+- String-based `elementHandle.evaluate` (Playwright evaluates strings as
+  expressions; they cannot receive the element).
+
+Reason for Rejection:
+
+Attribute tagging mutates the page and still breaks if the node is replaced;
+candidate ordinals are unstable under DOM mutation (the Phase explicitly
+forbids them). ElementHandle references are the strongest existing stable
+identity mechanism and fail typed on detachment, satisfying the atomic
+capture contract with the smallest correct mechanism.
+
+Consequences:
+
+Positive:
+
+- RESOLVED TARGET = CAPTURED TARGET: geometry-disambiguated candidates keep
+  their identity through every evidence collector (real-browser E2E proves
+  all packet fields describe B, none describe A).
+- Detachment never falls back to another match (typed detached failure).
+- Recapture (persisted selector + trusted geometry) inherits the guarantee
+  through the shared pipeline.
+- `getComputedStyles` now collects real values: `getPropertyValue` requires
+  dash-case CSS names, so the old camelCase lookups returned '' for every
+  multi-word property.
+
+Negative:
+
+- MCP select→capture holds one parked handle between calls (released on
+  replacement or browser close; in-memory only).
+- Callers that need element evidence must resolve once and thread the
+  reference; the old selector-based collector signatures are gone.
+
+Future Review:
+
+- Phase 29 partial-capture semantics for VALID TARGET + OPTIONAL EVIDENCE
+  FAILURE remain unchanged.
+
+Supersedes:
+
+The "Future Review" note in Decision 044 (evidence collection using
+`querySelector`'s first match after geometry disambiguation).
+
+## Decision 046
+
+Status: Accepted
+Date: 2026-08-15
+Context: Phase 29 — context integrity, privacy and agent retrieval.
+
+Audit confirmed four findings: (VISKOD-AUDIT-003) handoffs referenced an
+in-memory `packetId` that no persisted store could resolve after restart;
+(VISKOD-AUDIT-007) DOM text/attributes and screenshot pixels bypassed
+packet-level privacy controls; (VISKOD-AUDIT-011) capture persistence created
+the final directory first and could leave listable partial captures with
+stale/transient screenshot paths; (VISKOD-AUDIT-032) packets fabricated
+viewport/user-agent/confidence/layout values and silently swallowed optional
+evidence failures.
+
+Decision:
+
+- One reusable redaction library in `@viskod/shared` (rules + deep-redact +
+  sensitive-attribute default-deny). Browser-runtime evidence, agent-handoff,
+  and the packet persistence boundary all build on it; no second regex
+  engine.
+- One mandatory packet-level redaction boundary (`redactPacketForPersistence`)
+  applied BEFORE persistence: the persisted packet.json is the safe
+  representation; agents can never recover a secret by reading disk files.
+- Screenshot privacy policy: default `agent-safe-omit` (raw pixels exist only
+  transiently in memory; persisted packet records `omitted_sensitive`);
+  explicit `persist-raw` opt-in marks artifacts `sensitive: true` and is
+  never represented as redacted.
+- Capture integrity contract: `complete` / `partial` (optional provider
+  failed or omitted for privacy, with sanitized per-provider diagnostics) /
+  `failed` (typed error, never a packet). Evidence map per provider:
+  collected | disabled | unavailable | failed | redacted | omitted_sensitive.
+- Synthetic metadata removed: actual page URL, viewport and user agent are
+  observed; confidence values are `null` when no provider computed them;
+  styles.layout is `null` (no layout-analysis provider).
+- Atomic persistence: sibling temp directory → validate persisted schema →
+  write artifacts → atomically rename to the final opaque capture id.
+  Failure-injection hooks prove no partial capture is ever listable.
+  Persistence failure when a pipeline is composed is a FAILED capture, not a
+  best-effort success.
+- Handoffs reference the DURABLE capture by opaque `captureId` (issue
+  evidence carries it); `get_handoff_context` MCP tool loads the persisted
+  handoff, resolves captures through the pipeline (schema-validated), and
+  returns a compact budgeted agent projection. Opaque id validation rejects
+  traversal/absolute-path identifiers in both MCP tools and
+  `HandoffPersistence`.
+- Persisted packet schemaVersion is `1.1.0`; the schema/privacy version is
+  unambiguous; corrupt or mismatched persisted packets return typed failures.
+
+Alternatives Considered:
+
+- Persist raw packet then redact at MCP read time (rejected: filesystem
+  access would reveal secrets).
+- Screenshot masking/OCR (rejected: Phase 31 visual review owns safe visual
+  artifact strategy).
+- A capture index file for packetId→capture lookup (rejected: deterministic
+  scan over bounded capture dirs is simpler and survives partial writes).
+
+Consequences:
+
+Positive:
+
+- Fresh MCP processes retrieve the exact persisted target context by opaque
+  handoff id; Phase 28B identity (candidate B) survives persistence and
+  retrieval; persisted artifacts and agent projections contain none of the
+  synthetic test secrets; raw screenshots never silently cross the safe
+  boundary; failed writes never become listable captures.
+
+Negative:
+
+- Legacy persisted packets (schemaVersion 1.0.0) are not treated as
+  privacy-safe; consumers must re-capture. Screenshot-enabled captures under
+  the default policy report `partial` (screenshot `omitted_sensitive`) by
+  design.
+
+Future Review:
+
+- Phase 30 source-hint ranking can fill `confidence.sourceMapping` and
+  qualified `sourceHints` in the projection; Phase 31 visual review owns
+  safe screenshot/thumbnail artifacts.
+
+Supersedes:
+
+The "best-effort capture persistence" behavior (previous
+`VisualContextEngine.generatePacket` caught and swallowed persistence
+failures).
+
+---
+
+# Decision: Phase 30 — Source Resolution Correctness & Studio Integration
+
+Date: 2026-08-15
+
+Status: Accepted
+
+## Context
+
+VISKOD-AUDIT-008: usage-site candidates scored 0.90–0.99 from broad
+text/component matching (a `0.9 + matchRatio * 0.09` formula on text-only
+matches ranked in tier 0), class-name file-existence hit 0.95, and a generic
+`div` was mapped to a `Card` component name. VISKOD-AUDIT-002: Studio never
+composed SourceHintEngine or ProjectScanner, so Studio captures produced no
+source hints.
+
+## Decision
+
+- **Evidence model over confidence inflation.** Source-hint candidates are
+  scored from explicit evidence families (route-ownership, import-path,
+  stable-identifier, usage-text, class-file, generic-class, component-ref,
+  style-adjacent) with hard calibration caps: text-only or
+  generic-component-only matches can never reach probable/exact; without a
+  strong family a candidate can never reach probable. Numeric confidence is
+  the evidence score and maps consistently to a semantic qualification
+  (`exact | probable | possible | weak`).
+- **Explicit result states.** Overall resolution is `resolved | ambiguous |
+  unavailable`. Ambiguity is deterministic (tie margin < 0.02, or same-tier
+  margin < 0.08); no-evidence/unknown-root/budget-exhaustion is `unavailable`,
+  never a fabricated path.
+- **Relative paths only.** Candidates crossing the persisted/agent boundary
+  are repository-relative; escaping/absolute paths are rejected at the
+  engine and projection boundaries.
+- **Studio composes project context from an EXPLICIT root only.**
+  `--project-root <dir>` (or `VISKOD_PROJECT_ROOT`); never a `process.cwd()`
+  walk guess. Without a root, source resolution is truthfully unavailable
+  with an actionable reason. Same contract for `viskod serve --project-root`.
+- **Persisted qualified hints + bounded agent projection.** The Phase 29
+  safe packet persists qualified candidates; `get_handoff_context` projects a
+  bounded set (5) with qualification, calibrated confidence, and ≤3 reasons,
+  deriving `resolution` deterministically from persisted evidence — the fresh
+  process never recomputes hints.
+- **Latency guard.** The scan has a finite budget (default 3000 files /
+  2500 ms) returning explicit `unavailable` on exhaustion.
+- **Handoff schema loss fix.** `AgentIssueBriefSchema` previously stripped
+  `kind/score/reasons/warnings`; it now also carries `qualification` and
+  `resolution`.
+
+## Consequences
+
+Positive:
+
+- Text-only/common-label matching can no longer produce high confidence;
+  duplicate text yields ambiguity; generic `Card`/tag heuristics are weak and
+  never dominate; candidates expose concise reasons; ordering is
+  deterministic; Studio captures persist calibrated relative source hints;
+  a fresh MCP process retrieves persisted candidates without recomputation;
+  persisted ambiguity stays ambiguous; target B's source hints derive from B
+  evidence.
+
+Negative:
+
+- Usage-site confidence values are no longer comparable to pre-Phase-30
+  numbers (schema version 2.0.0 for generated hints); route/import evidence
+  only exists when the project root is explicitly configured and the
+  scanner's route map matches.
+
+Future Review:
+
+- Phase 31 visual review owns safe screenshot artifacts; Phase 33 owns full
+  async scanning/caching/workspace discovery; `confidence.sourceMapping`
+  remains null (no source-map provider exists).
+
+# Decision: Phase 30A — Source Semantic & Persistence Closure
+
+## Decision
+
+- **Resolution is a capture-time fact; qualification is candidate truth.**
+  The persisted packet now carries a `sourceHintsResolution` snapshot
+  (`status: resolved|ambiguous|unavailable`, `modelVersion: 2.0.0`,
+  optional `topCandidate`), stamped with the exported
+  `SOURCE_HINT_SCHEMA_VERSION`. `get_handoff_context` reports that snapshot
+  verbatim (`resolutionSource: 'persisted'` + `modelVersion`); it never
+  recomputes resolution or reranks/re-qualifies historical candidates.
+- **Studio wording derives from the top candidate's qualification.** A
+  resolved result is labeled `exact source identified` / `probable source` /
+  `possible source` / `weak source evidence` (server + client JS); the
+  review screen's obsolete `Source hints: high/medium/low confidence`
+  mapping (which relabeled TARGET-resolution confidence as source-hint
+  confidence) is replaced by the real Phase 30 source status.
+- **Durable source-hint data is schema-validated.** `PersistedSourceHintSchema`
+  requires safe repository-relative paths (shared
+  `isSafeRelativeSourcePath`: rejects `\`, absolute, drive-letter, `file://`,
+  `..`), finite 0..1 confidence, recognized qualification, bounded reasons,
+  shaped matchType/exists. `PersistedSourceResolutionSchema` requires a
+  recognized status and semver modelVersion (future versions accepted —
+  persisted results stay interpretable).
+- **Legacy compatibility is marked, not disguised.** Packets predating the
+  snapshot derive resolution with the deterministic rule but expose
+  `resolutionSource: 'derived'` (no modelVersion); pre-Phase-30 candidates
+  (no recognized qualification) fail schema → `CP_PACKET_CORRUPT` →
+  re-capture required. Historical scores are never silently upgraded.
+
+## Consequences
+
+Positive:
+
+- A `possible` candidate is never labeled `probable` in Studio (unit +
+  rendered-UI E2E regression); ambiguity/unavailable wording stays truthful.
+- Fresh MCP retrieval reproduces the exact persisted conclusion (resolved +
+  possible + 0.54, and ambiguous + StatusWidgetA/B order) with the model
+  version that produced it — stable across engine changes.
+- Corrupt/tampered persisted source data (bad qualification, confidence > 1,
+  absolute/traversal/URI paths, malformed reasons/resolution/version) fails
+  safely at write and load; never returned as normal agent context.
+
+Negative:
+
+- `get_handoff_context` adds `resolutionSource`/`modelVersion` fields to the
+  agent projection (additive; consumers reading `resolution`/`candidates`
+  are unaffected).
+- Persisted packets written before 30A but after Phase 30 (candidates
+  without a snapshot) retrieve with `resolutionSource: 'derived'` until
+  re-captured.
+
+Future Review:
+
+- Phase 31 owns the review screen's deeper visual-review architecture; the
+  30A review-panel label fix is a local truthful relabel, not Phase 31 work.
+
+
+# Decision: Phase 31 — True Safe Before/After Visual Review
+
+Date: 2026-08-15
+
+Status: Accepted
+
+Category: Architecture | Security | UI
+
+Context:
+VISKOD-AUDIT-004/005/023: the pre-Phase-31 review compared METADATA only
+(no persisted screenshots), an unchanged target could report "changed" (the
+after snapshot presented `tagName` as the target label, so a label-vs-tag
+mismatch flipped the result — the exact false positive the audit flagged),
+and Studio always sent an empty decision note.
+
+Decision:
+- **Local-sensitive visual review artifacts.** A separate artifact class
+  under `.viskod/reviews/<reviewId>/{before,after,diff}.png` +
+  `manifest.json`, plus issue-scoped baselines under
+  `.viskod/reviews/baselines/<issueId>/`. Raw target crops are marked
+  `sensitive: true` + `localOnly: true`, atomic (temp-write → validate →
+  rename, manifest written last as the commit marker), and NEVER enter the
+  agent-safe packet, `get_handoff_context`, or the Phase 29 screenshot
+  boundary.
+- **Explicit Studio policy, default disabled.** `visualReviewArtifacts:
+  disabled | local-sensitive-target-crop` persisted in `.viskod/settings.json`
+  (smallest settings mechanism). The UI asks once (banner) before enabling;
+  default follows the Phase 29 privacy stance. Consent is never inferred
+  from `collectScreenshot`.
+- **Before baseline at handoff-prepare.** The pre-change crop is captured
+  when the agent handoff is prepared (the last moment before the coding
+  agent modifies the UI), tied durably to the issue; a missing baseline is
+  reported truthfully as visual-unavailable — never fabricated from the
+  post-change page.
+- **Phase 28B exact-target pipeline.** Both before and after crops resolve
+  through `resolveElement(selector, trustedBoundingBox)` — never a bare
+  selector re-query. After recapture, same-target determination uses the
+  stable-identity model (targetId/stable attributes); display labels are
+  presentation only (VISKOD-AUDIT-005 closure).
+- **Real pixel comparison.** PNG decode (pngjs) + per-pixel RGBA compare
+  (tolerance 24/channel) on a deterministic common canvas (max dims,
+  top-left aligned, no scaling); changed pixels are highlighted red in a
+  persisted diff artifact; geometry (x/y/w/h deltas) is separate evidence
+  (tolerance 1px); viewport/DPR mismatch → `incomparable`, never a confident
+  pixel result; missing artifacts → `visual_unavailable`; target
+  missing/ambiguous/identity-replaced keep typed statuses.
+- **Protected serving.** Studio serves images only via
+  `GET /review/artifact/<opaqueId>` (id pattern validated, manifest-bound,
+  traversal rejected, `image/png`, no-store). MCP exposes no artifact tool.
+- **Human decision independent.** Visual status is evidence, not truth:
+  accept/reject stays an explicit human action with an optional persisted
+  note (VISKOD-AUDIT-023 closure).
+
+Alternatives Considered:
+- Full-viewport screenshots — rejected: exposes unrelated page content;
+  target crop + bounded padding is the minimal exposure contract.
+- Resize one crop to the other's dimensions — rejected: hides real
+  size/layout changes; the common-canvas rule preserves pixels and records
+  dimensions/geometry separately.
+- Reuse the byte-level `compareScreenshots` — rejected: raw-buffer compare
+  can't produce metrics/diff images and misreports compression noise.
+
+Consequences:
+Positive:
+- Real before/after/diff images render in Studio from opaque endpoints;
+  unchanged targets stay unchanged (real Chromium regression); color,
+  typography, border/shadow, size, position, and text changes are detected;
+  replaced targets are never silently compared; viewport/DPR mismatches are
+  incomparable; privacy boundary regression-tested (packet stays
+  `omitted_sensitive`; MCP has no image access); artifacts + pairing survive
+  Studio restart; note persists.
+Negative:
+- One extra screenshot capture per review when the policy is enabled; the
+  legacy metadata comparison remains for disabled-policy flows and reports
+  truthfully what metadata can see.
+Future Review:
+- Phase 32+ owns retention UX, dynamic-content stabilization, and deeper
+  review workflows.
+
+## Phase 31A — Visual Review Durability & Consent Closure (2026-08-15)
+
+Decision: Close the Phase 31 durability/consent evidence gaps without a
+redesign; record the pre-verification restart baseline invariant and the
+opt-in policy contract as tested behavior.
+
+Accepted decisions / invariants:
+- **Pre-verification restart durability.** A BEFORE baseline captured at
+  handoff-prepare survives Studio restart before any verification; the
+  post-restart review reuses the EXACT original baseline (SHA-256 byte
+  equality, original capturedAt, review manifest pairs after/diff to it).
+  No second baseline is ever generated; the baseline dir stays
+  `[before.png, manifest.json]`.
+- **No active-workflow UI resume.** Studio workflow state (selection,
+  issue/handoff/review ids) is in-memory only; after restart the workflow
+  is idle and there is no resume endpoint. Post-restart verification is
+  exercised at service/persistence level with fresh
+  ReviewArtifactStore/ReviewServiceImpl instances on the same `.viskod`
+  store. User-facing resume/history is deferred to the issue-history phase
+  (Phase 32+); no fabricated resume capability.
+- **Fail-closed baseline.** A manifest whose before.png is missing or
+  corrupt fails review creation with typed `ARTIFACT_NOT_FOUND` /
+  `ARTIFACT_INVALID_IMAGE`; no post-change image is substituted, no new
+  baseline is manufactured, metadata evidence remains available.
+- **Policy contract.** `visualReviewArtifacts` defaults `disabled`;
+  enabling requires the explicit one-time consent answer (banner shows
+  until enable OR disable is chosen); both choices persist in
+  `.viskod/settings.json`; malformed values and corrupt JSON resolve to
+  `disabled` (fail closed, no migration framework). `collectScreenshot` is
+  never consent. Persisted consent never changes the Phase 29 agent-safe
+  packet/handoff boundary.
+- **Windows rename EBUSY.** The settings save and the visual-review
+  fixture state write retry atomic renames on transient Windows
+  `EBUSY` (antivirus/indexer lock window) so a consent answer is never
+  silently dropped from persistence.
+- **Corrupt artifact read classification.** `readArtifactFile` classifies
+  undecodable PNGs as `ARTIFACT_INVALID_IMAGE` via `instanceof
+  ImageDecodeError` (the old string match never fired, producing
+  `ARTIFACT_READ_FAILED`).
+
+Consequences:
+Positive: restart-before-verification, default/decline/enable policy
+persistence, malformed-settings fail-closed, missing/corrupt baseline, and
+post-restart privacy are now product/persistence-level regression-tested
+(6 new E2E + 6 new unit tests); `pnpm release:check` exit 0 recorded.
+Negative: none known; stale gitignored `src/*.js` compiled leftovers were
+removed so vitest resolves real `.ts` source (they shadowed `.ts` in
+module resolution).
+Future Review: issue-history desk / workflow resume (Phase 32+); retention
+UX for review artifacts.

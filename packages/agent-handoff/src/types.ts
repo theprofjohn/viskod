@@ -49,6 +49,8 @@ export interface AgentIssueBrief {
   sourceHints?: {
     count: number;
     status?: 'ranked' | 'ambiguous' | 'low_confidence' | 'missing';
+    /** Phase 30: semantic resolution state (resolved/ambiguous/unavailable). */
+    resolution?: 'resolved' | 'ambiguous' | 'unavailable';
     topHints: Array<{
       displayName: string;
       confidence?: number;
@@ -56,6 +58,8 @@ export interface AgentIssueBrief {
       score?: number;
       reasons?: string[];
       warnings?: string[];
+      /** Phase 30: evidence-derived qualification. */
+      qualification?: 'exact' | 'probable' | 'possible' | 'weak';
     }>;
   };
   task: {
@@ -72,6 +76,8 @@ export interface AgentHandoffContext {
   };
   packetRefs: Array<{
     packetId: string;
+    /** Durable persisted capture id; resolves through CapturePipeline after restart. */
+    captureId?: string;
     type: 'capture' | 'recapture' | 'export';
     label: string;
   }>;
@@ -154,8 +160,11 @@ export interface AgentHandoffCreateInput {
     score?: number;
     reasons?: string[];
     warnings?: string[];
+    qualification?: 'exact' | 'probable' | 'possible' | 'weak';
   }>;
   sourceHintStatus?: 'ranked' | 'ambiguous' | 'low_confidence' | 'missing';
+  /** Phase 30: semantic resolution state captured at issue time. */
+  sourceHintResolution?: 'resolved' | 'ambiguous' | 'unavailable';
 }
 
 export interface AgentHandoffCreateOutput {

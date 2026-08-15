@@ -61,10 +61,18 @@ export const AgentIssueBriefSchema = z.object({
     .object({
       count: z.number().int().nonnegative(),
       status: z.enum(['ranked', 'ambiguous', 'low_confidence', 'missing']).optional(),
+      /** Phase 30: semantic resolution state (resolved/ambiguous/unavailable). */
+      resolution: z.enum(['resolved', 'ambiguous', 'unavailable']).optional(),
       topHints: z.array(
         z.object({
           displayName: z.string(),
           confidence: z.number().optional(),
+          kind: z.string().optional(),
+          score: z.number().optional(),
+          reasons: z.array(z.string()).optional(),
+          warnings: z.array(z.string()).optional(),
+          /** Phase 30: evidence-derived qualification. */
+          qualification: z.enum(['exact', 'probable', 'possible', 'weak']).optional(),
         }),
       ),
     })
@@ -82,6 +90,8 @@ export const AgentHandoffContextSchema = z.object({
   packetRefs: z.array(
     z.object({
       packetId: z.string(),
+      /** Durable persisted capture id; resolves through CapturePipeline after restart. */
+      captureId: z.string().optional(),
       type: z.enum(['capture', 'recapture', 'export']),
       label: z.string(),
     }),

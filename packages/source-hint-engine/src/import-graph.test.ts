@@ -2,7 +2,12 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildImportGraph, findImporters, findImports } from './import-graph';
+import {
+  buildImportGraph,
+  buildLocalDependencyClosure,
+  findImporters,
+  findImports,
+} from './import-graph';
 
 describe('import-graph', () => {
   it('builds import graph from project files', () => {
@@ -99,17 +104,54 @@ describe('import-graph', () => {
     expect(graph.length).toBe(0);
   });
 
-  it('handles relative imports (skipped)', () => {
+  it('resolves relative imports to repository-relative local files (Phase 30)', () => {
     const tmpDir = join(tmpdir(), `viskod-ig-relative-${Date.now()}`);
     const srcDir = join(tmpDir, 'src');
     mkdirSync(srcDir, { recursive: true });
 
     writeFileSync(join(srcDir, 'page.tsx'), 'import { X } from "./local";');
+    writeFileSync(join(srcDir, 'local.tsx'), 'export const X = 1;');
 
     const graph = buildImportGraph(tmpDir, ['src']);
     const pageImports = findImports(graph, 'src/page.tsx');
-    // Relative imports are skipped in the current implementation
-    expect(pageImports.length).toBe(0);
+    expect(pageImports.length).toBe(1);
+    expect(pageImports[0]?.isLocal).toBe(true);
+    expect(pageImports[0]?.importedFile).toBe('src/local.tsx');
+    expect(pageImports[0]?.importedName).toBe('X');
+
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('builds the transitive local import closure of an entry file', () => {
+    const tmpDir = join(tmpdir(), `viskod-ig-closure-${Date.now()}`);
+    const srcDir = join(tmpDir, 'src');
+    mkdirSync(join(srcDir, 'components'), { recursive: true });
+
+    writeFileSync(join(srcDir, 'page.tsx'), 'import { Card } from "./components/Card";');
+    writeFileSync(join(srcDir, 'components', 'Card.tsx'), 'import { Button } from "./Button";');
+    writeFileSync(join(srcDir, 'components', 'Button.tsx'), 'export function Button() {}');
+
+    const closure = buildLocalDependencyClosure(tmpDir, 'src/page.tsx');
+    expect(closure.has('src/page.tsx')).toBe(true);
+    expect(closure.has('src/components/Card.tsx')).toBe(true);
+    expect(closure.has('src/components/Button.tsx')).toBe(true);
+
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('never lets a relative import escape the repository root', () => {
+    const tmpDir = join(tmpdir(), `viskod-ig-escape-${Date.now()}`);
+    const srcDir = join(tmpDir, 'src');
+    mkdirSync(srcDir, { recursive: true });
+
+    writeFileSync(join(srcDir, 'page.tsx'), 'import { X } from "../../../../etc/passwd";');
+    writeFileSync(join(srcDir, 'local.tsx'), 'export const X = 1;');
+
+    const graph = buildImportGraph(tmpDir, ['src']);
+    const pageImports = findImports(graph, 'src/page.tsx');
+    // Escaping imports must not resolve to files outside the root.
+    expect(pageImports.length).toBe(1);
+    expect(pageImports[0]?.isLocal).toBe(false);
 
     rmSync(tmpDir, { recursive: true, force: true });
   });

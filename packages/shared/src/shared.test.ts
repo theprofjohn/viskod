@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { OVERLAY_CSS_PREFIX, VISKOD_STORAGE_DIR } from './constants';
 import { ErrorCategory, ErrorSeverity, err, isRecoverable, ok } from './errors';
+import { isSafeRelativeSourcePath } from './paths';
 import {
   BoundingBoxSchema,
   IdentifierSchema,
@@ -137,5 +138,53 @@ describe('Constants', () => {
 
   it('OVERLAY_CSS_PREFIX is __viskod_', () => {
     expect(OVERLAY_CSS_PREFIX).toBe('__viskod_');
+  });
+});
+
+describe('isSafeRelativeSourcePath (Phase 30A load-side gate)', () => {
+  it('accepts repository-relative paths', () => {
+    for (const p of [
+      'src/components/TargetCard.jsx',
+      'app/settings/page.tsx',
+      'features/a/StatusWidgetA.jsx',
+      'index.ts',
+      'src/deeply/nested/component.module.css',
+    ]) {
+      expect(isSafeRelativeSourcePath(p), `'${p}' should be safe`).toBe(true);
+    }
+  });
+
+  it('rejects absolute and drive-letter paths', () => {
+    for (const p of [
+      '/Users/x/secret.ts',
+      '/etc/passwd',
+      'C:\\secret.ts',
+      'C:/secret.ts',
+      'd:\\Users\\victim\\Evil.tsx',
+      '\\\\server\\share\\x.ts',
+    ]) {
+      expect(isSafeRelativeSourcePath(p), `'${p}' must be rejected`).toBe(false);
+    }
+  });
+
+  it('rejects traversal paths', () => {
+    for (const p of [
+      '../../secret.ts',
+      '../secret.ts',
+      'src/../../outside.ts',
+      '..',
+      'a/../b.ts',
+      'src/..\\secret.ts',
+    ]) {
+      expect(isSafeRelativeSourcePath(p), `'${p}' must be rejected`).toBe(false);
+    }
+  });
+
+  it('rejects URI-scheme paths and empty values', () => {
+    for (const p of ['file:///tmp/x.ts', 'file:///Users/x.ts', '']) {
+      expect(isSafeRelativeSourcePath(p), `'${p}' must be rejected`).toBe(false);
+    }
+    expect(isSafeRelativeSourcePath(null as unknown as string)).toBe(false);
+    expect(isSafeRelativeSourcePath(42 as unknown as string)).toBe(false);
   });
 });
