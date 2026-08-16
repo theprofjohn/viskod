@@ -85,3 +85,11 @@ examples/dogfood-app/**/*.d.ts.map
 
 # Dogfood test output evidence (regenerated on every run)
 phase21-dogfood-evidence/
+
+# OS noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Windows NTFS alternate-data-stream markers (from copying off NTFS drives)
+*.Zone.Identifier
