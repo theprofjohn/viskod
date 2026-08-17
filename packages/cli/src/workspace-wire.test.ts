@@ -29,7 +29,8 @@ describe('CLI workspace wiring', () => {
     if (result.ok) {
       expect(result.value.isWorkspace).toBe(true);
       expect(result.value.packages).toHaveLength(1);
-      expect(result.value.packages[0].name).toBe('@acme/ui');
+      const pkg = result.value.packages[0];
+      expect(pkg?.name).toBe('@acme/ui');
     }
 
     fs.rmSync(tmpDir, { recursive: true, force: true });

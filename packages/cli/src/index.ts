@@ -22,6 +22,7 @@ import {
   verifyMcpToolsRuntime,
 } from '@viskod/setup';
 import { SourceHintEngine } from '@viskod/source-hint-engine';
+import type { WorkspaceMetadata } from '@viskod/shared';
 
 // Injected at bundle time by scripts/build-cli.mjs from the publishable
 // packages/cli/package.json version. Source runs (tsx) fall back to a dev
@@ -272,7 +273,14 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
     // Discover workspace metadata
     const workspaceResult =
       await runtime.projectScanner.discoverWorkspace(projectPath ?? s.metadata.rootPath);
-    const workspace = workspaceResult.ok ? workspaceResult.value : undefined;
+    const workspace: WorkspaceMetadata | undefined = workspaceResult.ok
+      ? {
+          isWorkspace: workspaceResult.value.isWorkspace,
+          workspaceType: workspaceResult.value.workspaceType as WorkspaceMetadata['workspaceType'],
+          packages: workspaceResult.value.packages,
+          globs: workspaceResult.value.globs,
+        }
+      : undefined;
 
     runtime.vce.setProjectContext({
       rootPath: s.metadata.rootPath,
