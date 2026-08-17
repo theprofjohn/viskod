@@ -1,3 +1,5 @@
+import type { WorkspaceMetadata } from '@viskod/shared';
+
 export type DiscoveryMethod =
   | 'route-correlation'
   | 'component-naming'
@@ -229,6 +231,7 @@ export interface ProjectContext {
     detected: string[];
     confidence: number;
   };
+  workspace?: WorkspaceMetadata;
 }
 
 export interface HintInput {
