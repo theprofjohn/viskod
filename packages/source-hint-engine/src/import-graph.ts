@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type { WorkspacePackageMetadata } from '@viskod/shared';
 import type { ImportGraphEntry } from './classifier';
 
 const NAMED_IMPORT_PATTERN = /\{([^}]+)\}/;
@@ -287,6 +288,61 @@ export function resolveLocalImport(
 }
 
 /**
+ * Resolve a module specifier that may be a workspace package import
+ * (e.g. `@acme/utils/format`) to a repository-relative file path.
+ *
+ * Returns null if the specifier is not a workspace package or the
+ * target file does not exist.
+ */
+export function resolveWorkspaceImport(
+  rootPath: string,
+  sourceFile: string,
+  spec: string,
+  packages: WorkspacePackageMetadata[],
+): string | null {
+  // Delegate relative imports to the local resolver
+  if (spec.startsWith('.')) return resolveLocalImport(rootPath, sourceFile, spec);
+
+  // Check if spec matches a workspace package
+  for (const pkg of packages) {
+    const pkgName = pkg.name;
+    if (spec === pkgName || spec.startsWith(`${pkgName}/`)) {
+      const subpath = spec.slice(pkgName.length + 1) || 'index';
+      // Try each sourceRoot in the package
+      for (const srcRoot of pkg.sourceRoots) {
+        const candidates: string[] = [];
+        if (subpath === 'index') {
+          // Package root import — look for index files
+          for (const ext of CODE_EXTENSIONS) {
+            candidates.push(`${srcRoot}/index${ext}`);
+          }
+        } else {
+          // Subpath import — look for the file with code extensions
+          const base = `${srcRoot}/${subpath}`;
+          candidates.push(base);
+          for (const ext of CODE_EXTENSIONS) {
+            candidates.push(`${base}${ext}`);
+          }
+          for (const suffix of INDEX_SUFFIXES) {
+            candidates.push(`${base}/${suffix}`);
+          }
+        }
+        for (const candidate of candidates) {
+          try {
+            if (fs.existsSync(path.join(rootPath, candidate.replace(/\//g, path.sep)))) {
+              return candidate;
+            }
+          } catch {
+            // permission error
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Repository-relative import closure of `entryFile` (transitively).
  *
  * Walks only local relative imports (never package imports), bounded by the
@@ -321,6 +377,51 @@ export function buildLocalDependencyClosure(
       if (entry.isLocal && entry.importedFile && !entry.importedFile.startsWith('.')) {
         const target = entry.importedFile;
         if (target.startsWith('..') || path.posix.isAbsolute(target)) continue;
+        if (!closure.has(target)) queue.push(target);
+      }
+    }
+  }
+
+  return closure;
+}
+
+/**
+ * Build a dependency closure that follows both local relative imports
+ * and workspace package imports.
+ */
+export function buildWorkspaceDependencyClosure(
+  rootPath: string,
+  entryFile: string,
+  packages: WorkspacePackageMetadata[],
+  budget: ScanBudget = DEFAULT_SCAN_BUDGET,
+): Set<string> {
+  const closure = new Set<string>();
+  const queue: string[] = [entryFile];
+  const state: BudgetState = { files: 0, startMs: Date.now(), budget };
+
+  while (queue.length > 0) {
+    const current = queue.shift() ?? '';
+    if (closure.has(current)) continue;
+    closure.add(current);
+    touchBudget(state);
+
+    let content: string;
+    try {
+      content = fs.readFileSync(path.join(rootPath, current.replace(/\//g, path.sep)), 'utf-8');
+    } catch (error) {
+      if (error instanceof ScanBudgetExceededError) throw error;
+      continue;
+    }
+
+    const entries = parseImports(rootPath, current, content);
+    for (const entry of entries) {
+      let target: string | null = null;
+      if (entry.isLocal && entry.importedFile && !entry.importedFile.startsWith('.')) {
+        target = entry.importedFile;
+      } else if (!entry.isLocal && packages.length > 0) {
+        target = resolveWorkspaceImport(rootPath, current, entry.importedFile, packages);
+      }
+      if (target && !target.startsWith('..') && !path.posix.isAbsolute(target)) {
         if (!closure.has(target)) queue.push(target);
       }
     }
