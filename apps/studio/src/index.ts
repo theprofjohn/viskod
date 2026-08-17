@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import http from 'node:http';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { UserFacingHandoff } from '@viskod/agent-handoff';
 import { HandoffServiceImpl } from '@viskod/agent-handoff';
@@ -9,6 +9,7 @@ import { VisualContextEngine } from '@viskod/context-engine';
 import type { ContextPacket, SelectionTarget } from '@viskod/context-engine';
 import { EventBus } from '@viskod/event-bus';
 import { getOverlayScript } from '@viskod/overlay-system';
+import { getMcpServeCommand, getSetupState } from '@viskod/setup';
 import {
   ErrorCategory,
   ErrorSeverity,
@@ -31,9 +32,11 @@ import {
 import type { VisualArtifactPolicy } from '@viskod/visual-review';
 import { SelectionOverlayController, VisualSelectionServiceImpl } from '@viskod/visual-selection';
 import type { BrowserIntegration } from '@viskod/visual-selection';
+import { chromium } from 'playwright';
 import { WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
 import { renderStudioHtml } from './ui';
+import type { StudioSetupStatus } from './ui';
 import { StudioWorkflow } from './workflow';
 import type { StudioWorkflowState } from './workflow';
 
@@ -171,6 +174,13 @@ interface StudioState {
     routeCount?: number;
     reason?: string;
   };
+  /**
+   * Phase 32: truthful first-run/setup status. Loaded from the persisted
+   * @viskod/setup state at startup and re-loaded on demand (/setup/status);
+   * never absolute paths. `stale` marks a persisted complete/limited state
+   * whose live light health check (Chromium present) is currently failing.
+   */
+  setup: StudioSetupStatus;
 }
 
 export type StudioProjectStatus = StudioState['project'];
@@ -277,6 +287,7 @@ export class Studio {
       pageUrl: null,
       workflow: { stage: 'idle', selection: null },
       project: { status: 'unknown' },
+      setup: { status: 'never', browserVerified: false, stale: false },
     };
     this.syncCaptureProfile();
 
@@ -458,6 +469,7 @@ export class Studio {
           pageId: this.pageId,
           pageUrl: this.state.pageUrl,
           workflow: this.getWorkflowState(),
+          setup: this.state.setup,
         },
       }),
     );
@@ -624,6 +636,13 @@ export class Studio {
       } else if (url === '/overlay/reload' && req.method === 'POST') {
         // reload page via Playwright and re-inject overlay
         void this.handleOverlayReload(res);
+      } else if (url === '/setup/status') {
+        // Phase 32 light health: cheap enough for polling. Re-loads the
+        // persisted setup state on demand; never runs full setup validation
+        // and never launches a browser.
+        this.refreshSetupStatus(resolveStudioProjectRoot());
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify(this.setupStatusPayload()));
       } else if (url.startsWith('/setup/mcp-config')) {
         // return MCP config JSON for the user's IDE onboarding
         const query = req.url?.split('?')[1] ?? '';
@@ -1163,6 +1182,7 @@ export class Studio {
         pageId: this.pageId,
         pageUrl: this.state.pageUrl,
         workflow: this.getWorkflowState(),
+        setup: this.state.setup,
       },
     });
   }
@@ -1486,41 +1506,36 @@ export class Studio {
     }
   }
 
+  /**
+   * Phase 32: portable per-IDE MCP onboarding config. The serve command comes
+   * from @viskod/setup (no checkout-specific or hardcoded Windows paths);
+   * opencode takes a `command` array, cursor/claude take `command` + `args`.
+   */
   private buildMcpConfig(ide: string): Record<string, unknown> {
-    const mcp = {
-      mcpServers: {
-        viskod: {
-          command: 'npx',
-          args: [
-            'tsx',
-            'C:/Viskod/packages/cli/src/index.ts',
-            'serve',
-            '--url',
-            'http://localhost:3000',
-          ],
-          env: {},
-          disabled: false,
-          autoApprove: [],
-        },
-      },
+    const projectRoot = resolveStudioProjectRoot() ?? undefined;
+    const serve = getMcpServeCommand({ projectRoot, url: 'http://localhost:3000' });
+    const serverEntry = {
+      command: serve.command,
+      args: serve.args,
+      env: {},
+      disabled: false,
+      autoApprove: [],
     };
 
     switch (ide) {
       case 'claude':
-        return {
-          mcpServers: mcp.mcpServers,
-          claudeDesktop: {
-            ...mcp,
-          },
-        };
       case 'cursor':
         return {
-          mcp: mcp.mcpServers,
+          mcpServers: {
+            viskod: serverEntry,
+          },
         };
       default:
         return {
           $schema: 'https://opencode.ai/config.json',
-          ...mcp,
+          mcp: {
+            viskod: { type: 'local', command: [serve.command, ...serve.args], enabled: true },
+          },
         };
     }
   }
@@ -1608,6 +1623,79 @@ export class Studio {
   }
 
   /**
+   * Phase 32: (re)load the persisted @viskod/setup state for the configured
+   * project root and publish the redacted Studio setup status. Cheap — a
+   * single state-file read plus a filesystem existence check; never runs
+   * setup validation and never launches a browser. `root: null` (no project
+   * root configured) yields a truthful 'never' status.
+   */
+  refreshSetupStatus(root: string | null): void {
+    let setup: StudioSetupStatus;
+    if (!root) {
+      setup = { status: 'never', browserVerified: false, stale: false };
+    } else {
+      const result = getSetupState(root);
+      if (!result.ok) {
+        // Unreadable/corrupt persisted state: never claim readiness.
+        setup = {
+          status: 'incomplete',
+          browserVerified: false,
+          projectName: this.projectDisplayName(root),
+          stale: false,
+        };
+      } else if (!result.value) {
+        setup = {
+          status: 'never',
+          browserVerified: false,
+          projectName: this.projectDisplayName(root),
+          stale: false,
+        };
+      } else {
+        const persisted = result.value;
+        setup = {
+          status: persisted.state,
+          limitedReasons: persisted.limitedReasons,
+          verifiedAt: persisted.verifiedAt,
+          setupVersion: persisted.setupVersion,
+          sourceResolution: persisted.sourceResolution,
+          agentConfig: persisted.agentConfig
+            ? { detected: persisted.agentConfig.detected, kind: persisted.agentConfig.kind }
+            : null,
+          browserVerified: persisted.capabilities?.browserRuntime ?? false,
+          projectName: this.projectDisplayName(root),
+          stale: false,
+        };
+        if ((setup.status === 'complete' || setup.status === 'limited') && !isChromiumAvailable()) {
+          setup.stale = true;
+          setup.staleReason = 'Chromium missing';
+        }
+      }
+    }
+    this.state.setup = setup;
+    this.broadcastStudioState();
+  }
+
+  /**
+   * Redacted /setup/status payload: persisted setup status (state kind +
+   * capability booleans, never absolute paths) plus Studio's own live facts.
+   */
+  private setupStatusPayload(): Record<string, unknown> {
+    return {
+      setup: this.state.setup,
+      browserConnected: this.browserConnected,
+      project: this.state.project,
+      chromiumAvailable: isChromiumAvailable(),
+      stale: this.state.setup.stale,
+      staleReason: this.state.setup.staleReason,
+    };
+  }
+
+  /** User-facing project display name for banner instructions; never a path. */
+  private projectDisplayName(root: string): string | undefined {
+    return this.state.project.name ?? basename(root);
+  }
+
+  /**
    * Phase 30: compact user-facing source status for the current packet.
    * Repository-relative paths only; ambiguity is presented as ambiguity —
    * the first candidate is never displayed as confirmed.
@@ -1683,6 +1771,19 @@ function resolveStudioProjectRoot(): string | null {
   return resolve(raw.trim());
 }
 
+/**
+ * Phase 32 light health check: the Playwright Chromium executable exists on
+ * disk. Never launches a browser; a failed/throwing lookup just means the
+ * runtime check currently fails.
+ */
+function isChromiumAvailable(): boolean {
+  try {
+    return fs.existsSync(chromium.executablePath());
+  } catch {
+    return false;
+  }
+}
+
 async function establishProjectContext(): Promise<void> {
   const rootPath = resolveStudioProjectRoot();
   if (!rootPath) {
@@ -1691,6 +1792,7 @@ async function establishProjectContext(): Promise<void> {
       reason:
         'No project root configured. Start Studio with --project-root <path> (or VISKOD_PROJECT_ROOT) to enable source resolution.',
     });
+    studio.refreshSetupStatus(null);
     return;
   }
   const scanResult = await projectScanner.scan(rootPath);
@@ -1699,9 +1801,23 @@ async function establishProjectContext(): Promise<void> {
       status: 'invalid',
       reason: `The configured project root could not be scanned: ${sanitizeErrorDetail(scanResult.error.message)}`,
     });
+    studio.refreshSetupStatus(rootPath);
     return;
   }
   const scan = scanResult.value;
+
+  // Discover workspace metadata
+  const workspaceResult = await projectScanner.discoverWorkspace(rootPath);
+  const workspace = workspaceResult.ok
+    ? {
+        isWorkspace: workspaceResult.value.isWorkspace,
+        workspaceType:
+          workspaceResult.value.workspaceType as import('@viskod/shared').WorkspaceMetadata['workspaceType'],
+        packages: workspaceResult.value.packages,
+        globs: workspaceResult.value.globs,
+      }
+    : undefined;
+
   vce.setProjectContext({
     rootPath: scan.metadata.rootPath,
     projectId: scan.metadata.projectId,
@@ -1711,6 +1827,7 @@ async function establishProjectContext(): Promise<void> {
     detectedFrameworks: scan.framework.detected,
     frameworkConfidence: scan.framework.confidence,
     routeMap: { routes: scan.routes.routes },
+    workspace,
   });
   studio.setProjectStatus({
     status: 'ready',
@@ -1718,6 +1835,7 @@ async function establishProjectContext(): Promise<void> {
     framework: scan.framework.primary ?? undefined,
     routeCount: scan.routes.totalRoutes,
   });
+  studio.refreshSetupStatus(rootPath);
 }
 
 /**
