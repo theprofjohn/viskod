@@ -44,3 +44,18 @@ export interface Spacing {
   bottom: number;
   left: number;
 }
+
+export interface WorkspacePackageMetadata {
+  name: string;
+  relativeRoot: string;
+  packageJsonPath: string;
+  sourceRoots: string[];
+  workspaceDependencies: string[];
+}
+
+export interface WorkspaceMetadata {
+  isWorkspace: boolean;
+  workspaceType: 'single' | 'pnpm-workspace' | 'npm-workspace' | 'yarn-workspace' | 'unknown';
+  packages: WorkspacePackageMetadata[];
+  globs: string[];
+}
