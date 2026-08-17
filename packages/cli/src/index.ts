@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { BrowserRuntime, resolveProfile } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
 import { VisualContextEngine, generateExport } from '@viskod/context-engine';
@@ -7,6 +10,17 @@ import { buildViskodServer } from '@viskod/mcp-server';
 import { ProjectScanner } from '@viskod/project-scanner';
 import { DaemonClient, DaemonServer, RuntimeSession } from '@viskod/runtime-session';
 import { SelectionEngine } from '@viskod/selection-engine';
+import {
+  completeSetup,
+  detectAndConfigureProject,
+  getMcpServeCommand,
+  initializeProjectWorkspace,
+  installAgentConfig,
+  runAllChecks,
+  runDoctor,
+  runSmoke,
+  verifyMcpToolsRuntime,
+} from '@viskod/setup';
 import { SourceHintEngine } from '@viskod/source-hint-engine';
 
 // Injected at bundle time by scripts/build-cli.mjs from the publishable
@@ -71,6 +85,12 @@ async function main(): Promise<void> {
       break;
     case 'install':
       await cmdInstall(args.slice(1));
+      break;
+    case 'setup':
+      await cmdSetup(args.slice(1));
+      break;
+    case 'doctor':
+      await cmdDoctor(args.slice(1));
       break;
     case 'version':
     case '--version':
@@ -249,6 +269,11 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
   const scanResult = await runtime.projectScanner.scan(projectPath);
   if (scanResult.ok) {
     const s = scanResult.value;
+    // Discover workspace metadata
+    const workspaceResult =
+      await runtime.projectScanner.discoverWorkspace(projectPath ?? s.metadata.rootPath);
+    const workspace = workspaceResult.ok ? workspaceResult.value : undefined;
+
     runtime.vce.setProjectContext({
       rootPath: s.metadata.rootPath,
       projectId: s.metadata.projectId,
@@ -257,6 +282,7 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
       primaryFramework: s.framework.primary,
       detectedFrameworks: s.framework.detected,
       frameworkConfidence: s.framework.confidence,
+      workspace,
     });
   }
 
@@ -440,110 +466,314 @@ async function cmdHealth(): Promise<void> {
 }
 
 async function cmdInstall(subArgs: string[]): Promise<void> {
-  const { existsSync, readFileSync, writeFileSync, mkdirSync } = await import('node:fs');
-  const { join, dirname, resolve } = await import('node:path');
-  const { homedir } = await import('node:os');
-  const { fileURLToPath } = await import('node:url');
-
   const ide = (subArgs[0] ?? 'opencode').toLowerCase();
-  const cwd = process.cwd();
-  const home = homedir();
-
-  // Resolve the Viskod repo root from THIS file's location, not process.cwd().
-  // The CLI runs as <repo>/packages/cli/src/index.ts (or built dist), so walk up
-  // until we find a package.json with "packages/cli" present.
-  const thisFile = fileURLToPath(import.meta.url);
-  let repoRoot = resolve(dirname(thisFile)); // start at src/ or dist/
-  for (let i = 0; i < 6; i++) {
-    if (
-      existsSync(join(repoRoot, 'packages', 'cli')) &&
-      existsSync(join(repoRoot, 'package.json'))
-    ) {
-      break;
-    }
-    const parent = dirname(repoRoot);
-    if (parent === repoRoot) break;
-    repoRoot = parent;
-  }
-
-  // Path to Viskod CLI entry (this repo)
-  const devEntry = join(repoRoot, 'packages', 'cli', 'src', 'index.ts');
-  const devMode = existsSync(devEntry);
-  // Installed mode: running from node_modules (@viskod/cli bundle). The MCP
-  // client must spawn the bundled entry with the current Node binary — no
-  // tsx, no repo checkout required.
-  const serveCommand = devMode
-    ? ['npx', 'tsx', devEntry, 'serve', '--url', 'http://localhost:3000']
-    : [process.execPath, fileURLToPath(import.meta.url), 'serve', '--url', 'http://localhost:3000'];
-
-  interface McpConfigFile {
-    path: string;
-    key: string; // top-level key holding mcp servers
-    serverKey: string;
-  }
-
-  const targets: Record<string, McpConfigFile> = {
-    opencode: {
-      path: join(home, '.config', 'opencode', 'opencode.json'),
-      key: 'mcp',
-      serverKey: 'viskod',
-    },
-    cursor: {
-      path: join(cwd, '.cursor', 'mcp.json'),
-      key: 'mcpServers',
-      serverKey: 'viskod',
-    },
-    claude: {
-      path: join(home, '.claude.json'),
-      key: 'mcpServers',
-      serverKey: 'viskod',
-    },
-  };
-
-  const target = targets[ide];
-  if (!target) {
+  if (ide !== 'opencode' && ide !== 'cursor' && ide !== 'claude') {
     console.error(`Unknown IDE "${ide}". Use one of: opencode, cursor, claude`);
     process.exit(1);
   }
 
-  try {
-    let config: Record<string, unknown> = {};
-    if (existsSync(target.path)) {
-      config = JSON.parse(readFileSync(target.path, 'utf-8'));
-    }
+  const projectRoot = getFlagValue(subArgs, '--project-root');
+  const useDevSource = hasFlag(subArgs, '--source');
+  const serveCommand = useDevSource
+    ? getMcpServeCommand({ mode: 'dev', projectRoot })
+    : getMcpServeCommand({ projectRoot });
 
-    // Ensure nested structure exists
-    if (!config[target.key] || typeof config[target.key] !== 'object') {
-      config[target.key] = {};
-    }
-
-    if (ide === 'opencode') {
-      // opencode uses: mcp: { name: { type: "local", command: [..], enabled: true } }
-      (config[target.key] as Record<string, unknown>)[target.serverKey] = {
-        type: 'local',
-        command: serveCommand,
-        enabled: true,
-      };
-    } else {
-      // cursor/claude use mcpServers: { name: { command, args, ... } }
-      (config[target.key] as Record<string, unknown>)[target.serverKey] = {
-        command: serveCommand[0],
-        args: serveCommand.slice(1),
-        env: {},
-        disabled: false,
-        autoApprove: [],
-      };
-    }
-
-    mkdirSync(target.path.split('/').slice(0, -1).join('/') || '.', { recursive: true });
-    writeFileSync(target.path, JSON.stringify(config, null, 2), 'utf-8');
-    console.log(`✓ Installed Viskod MCP config for ${ide}`);
-    console.log(`  → ${target.path}`);
-    console.log('  Restart your IDE to pick up the MCP server.');
-  } catch (error) {
-    console.error(`Failed to install: ${String(error)}`);
+  const installed = installAgentConfig({
+    kind: ide,
+    serveCommand,
+    home: homedir(),
+    cwd: projectRoot ?? process.cwd(),
+    projectRoot,
+  });
+  if (!installed.ok) {
+    console.error(`Failed to install: ${installed.error.message}`);
     process.exit(1);
   }
+
+  console.log(`✓ Installed Viskod MCP config for ${ide}`);
+  console.log(`  → ${installed.value.path}`);
+  if (installed.value.changed) {
+    console.log(
+      installed.value.previous !== undefined
+        ? '  Updated existing entry (previous entry preserved).'
+        : '  Added new entry.',
+    );
+  } else {
+    console.log('  Config unchanged (entry already matches).');
+  }
+  console.log(
+    `  serve: ${serveCommand.command} ${serveCommand.args.join(' ')} (${serveCommand.mode})`,
+  );
+  console.log('  Restart your IDE to pick up the MCP server.');
+}
+
+// --- CLI argument helpers ---
+
+function hasFlag(args: string[], flag: string): boolean {
+  return args.includes(flag);
+}
+
+function getFlagValue(args: string[], flag: string): string | undefined {
+  const idx = args.indexOf(flag);
+  if (idx < 0 || idx + 1 >= args.length) return undefined;
+  return args[idx + 1];
+}
+
+// --- viskod setup ---
+
+async function cmdSetup(subArgs: string[]): Promise<void> {
+  const projectRootArg = getFlagValue(subArgs, '--project-root');
+  const appUrl = getFlagValue(subArgs, '--app-url');
+  const installAgent = getFlagValue(subArgs, '--install');
+  const forceLimited = hasFlag(subArgs, '--limited');
+  const skipSmoke = hasFlag(subArgs, '--skip-smoke');
+
+  // 1. Resolve project root
+  let projectRoot: string | undefined;
+  if (projectRootArg) {
+    projectRoot = resolve(projectRootArg);
+    if (!existsSync(projectRoot) || !existsSync(join(projectRoot, 'package.json'))) {
+      console.error(`Project root does not exist or has no package.json: ${projectRoot}`);
+      process.exit(1);
+    }
+  } else {
+    const cwd = process.cwd();
+    if (existsSync(join(cwd, 'package.json'))) {
+      projectRoot = cwd;
+      console.log(`Using current directory as project root: ${cwd}`);
+    } else {
+      console.error(
+        'No --project-root provided and current directory has no package.json.\n' +
+          'Usage: viskod setup --project-root <path>',
+      );
+      process.exit(1);
+    }
+  }
+
+  console.log(`\nViskod setup — project root: ${projectRoot}\n`);
+
+  // 2. Initialize workspace
+  const initResult = initializeProjectWorkspace({ projectRoot });
+  if (!initResult.ok) {
+    console.error(`Workspace init failed: ${initResult.error.message}`);
+    process.exit(1);
+  }
+  console.log('Workspace initialized.');
+
+  // 3. Detect project
+  const project = detectAndConfigureProject({ projectRoot });
+  if (!project.ok) {
+    console.error(`Project detection failed: ${project.error.message}`);
+    process.exit(1);
+  }
+  console.log(`Project: ${project.value.name} (${project.value.framework ?? 'unknown framework'})`);
+
+  // 4. Run checks
+  console.log('\nRunning environment checks...');
+  const checks = await runAllChecks({ projectRoot, includeOptional: true, appUrl });
+  for (const check of checks) {
+    const mark = check.status === 'pass' ? '✓' : check.status === 'fail' ? '✗' : '–';
+    const extra = check.severity === 'required' ? ' (required)' : '';
+    console.log(`  ${mark} ${check.name}${extra}: ${check.summary}`);
+  }
+
+  const criticalFailures = checks.filter(
+    (c) =>
+      c.severity === 'required' &&
+      c.status === 'fail' &&
+      c.checkId !== 'mcp-tools-runtime' &&
+      c.checkId !== 'browser-runtime',
+  );
+  if (criticalFailures.length > 0) {
+    console.error(
+      `\n${criticalFailures.length} critical check(s) failed. Fix these before continuing.`,
+    );
+    process.exit(1);
+  }
+
+  // 5. MCP runtime verification
+  console.log('\nVerifying MCP runtime...');
+  let mcpOk = false;
+  try {
+    const mcpResult = await verifyMcpToolsRuntime(projectRoot);
+    if (mcpResult.ok && mcpResult.value.requiredToolsPresent) {
+      mcpOk = true;
+      const timing = mcpResult.value.timing;
+      console.log(`  MCP runtime verified (${mcpResult.value.mode}; ${timing?.totalMs ?? '?'}ms)`);
+    } else {
+      const msg = mcpResult.ok
+        ? `Missing tools: ${mcpResult.value.missingRequiredTools.join(', ')}`
+        : mcpResult.error.message;
+      console.error(`  MCP runtime verification failed: ${msg}`);
+    }
+  } catch (e) {
+    console.error(
+      `  MCP runtime verification error: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
+  // 6. Capture smoke
+  let smokeResult: Awaited<ReturnType<typeof runSmoke>> | undefined;
+  if (!skipSmoke) {
+    console.log('\nRunning capture smoke...');
+    smokeResult = await runSmoke({ projectRoot, url: appUrl });
+    if (smokeResult.ok) {
+      console.log(
+        `  Smoke: ${smokeResult.value.status}${smokeResult.value.packetId ? ' (packet OK)' : ''}`,
+      );
+    } else {
+      console.error(`  Smoke failed: ${smokeResult.error.message}`);
+    }
+  }
+
+  // 7. Consent gate
+  const browserCheck = checks.find((c) => c.checkId === 'browser-runtime');
+  const browserVerified = browserCheck?.status === 'pass';
+  const captureSmokePassed = smokeResult?.ok === true && !!smokeResult.value.packetId;
+  const isFull = mcpOk && browserVerified && captureSmokePassed;
+
+  let limitedMode = false;
+  const limitedReasons: string[] = [];
+
+  if (!isFull) {
+    if (forceLimited) {
+      limitedMode = true;
+      if (!mcpOk) limitedReasons.push('MCP runtime verification failed');
+      if (!browserVerified) limitedReasons.push('Browser runtime not verified');
+      if (!captureSmokePassed) limitedReasons.push('Capture smoke did not produce a packet');
+      console.log(`\nContinuing in limited mode: ${limitedReasons.join('; ')}`);
+    } else if (process.stdin.isTTY) {
+      // Interactive consent
+      const readline = await import('node:readline');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise<string>((resolve) => {
+        rl.question('\nSetup cannot complete all checks. Continue in limited mode? [y/N] ', (a) => {
+          rl.close();
+          resolve(a.trim().toLowerCase());
+        });
+      });
+      if (answer === 'y' || answer === 'yes') {
+        limitedMode = true;
+        if (!mcpOk) limitedReasons.push('MCP runtime verification failed');
+        if (!browserVerified) limitedReasons.push('Browser runtime not verified');
+        if (!captureSmokePassed) limitedReasons.push('Capture smoke did not produce a packet');
+        console.log(`Limited mode: ${limitedReasons.join('; ')}`);
+      } else {
+        console.error('\nSetup cancelled. Run viskod setup again when ready.');
+        process.exit(1);
+      }
+    } else {
+      console.error(
+        '\nSetup incomplete. Re-run with --limited to continue in limited mode, or fix the issues above.',
+      );
+      process.exit(1);
+    }
+  }
+
+  // 8. Complete setup
+  const result = completeSetup({
+    projectRoot,
+    project: project.value,
+    checks,
+    smoke: smokeResult?.ok ? smokeResult.value : undefined,
+    limitedMode,
+    limitedReasons,
+    appUrl,
+  });
+
+  if (!result.ok) {
+    console.error(`Failed to persist setup state: ${result.error.message}`);
+    process.exit(1);
+  }
+
+  const state = result.value;
+  console.log(`\nSetup ${state.state}.`);
+  if (state.sourceResolution) {
+    console.log(`Source resolution: ${state.sourceResolution}`);
+  }
+
+  // 9. Agent config install
+  if (installAgent) {
+    const kind = installAgent as 'opencode' | 'cursor' | 'claude';
+    const serveCmd = getMcpServeCommand({ projectRoot, url: appUrl ?? 'http://localhost:3000' });
+    const install = installAgentConfig({
+      kind,
+      serveCommand: serveCmd,
+      projectRoot,
+      home: homedir(),
+      cwd: process.cwd(),
+    });
+    if (install.ok) {
+      console.log(
+        `\nAgent config: ${install.value.path} (${install.value.changed ? 'updated' : 'unchanged'})`,
+      );
+    } else {
+      console.error(`\nAgent config install failed: ${install.error.message}`);
+    }
+  }
+}
+
+// --- viskod doctor ---
+
+async function cmdDoctor(subArgs: string[]): Promise<void> {
+  const projectRoot =
+    getFlagValue(subArgs, '--project-root') ??
+    (existsSync(join(process.cwd(), 'package.json')) ? process.cwd() : undefined);
+  const appUrl = getFlagValue(subArgs, '--app-url');
+
+  console.log('Viskod doctor — checking environment...\n');
+
+  const report = await runDoctor({ projectRoot, appUrl });
+
+  const line = (label: string, ok: boolean, detail: string) => {
+    console.log(`  ${ok ? '✓' : '✗'} ${label}: ${detail}`);
+  };
+
+  line('Node.js', report.node.ok, `v${report.node.version}`);
+  line(
+    'Chromium',
+    report.chromium.verified,
+    report.chromium.executablePath ?? report.chromium.hint ?? 'not found',
+  );
+  line(
+    'MCP runtime',
+    report.mcp.ok,
+    report.mcp.mode
+      ? `${report.mcp.mode} (${report.mcp.durationMs ?? '?'}ms, ${report.mcp.toolsFound ?? 0} tools)`
+      : (report.mcp.error ?? 'failed'),
+  );
+  line(
+    'Project root',
+    report.project.ok,
+    report.project.rootPath
+      ? `${report.project.rootPath} — ${report.project.reason ?? 'scanned'}`
+      : (report.project.reason ?? 'not configured'),
+  );
+  line('Source resolution', report.sourceResolution === 'ready', report.sourceResolution);
+  line(
+    'Studio (3001)',
+    report.studio.reachable,
+    report.studio.reachable ? 'running' : 'not reachable',
+  );
+  line(
+    'Setup state',
+    !report.setupState.stale,
+    report.setupState.exists
+      ? `${report.setupState.state ?? 'unknown'}${report.setupState.stale ? ' (stale — re-run setup)' : ''}`
+      : 'never run',
+  );
+  line(
+    'Agent config',
+    report.agentConfig?.detected ?? false,
+    report.agentConfig?.detected
+      ? `${report.agentConfig.kind} at ${report.agentConfig.configPath}`
+      : 'not detected',
+  );
+
+  const hasProblems =
+    !report.node.ok || !report.chromium.verified || !report.mcp.ok || report.setupState.stale;
+  console.log(`\n${hasProblems ? 'Issues found.' : 'All checks passed.'}`);
+  process.exit(hasProblems ? 1 : 0);
 }
 
 function printHelp(): void {
@@ -554,6 +784,8 @@ Usage:
   viskod capture <sel>   Capture context (reuses session if available)
   viskod serve [--url] [--project-root <dir>]   Start MCP server (with optional browser + explicit project root)
   viskod install [ide]   Install Viskod MCP config into your IDE (opencode|cursor|claude)
+  viskod setup [--project-root] [--install <agent>] [--limited]
+  viskod doctor [--project-root]
   viskod status          Show session status
   viskod stop            Stop the runtime session
   viskod export <path>   Export Context Packet to agent brief (--format markdown|json, --out <file>)
@@ -566,7 +798,9 @@ Examples:
   viskod capture "#my-button" --url http://localhost:5173
   viskod capture ".card" --project-path ./my-app
   viskod serve --url http://localhost:3000
-  viskod install opencode`);
+  viskod install opencode
+  viskod setup --project-root ./my-app --install cursor
+  viskod doctor --project-root ./my-app`);
 }
 
 main().catch((e) => {
