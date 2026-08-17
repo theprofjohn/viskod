@@ -19,7 +19,7 @@ import {
 import type { CapturePipeline } from '@viskod/capture-pipeline';
 import type { EventBus } from '@viskod/event-bus';
 import type { SelectionEngine, SelectionTarget } from '@viskod/selection-engine';
-import type { BaseEvent, BoundingBox, Result } from '@viskod/shared';
+import type { BaseEvent, BoundingBox, Result, WorkspaceMetadata } from '@viskod/shared';
 import { createViskodError, err, ok, sanitizeErrorDetail } from '@viskod/shared';
 import type { ViskodError } from '@viskod/shared';
 import type { SourceHintEngine } from '@viskod/source-hint-engine';
@@ -286,6 +286,7 @@ export class VisualContextEngine {
     routeMap?: {
       routes: Array<{ path: string; file: string; type: string; isDynamic?: boolean }>;
     };
+    workspace?: WorkspaceMetadata;
   } | null = null;
 
   constructor(options: VCECreationOptions) {
@@ -778,6 +779,7 @@ export class VisualContextEngine {
                     confidence: this.projectScan.frameworkConfidence,
                   }
                 : undefined,
+              workspace: this.projectScan?.workspace,
             },
             captureId: packetId,
           };
@@ -1100,6 +1102,7 @@ export class VisualContextEngine {
     routeMap?: {
       routes: Array<{ path: string; file: string; type: string; isDynamic?: boolean }>;
     };
+    workspace?: WorkspaceMetadata;
   }): void {
     this.projectScan = context;
   }
@@ -1119,6 +1122,7 @@ export class VisualContextEngine {
     routeMap?: {
       routes: Array<{ path: string; file: string; type: string; isDynamic?: boolean }>;
     };
+    workspace?: WorkspaceMetadata;
   } | null {
     return this.projectScan;
   }
