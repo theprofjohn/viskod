@@ -2,9 +2,10 @@
 
 > **Specification ID:** SPEC-023
 > **Version:** 1.0
-> **Status:** Draft
+> **Status:** Approved
 > **Owner:** Viskod Engineering
 > **Last Updated:** 2026-07-28
+> **Phase 2 Note:** P0 stub Studio exists as an HTTP server on port 3001 with simulated selection. Phase 2 replaces simulated selection with real Selection Engine integration, adds Context Packet display (screenshot rendering, DOM tree view, styles panel), adds Selection Inspector panel with real hierarchy from Selection Engine, and wires Capture History panel to file-backed Capture Pipeline. Real selection workflow: start selection → hover overlay → click → Selection Engine resolves → VCE generates Context Packet → Studio displays.
 
 ---
 
