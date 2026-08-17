@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { EventBus } from '@viskod/event-bus';
-import type { Result, ViskodError } from '@viskod/shared';
+import type { Result, ViskodError, WorkspaceMetadata } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 
 import type { ImportGraphEntry } from './classifier';
@@ -84,6 +84,22 @@ const USAGE_SITE_DIRS = [
   'routes',
   'app',
 ];
+
+/** Resolve the full set of directories to scan, including workspace package sourceRoots. */
+export function resolveWorkspaceDirs(
+  baseDirs: string[],
+  workspace?: WorkspaceMetadata,
+): string[] {
+  const dirs = [...baseDirs, ...USAGE_SITE_DIRS];
+  if (workspace?.isWorkspace) {
+    for (const pkg of workspace.packages) {
+      for (const src of pkg.sourceRoots) {
+        dirs.push(src);
+      }
+    }
+  }
+  return [...new Set(dirs)];
+}
 
 /** Class tokens too generic to imply ownership (weak evidence only). */
 const GENERIC_TOKENS = new Set([
@@ -508,7 +524,7 @@ function scanProjectFiles(input: HintInput, ctx: ScanContext): Map<string, FileS
   if (testId && testId.length >= 4 && !GENERIC_IDENTIFIERS.has(testId.toLowerCase()))
     stableIds.push(testId);
   const componentNames = extractComponentNames(input);
-  const uniqueDirs = [...new Set([...dirs, ...USAGE_SITE_DIRS])];
+  const uniqueDirs = resolveWorkspaceDirs(dirs, input.project.workspace);
 
   for (const dir of uniqueDirs) {
     walkCodeFiles(rootPath, dir, ctx, (relPath, fullPath) => {
