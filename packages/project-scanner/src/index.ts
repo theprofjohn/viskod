@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import * as path from 'node:path';
 import { dirname, join, resolve } from 'node:path';
 import type { EventBus } from '@viskod/event-bus';
 import type { Result, ViskodError } from '@viskod/shared';
@@ -18,6 +19,8 @@ import type {
   ScanResult,
   ScannerDiagnostic,
   ScannerHealth,
+  WorkspaceDiscovery,
+  WorkspacePackage,
   WorkspaceType,
 } from './types';
 
@@ -28,6 +31,8 @@ export type {
   RouteMap,
   ComponentIndex,
   FrameworkDetection,
+  WorkspaceDiscovery,
+  WorkspacePackage,
 } from './types';
 
 export class ProjectScanner {
@@ -158,6 +163,25 @@ export class ProjectScanner {
       scansFailed: this.scansFailed,
       cacheSize: this.cacheSize,
     };
+  }
+
+  /**
+   * Discover workspace packages from declared metadata within the explicit
+   * repository root. Supports package.json workspaces and pnpm-workspace.yaml.
+   * Never walks above the root; globs are expanded only inside the root.
+   */
+  async discoverWorkspace(rootPath: string): Promise<Result<WorkspaceDiscovery>> {
+    try {
+      const result = this.discoverWorkspaceSync(rootPath);
+      return ok(result);
+    } catch (error) {
+      return err(
+        this.scannerError(
+          'PS_WORKSPACE_DISCOVERY_FAILED',
+          `Workspace discovery failed: ${String(error)}`,
+        ),
+      );
+    }
   }
 
   // ---- Private helpers ----
@@ -913,6 +937,347 @@ export class ProjectScanner {
     }
 
     return diagnostics;
+  }
+
+  // ---- Workspace discovery ----
+
+  private discoverWorkspaceSync(rootPath: string): WorkspaceDiscovery {
+    const diagnostics: ScannerDiagnostic[] = [];
+    const workspaceType = this.detectWorkspaceType(rootPath);
+
+    // Single package: no workspace metadata found
+    if (workspaceType === 'single') {
+      return {
+        isWorkspace: false,
+        workspaceType: 'single',
+        packages: [],
+        globs: [],
+        diagnostics,
+      };
+    }
+
+    // Parse workspace globs from metadata
+    let globs: string[] = [];
+    try {
+      globs = this.parseWorkspaceGlobs(rootPath, workspaceType);
+    } catch (error) {
+      diagnostics.push({
+        level: 'warning',
+        message: `Failed to parse workspace metadata: ${String(error)}`,
+        stage: 'workspace',
+      });
+      return {
+        isWorkspace: true,
+        workspaceType,
+        packages: [],
+        globs: [],
+        diagnostics,
+      };
+    }
+
+    if (globs.length === 0) {
+      return {
+        isWorkspace: true,
+        workspaceType,
+        packages: [],
+        globs: [],
+        diagnostics,
+      };
+    }
+
+    // Expand globs and discover packages
+    const packages: WorkspacePackage[] = [];
+    const seen = new Set<string>();
+
+    for (const glob of globs) {
+      const expanded = this.expandWorkspaceGlob(rootPath, glob);
+      for (const relDir of expanded) {
+        if (seen.has(relDir)) continue;
+        seen.add(relDir);
+
+        const pkgJsonPath = join(relDir, 'package.json');
+        const fullPkgPath = join(rootPath, pkgJsonPath.replace(/\//g, path.sep));
+
+        if (!existsSync(fullPkgPath)) continue;
+
+        try {
+          const pkgContent = JSON.parse(readFileSync(fullPkgPath, 'utf-8'));
+          const name = String(pkgContent.name ?? relDir);
+          const sourceRoots = this.detectPackageSourceRoots(rootPath, relDir, pkgContent);
+          const workspaceDeps = this.extractWorkspaceDependencies(rootPath, pkgContent);
+
+          packages.push({
+            name,
+            relativeRoot: relDir,
+            packageJsonPath: pkgJsonPath,
+            sourceRoots,
+            workspaceDependencies: workspaceDeps,
+          });
+        } catch {
+          diagnostics.push({
+            level: 'warning',
+            message: `Failed to read package.json in workspace package: ${relDir}`,
+            stage: 'workspace',
+          });
+        }
+      }
+    }
+
+    // Sort deterministically by name
+    packages.sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      isWorkspace: true,
+      workspaceType,
+      packages,
+      globs,
+      diagnostics,
+    };
+  }
+
+  private parseWorkspaceGlobs(rootPath: string, workspaceType: WorkspaceType): string[] {
+    if (workspaceType === 'pnpm-workspace') {
+      return this.parsePnpmWorkspaceYaml(rootPath);
+    }
+    // For npm/yarn workspaces, read from package.json "workspaces" field
+    return this.parsePackageJsonWorkspaces(rootPath);
+  }
+
+  private parsePnpmWorkspaceYaml(rootPath: string): string[] {
+    const yamlPath = join(rootPath, 'pnpm-workspace.yaml');
+    if (!existsSync(yamlPath)) return [];
+
+    const content = readFileSync(yamlPath, 'utf-8');
+    const globs: string[] = [];
+
+    // Parse the packages: array from pnpm-workspace.yaml
+    // Simple line-by-line parser: find "packages:" then collect indented list items
+    const lines = content.split('\n');
+    let inPackages = false;
+    let indent = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trimStart();
+
+      // Detect "packages:" key
+      if (/^packages\s*:/.test(trimmed)) {
+        inPackages = true;
+        indent = line.length - line.trimStart().length;
+        continue;
+      }
+
+      if (inPackages) {
+        const currentIndent = line.length - line.trimStart().length;
+
+        // If we're back to same or lesser indent (and line is not blank/comment), we've left the packages block
+        if (currentIndent <= indent && trimmed !== '' && !trimmed.startsWith('#')) {
+          inPackages = false;
+          continue;
+        }
+
+        // Collect glob entries (lines starting with -)
+        const globMatch = trimmed.match(/^-\s+['"]?([^'"]+)['"]?$/);
+        if (globMatch?.[1]) {
+          globs.push(globMatch[1]);
+        }
+      }
+    }
+
+    return globs;
+  }
+
+  private parsePackageJsonWorkspaces(rootPath: string): string[] {
+    const pkgPath = join(rootPath, 'package.json');
+    if (!existsSync(pkgPath)) return [];
+
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+      const workspaces = pkg.workspaces;
+
+      if (Array.isArray(workspaces)) {
+        return workspaces.filter((w): w is string => typeof w === 'string');
+      }
+      if (workspaces && typeof workspaces === 'object' && Array.isArray(workspaces.packages)) {
+        return (workspaces.packages as unknown[]).filter(
+          (w): w is string => typeof w === 'string',
+        );
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return [];
+  }
+
+  private expandWorkspaceGlob(rootPath: string, glob: string): string[] {
+    // Simple glob expansion: handle * and ** patterns within root
+    // No symlink following outside root boundary
+    const results: string[] = [];
+
+    // Convert glob to a regex pattern for matching
+    // Handle: packages/*, apps/*, packages/*/src, etc.
+    const parts = glob.split('/');
+    this.walkGlob(rootPath, rootPath, parts, 0, results);
+
+    return results;
+  }
+
+  private walkGlob(
+    rootPath: string,
+    currentDir: string,
+    globParts: string[],
+    partIndex: number,
+    results: string[],
+  ): void {
+    if (partIndex >= globParts.length) return;
+    if (results.length > 500) return; // safety bound
+
+    const part = globParts[partIndex] ?? '';
+    const isLast = partIndex === globParts.length - 1;
+
+    // Check we haven't escaped the root
+    const relCurrent = join(rootPath, '.' === '.' ? '' : '.', path.relative(rootPath, currentDir))
+      .replace(/\\/g, '/');
+    if (relCurrent.startsWith('..')) return;
+
+    if (part === '**') {
+      // Match zero or more directories
+      if (isLast) {
+        // ** at end: match all directories
+        this.collectDirsBfs(rootPath, currentDir, results);
+      } else {
+        // ** in middle: match current dir AND recurse
+        this.walkGlob(rootPath, currentDir, globParts, partIndex + 1, results);
+        this.walkDirsRecursive(rootPath, currentDir, globParts, partIndex, results);
+      }
+      return;
+    }
+
+    if (part.includes('*')) {
+      // Single-level glob match
+      try {
+        const entries = readdirSync(currentDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+          if (!entry.isDirectory()) continue;
+          if (this.globMatches(entry.name, part)) {
+            const childPath = join(currentDir, entry.name);
+            if (isLast) {
+              const rel = path.relative(rootPath, childPath).replace(/\\/g, '/');
+              results.push(rel);
+            } else {
+              this.walkGlob(rootPath, childPath, globParts, partIndex + 1, results);
+            }
+          }
+        }
+      } catch {
+        // skip
+      }
+    } else {
+      // Literal directory name
+      const childPath = join(currentDir, part);
+      if (existsSync(childPath) && statSync(childPath).isDirectory()) {
+        if (isLast) {
+          const rel = path.relative(rootPath, childPath).replace(/\\/g, '/');
+          results.push(rel);
+        } else {
+          this.walkGlob(rootPath, childPath, globParts, partIndex + 1, results);
+        }
+      }
+    }
+  }
+
+  private collectDirsBfs(rootPath: string, startDir: string, results: string[]): void {
+    const queue = [startDir];
+    while (queue.length > 0 && results.length < 500) {
+      const dir = queue.shift() ?? '';
+      const rel = path.relative(rootPath, dir).replace(/\\/g, '/');
+      if (rel !== '') results.push(rel);
+
+      try {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+          if (entry.isDirectory()) {
+            queue.push(join(dir, entry.name));
+          }
+        }
+      } catch {
+        // skip
+      }
+    }
+  }
+
+  private walkDirsRecursive(
+    rootPath: string,
+    currentDir: string,
+    globParts: string[],
+    starStarIndex: number,
+    results: string[],
+  ): void {
+    if (results.length > 500) return;
+    try {
+      const entries = readdirSync(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+        if (!entry.isDirectory()) continue;
+        const childPath = join(currentDir, entry.name);
+        this.walkGlob(rootPath, childPath, globParts, starStarIndex + 1, results);
+        this.walkDirsRecursive(rootPath, childPath, globParts, starStarIndex, results);
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  private globMatches(name: string, pattern: string): boolean {
+    // Convert simple glob pattern to regex
+    const regexStr = '^' + pattern.replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]') + '$';
+    return new RegExp(regexStr).test(name);
+  }
+
+  private detectPackageSourceRoots(
+    _rootPath: string,
+    relDir: string,
+    _pkg: Record<string, unknown>,
+  ): string[] {
+    const roots: string[] = [];
+
+    // Check common source roots
+    const candidates = ['src', 'lib', 'app'];
+    for (const c of candidates) {
+      const fullPath = join(_rootPath, relDir, c);
+      if (existsSync(fullPath) && statSync(fullPath).isDirectory()) {
+        roots.push(`${relDir}/${c}`);
+      }
+    }
+
+    // If no src/lib/app, use the package root itself
+    if (roots.length === 0) {
+      roots.push(relDir);
+    }
+
+    return roots;
+  }
+
+  private extractWorkspaceDependencies(
+    _rootPath: string,
+    pkg: Record<string, unknown>,
+  ): string[] {
+    const deps = (pkg.dependencies ?? {}) as Record<string, string>;
+    const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>;
+    const peerDeps = (pkg.peerDependencies ?? {}) as Record<string, string>;
+    const allDeps = { ...deps, ...devDeps, ...peerDeps };
+
+    // Workspace dependencies are those using workspace: protocol or
+    // that we'll match against discovered package names
+    const workspaceDeps: string[] = [];
+    for (const [name, version] of Object.entries(allDeps)) {
+      if (typeof version === 'string' && version.startsWith('workspace:')) {
+        workspaceDeps.push(name);
+      }
+    }
+
+    return workspaceDeps;
   }
 
   private scannerError(code: string, message: string): ViskodError {

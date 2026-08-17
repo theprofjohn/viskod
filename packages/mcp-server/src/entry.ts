@@ -70,6 +70,20 @@ export function buildViskodServer(options?: BuildViskodServerOptions) {
       return;
     }
     currentScan = { ok: true, scan: result.value };
+
+    // Discover workspace metadata
+    const workspaceResult =
+      await projectScanner.discoverWorkspace(configuredProjectRoot);
+    const workspace = workspaceResult.ok
+      ? {
+          isWorkspace: workspaceResult.value.isWorkspace,
+          workspaceType:
+            workspaceResult.value.workspaceType as import('@viskod/shared').WorkspaceMetadata['workspaceType'],
+          packages: workspaceResult.value.packages,
+          globs: workspaceResult.value.globs,
+        }
+      : undefined;
+
     vce.setProjectContext({
       rootPath: result.value.metadata.rootPath,
       projectId: result.value.metadata.projectId,
@@ -79,6 +93,7 @@ export function buildViskodServer(options?: BuildViskodServerOptions) {
       detectedFrameworks: result.value.framework.detected,
       frameworkConfidence: result.value.framework.confidence,
       routeMap: { routes: result.value.routes.routes },
+      workspace,
     });
   }
 
@@ -1501,11 +1516,26 @@ export function buildViskodServer(options?: BuildViskodServerOptions) {
 
   const completeSetupTool: MCPToolDefinition = {
     name: 'complete_setup',
-    description: 'Mark setup as complete and persist the setup state.',
+    description:
+      'Mark setup as complete and persist the setup state. Passing limitedMode: true is explicit user consent to complete setup in limited mode when required gates fail; limitedReasons documents why full setup cannot complete. Without explicit consent, failed required gates leave setup in the incomplete state.',
     inputSchema: {
       type: 'object',
       properties: {
         projectRoot: { type: 'string', description: 'Project root path' },
+        limitedMode: {
+          type: 'boolean',
+          description:
+            'Explicit user consent to complete setup in limited mode, bypassing failed required gates',
+        },
+        limitedReasons: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Reasons why the user consents to completing setup in limited mode',
+        },
+        appUrl: {
+          type: 'string',
+          description: 'Local app URL verified during setup (e.g., http://localhost:3000)',
+        },
       },
       required: ['projectRoot'],
     },
@@ -1606,6 +1636,9 @@ export function buildViskodServer(options?: BuildViskodServerOptions) {
         projectRoot,
         project: projectResult.value,
         checks,
+        limitedMode: args.limitedMode as boolean | undefined,
+        limitedReasons: args.limitedReasons as string[] | undefined,
+        appUrl: args.appUrl as string | undefined,
       });
       if (!result.ok) return mcpError(result.error.message);
       return mcpOk({ ok: true, state: result.value });
