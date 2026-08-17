@@ -1829,6 +1829,9 @@ async function establishProjectContext(): Promise<void> {
     routeMap: { routes: scan.routes.routes },
     workspace,
   });
+
+  sourceHintEngine.invalidateCache(rootPath);
+
   studio.setProjectStatus({
     status: 'ready',
     name: scan.metadata.name,

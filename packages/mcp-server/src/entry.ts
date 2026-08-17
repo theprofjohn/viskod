@@ -95,6 +95,8 @@ export function buildViskodServer(options?: BuildViskodServerOptions) {
       routeMap: { routes: result.value.routes.routes },
       workspace,
     });
+
+    sourceHintEngine.invalidateCache(configuredProjectRoot);
   }
 
   const issuePersistence = new IssuePersistence();

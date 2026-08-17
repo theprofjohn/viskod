@@ -292,6 +292,8 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
       frameworkConfidence: s.framework.confidence,
       workspace,
     });
+
+    runtime.sourceHintEngine.invalidateCache(projectPath ?? s.metadata.rootPath);
   }
 
   console.log(`Selecting element: ${selector}...`);
