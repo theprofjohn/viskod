@@ -9,6 +9,7 @@ import { MIN_CONFIDENCE, scoreEvidence } from './evidence';
 import type { EvidenceFamily } from './evidence';
 import { buildImportGraph, buildLocalDependencyClosure } from './import-graph';
 import { DEFAULT_SCAN_BUDGET, type ScanBudget, ScanBudgetExceededError } from './import-graph';
+import { LruCache } from './lru-cache';
 import { rankHints } from './ranking';
 import type {
   DiscoveryMethod,
@@ -67,6 +68,10 @@ export type { ImportGraphEntry } from './classifier';
 export const SOURCE_HINT_SCHEMA_VERSION = '2.0.0';
 const SCHEMA_VERSION = SOURCE_HINT_SCHEMA_VERSION;
 const MAX_HINTS = 10;
+const HINT_CACHE_MAX = 500;
+const HINT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const IMPORT_GRAPH_CACHE_MAX = 50;
+const IMPORT_GRAPH_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const SUBSYSTEM = 'source-hint-engine';
 
 const EXTENSION_PATTERNS = ['.tsx', '.jsx', '.vue', '.svelte', '.ts', '.js'];
@@ -797,8 +802,11 @@ function collectCandidates(input: HintInput, ctx: ScanContext): CandidateEvidenc
 // ---------------------------------------------------------------------------
 
 export class SourceHintEngine {
-  private cache = new Map<string, SourceHint[]>();
-  private importGraphCache = new Map<string, ImportGraphEntry[]>();
+  private cache = new LruCache<string, SourceHint[]>(HINT_CACHE_MAX, HINT_CACHE_TTL_MS);
+  private importGraphCache = new LruCache<string, ImportGraphEntry[]>(
+    IMPORT_GRAPH_CACHE_MAX,
+    IMPORT_GRAPH_CACHE_TTL_MS,
+  );
   private hintsGenerated = 0;
   private hintsFailed = 0;
   private hintsUnavailable = 0;
@@ -1145,7 +1153,16 @@ export class SourceHintEngine {
 
   async clearCache(): Promise<Result<void>> {
     this.cache.clear();
+    this.importGraphCache.clear();
     return ok(undefined);
+  }
+
+  /** Invalidate cached entries for a specific project root. */
+  invalidateCache(rootPath: string): void {
+    // For hints: clear the entire hint cache when workspace changes — acceptable
+    // because workspace changes are rare events.
+    this.cache.clear();
+    this.importGraphCache.delete(rootPath);
   }
 }
 
