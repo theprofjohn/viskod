@@ -4,13 +4,26 @@ import type { EventBus } from '@viskod/event-bus';
 import type { Result, ViskodError, WorkspaceMetadata } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, err, ok } from '@viskod/shared';
 
+import { mapWithConcurrency } from './async-pool';
 import type { ImportGraphEntry } from './classifier';
 import { MIN_CONFIDENCE, scoreEvidence } from './evidence';
 import type { EvidenceFamily } from './evidence';
-import { buildImportGraph, buildLocalDependencyClosure } from './import-graph';
-import { DEFAULT_SCAN_BUDGET, type ScanBudget, ScanBudgetExceededError } from './import-graph';
+import type { FsActivity, FsActivitySnapshot } from './fs-activity';
+import { FsActivity as FsActivityImpl } from './fs-activity';
+import {
+  DEFAULT_SCAN_CONCURRENCY,
+  buildImportGraphAsync,
+  buildLocalDependencyClosureAsync,
+} from './import-graph';
 import { LruCache } from './lru-cache';
+import { ManifestCache, SourceFingerprintService } from './manifest-cache';
 import { rankHints } from './ranking';
+import {
+  DEFAULT_SCAN_BUDGET,
+  type ScanBudget,
+  ScanBudgetExceededError,
+  ScanCancelledError,
+} from './scan-control';
 import type {
   DiscoveryMethod,
   EvidenceType,
@@ -42,9 +55,21 @@ export {
   findImports,
   resolveLocalImport,
   ScanBudgetExceededError,
+  ScanCancelledError,
   DEFAULT_SCAN_BUDGET,
+  DEFAULT_SCAN_CONCURRENCY,
 } from './import-graph';
 export type { ScanBudget } from './import-graph';
+export { mapWithConcurrency } from './async-pool';
+export {
+  ManifestCache,
+  SourceFingerprintService,
+  MANIFEST_CACHE_MAX,
+  MANIFEST_CACHE_TTL_MS,
+} from './manifest-cache';
+export type { ManifestCacheEntry, ManifestFileEntry } from './manifest-cache';
+export { FsActivity } from './fs-activity';
+export type { FsActivitySnapshot } from './fs-activity';
 export {
   computeSourceResolution,
   qualifyConfidence,
@@ -91,10 +116,7 @@ const USAGE_SITE_DIRS = [
 ];
 
 /** Resolve the full set of directories to scan, including workspace package sourceRoots. */
-export function resolveWorkspaceDirs(
-  baseDirs: string[],
-  workspace?: WorkspaceMetadata,
-): string[] {
+export function resolveWorkspaceDirs(baseDirs: string[], workspace?: WorkspaceMetadata): string[] {
   const dirs = [...baseDirs, ...USAGE_SITE_DIRS];
   if (workspace?.isWorkspace) {
     for (const pkg of workspace.packages) {
@@ -215,36 +237,60 @@ function djb2(str: string): string {
   return (hash >>> 0).toString(16);
 }
 
-/** Safety: a candidate path must be repo-relative and inside the root. */
+/** Safety: lexical and real-path containment inside the explicit project root. */
+function isContainedPath(rootPath: string, candidatePath: string): boolean {
+  try {
+    const root = fs.realpathSync(rootPath);
+    const candidate = fs.realpathSync(candidatePath);
+    const relative = path.relative(root, candidate);
+    return (
+      relative === '' ||
+      (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isSafeRelativePath(relPath: string): boolean {
-  if (!relPath) return false;
-  if (path.posix.isAbsolute(relPath)) return false;
-  if (/^[A-Za-z]:[\\/]/.test(relPath)) return false;
+  if (!relPath || path.posix.isAbsolute(relPath) || /^[A-Za-z]:[\\/]/.test(relPath)) return false;
   const normalized = path.posix.normalize(relPath);
-  if (normalized === '..' || normalized.startsWith('../')) return false;
-  return true;
+  return normalized !== '..' && !normalized.startsWith('../');
+}
+
+function safePath(rootPath: string, relPath: string): string | null {
+  if (!isSafeRelativePath(relPath)) return null;
+  const candidate = path.resolve(rootPath, relPath.replace(/\\/g, path.sep));
+  const relative = path.relative(path.resolve(rootPath), candidate);
+  return relative === '' ||
+    (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+    ? candidate
+    : null;
 }
 
 function resolvePathWithCase(
   rootPath: string,
   relativePath: string,
 ): { resolved: string | null; matchType: 'exact' | 'case-insensitive' | null } {
-  const full = path.join(rootPath, relativePath.replace(/\//g, path.sep));
-  if (fs.existsSync(full)) return { resolved: full, matchType: 'exact' };
+  const full = safePath(rootPath, relativePath);
+  if (!full) return { resolved: null, matchType: null };
   const parent = path.dirname(full);
   const targetBase = path.basename(full);
-  if (!fs.existsSync(parent)) return { resolved: null, matchType: null };
+  if (!fs.existsSync(parent) || !isContainedPath(rootPath, parent))
+    return { resolved: null, matchType: null };
   try {
     const entries = fs.readdirSync(parent);
-    // Normalize by removing non-alphanumeric chars for case-insensitive comparison
     const normalizeForCompare = (s: string) => s.replace(/[^a-z0-9.]/gi, '').toLowerCase();
     const normalizedTarget = normalizeForCompare(targetBase);
     const ciMatch = entries.find((e) => normalizeForCompare(e) === normalizedTarget);
-    if (ciMatch) return { resolved: path.join(parent, ciMatch), matchType: 'case-insensitive' };
+    if (!ciMatch) return { resolved: null, matchType: null };
+    const resolved = path.join(parent, ciMatch);
+    return isContainedPath(rootPath, resolved)
+      ? { resolved, matchType: 'case-insensitive' }
+      : { resolved: null, matchType: null };
   } catch {
-    // permission error
+    return { resolved: null, matchType: null };
   }
-  return { resolved: null, matchType: null };
 }
 
 function findAdjacentStyleFiles(
@@ -271,13 +317,16 @@ function findAdjacentStyleFiles(
   return results;
 }
 
-function buildCacheKey(input: HintInput): string {
+/**
+ * Phase 33A: the cache key is fingerprint-scoped. The fingerprint comes from
+ * the engine's `SourceFingerprintService` (manifest-validated, stat-only on
+ * warm queries), so any source/config change rotates the key and every
+ * resolution consumes ONE coherent repository generation.
+ */
+function buildCacheKey(fingerprint: string, input: HintInput): string {
   const rt = input.route;
   const dc = input.domContext;
-  // Text, role, and testId are part of the evidence: two elements on the same
-  // route with the same tag/id/class but different visible text must not share
-  // a cache entry (that produced stale hints dependent on call order).
-  return `${rt.pathname}:${dc.tagName}:${dc.id ?? ''}:${dc.className ?? ''}:${dc.role ?? ''}:${dc.testId ?? ''}:${dc.text ?? ''}`;
+  return `${fingerprint}:${rt.pathname}:${dc.tagName}:${dc.id ?? ''}:${dc.className ?? ''}:${dc.role ?? ''}:${dc.testId ?? ''}:${dc.text ?? ''}`;
 }
 
 function buildHintId(filePath: string, evidence: HintEvidence[]): string {
@@ -423,33 +472,21 @@ const UTILITY_BLACKLIST = new Set([
   'popover',
   'sidebar',
   'linethrough',
-  'overline',
-  'normalcase',
-  'lowercase',
-  'uppercase',
 ]);
 
-/** Extract meaningful visible-text words (deduplicated, lowercase). */
 function extractTextWords(text: string): string[] {
   const words = text
     .split(/[\s\n]+/)
-    .map((w) => w.replace(/[^a-zA-Z0-9]/g, ''))
+    .map((word) => word.replace(/[^a-zA-Z0-9]/g, '').toLowerCase())
     .filter(
-      (w) => w.length >= 4 && !UTILITY_BLACKLIST.has(w.toLowerCase()) && Number.isNaN(Number(w)),
+      (word) => word.length >= 4 && !UTILITY_BLACKLIST.has(word) && Number.isNaN(Number(word)),
     );
-  return [...new Set(words.map((w) => w.toLowerCase()))];
+  return [...new Set(words)];
 }
 
-// ---------------------------------------------------------------------------
-// Project file scan (one deterministic pass, budget-bounded)
-// ---------------------------------------------------------------------------
-
 interface FileSignals {
-  /** Visible-text words found in the file content. */
   matchedWords: string[];
-  /** Stable identifiers (id/testid) literally defined in the file. */
   stableIdHits: string[];
-  /** Explicitly observed component names referenced in the file. */
   componentRefHits: string[];
 }
 
@@ -457,9 +494,14 @@ interface ScanContext {
   files: number;
   startMs: number;
   budget: ScanBudget;
+  /** Phase 33A: filesystem activity instrumentation (reads/parses/stats). */
+  activity: FsActivity;
+  /** Phase 33A: bounded parallelism for per-file work. */
+  concurrency: number;
 }
 
 function touchScan(ctx: ScanContext): void {
+  if (ctx.budget.signal?.aborted) throw new ScanCancelledError();
   ctx.files++;
   if (ctx.files > ctx.budget.maxFiles || Date.now() - ctx.startMs > ctx.budget.maxTimeMs) {
     throw new ScanBudgetExceededError();
@@ -478,104 +520,114 @@ const SKIP_DIRS = new Set([
   '.git',
 ]);
 
-function walkCodeFiles(
+async function walkCodeFiles(
   rootPath: string,
   dir: string,
   ctx: ScanContext,
-  visit: (relPath: string, fullPath: string) => void,
+  collect: (relPath: string, fullPath: string) => void,
   depth = 0,
-): void {
+): Promise<void> {
   if (depth > 10) return;
+  if (ctx.budget.signal?.aborted) throw new ScanCancelledError();
   const dirPath = path.join(rootPath, dir.replace(/\//g, path.sep));
   let items: fs.Dirent[];
   try {
-    items = fs.readdirSync(dirPath, { withFileTypes: true });
+    items = await fs.promises.readdir(dirPath, { withFileTypes: true });
   } catch {
     return;
   }
-  // Deterministic enumeration: filesystem order must never influence output.
+  ctx.activity.record('readdir');
   items.sort((a, b) => a.name.localeCompare(b.name));
   for (const entry of items) {
+    if (ctx.budget.signal?.aborted) throw new ScanCancelledError();
     if (entry.name.startsWith('.')) continue;
     const fullPath = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      walkCodeFiles(rootPath, `${dir}/${entry.name}`, ctx, visit, depth + 1);
+      if (!SKIP_DIRS.has(entry.name))
+        await walkCodeFiles(rootPath, `${dir}/${entry.name}`, ctx, collect, depth + 1);
       continue;
     }
     if (!entry.isFile()) continue;
     const ext = path.extname(entry.name).toLowerCase();
     if (!EXTENSION_PATTERNS.includes(ext)) continue;
     touchScan(ctx);
-    visit(`${dir}/${entry.name}`, fullPath);
+    collect(`${dir}/${entry.name}`, fullPath);
   }
 }
 
-function scanProjectFiles(input: HintInput, ctx: ScanContext): Map<string, FileSignals> {
+async function scanProjectFiles(
+  input: HintInput,
+  ctx: ScanContext,
+): Promise<Map<string, FileSignals>> {
   const result = new Map<string, FileSignals>();
   const rootPath = input.project.metadata.rootPath;
-  const dirs = input.project.componentIndex?.directories ?? [];
   const dc = input.domContext;
   const textWords = extractTextWords(dc.text ?? '');
-  // Word-boundary matching: 'save' must NOT match the identifier 'SaveButton'.
   const textPattern =
     textWords.length > 0
       ? new RegExp(`\\b(?:${textWords.map(escapeRegExp).join('|')})\\b`, 'gi')
       : null;
-  const stableIds: string[] = [];
-  const id = (dc.id ?? '').trim();
-  const testId = (dc.testId ?? '').trim();
-  if (id && id.length >= 4 && !GENERIC_IDENTIFIERS.has(id.toLowerCase())) stableIds.push(id);
-  if (testId && testId.length >= 4 && !GENERIC_IDENTIFIERS.has(testId.toLowerCase()))
-    stableIds.push(testId);
+  const stableIds = [dc.id, dc.testId].filter((value): value is string =>
+    Boolean(value && value.length >= 4 && !GENERIC_IDENTIFIERS.has(value.toLowerCase())),
+  );
   const componentNames = extractComponentNames(input);
-  const uniqueDirs = resolveWorkspaceDirs(dirs, input.project.workspace);
 
-  for (const dir of uniqueDirs) {
-    walkCodeFiles(rootPath, dir, ctx, (relPath, fullPath) => {
+  // Phase 33A: enumerate first (budget-bounded), then process the collected
+  // files with a bounded concurrency window — never unbounded Promise.all.
+  const files: Array<{ relPath: string; fullPath: string }> = [];
+  for (const dir of resolveWorkspaceDirs(
+    input.project.componentIndex?.directories ?? [],
+    input.project.workspace,
+  )) {
+    await walkCodeFiles(rootPath, dir, ctx, (relPath, fullPath) => {
+      files.push({ relPath, fullPath });
+    });
+  }
+
+  const processed = await mapWithConcurrency(
+    files,
+    ctx.concurrency,
+    async ({ relPath, fullPath }): Promise<{ relPath: string; signals: FileSignals } | null> => {
       let content: string;
       try {
-        content = fs.readFileSync(fullPath, 'utf-8');
+        content = await fs.promises.readFile(fullPath, 'utf-8');
       } catch {
-        return;
+        return null;
       }
-      const matchedWords: string[] = [];
-      if (textPattern) {
-        const seenWords = new Set<string>();
-        for (const m of content.matchAll(textPattern)) {
-          const word = (m[0] ?? '').toLowerCase();
-          if (textWords.includes(word)) seenWords.add(word);
-        }
-        matchedWords.push(...seenWords);
-      }
-      const stableIdHits: string[] = [];
-      for (const s of stableIds) {
-        if (
+      ctx.activity.record('contentRead');
+      const matchedWords = textPattern
+        ? [
+            ...new Set(
+              [...content.matchAll(textPattern)]
+                .map((m) => (m[0] ?? '').toLowerCase())
+                .filter((word) => textWords.includes(word)),
+            ),
+          ]
+        : [];
+      const stableIdHits = stableIds.filter(
+        (s) =>
           content.includes(`id="${s}"`) ||
           content.includes(`id='${s}'`) ||
           content.includes(`data-testid="${s}"`) ||
-          content.includes(`data-testid='${s}'`)
-        ) {
-          stableIdHits.push(s);
-        }
-      }
-      const componentRefHits: string[] = [];
-      for (const name of componentNames) {
-        // JSX tag, call, or export reference to an explicitly observed name.
-        if (new RegExp(`\\b${escapeRegExp(name)}\\b`).test(content)) {
-          componentRefHits.push(name);
-        }
-      }
-      if (matchedWords.length > 0 || stableIdHits.length > 0 || componentRefHits.length > 0) {
-        result.set(relPath, { matchedWords, stableIdHits, componentRefHits });
-      }
-    });
+          content.includes(`data-testid='${s}'`),
+      );
+      const componentRefHits = componentNames.filter((name) =>
+        new RegExp(`\\b${escapeRegExp(name)}\\b`).test(content),
+      );
+      ctx.activity.record('contentParse');
+      if (!matchedWords.length && !stableIdHits.length && !componentRefHits.length) return null;
+      return { relPath, signals: { matchedWords, stableIdHits, componentRefHits } };
+    },
+    { signal: ctx.budget.signal },
+  );
+  for (const entry of processed) {
+    if (entry) result.set(entry.relPath, entry.signals);
   }
   return result;
 }
 
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
 }
 
 /**
@@ -612,14 +664,20 @@ interface CandidateEvidence {
   relatedSelector?: string;
 }
 
-function collectCandidates(input: HintInput, ctx: ScanContext): CandidateEvidence[] {
+async function collectCandidates(input: HintInput, ctx: ScanContext): Promise<CandidateEvidence[]> {
   const rootPath = input.project.metadata.rootPath;
   const dc = input.domContext;
   const matchedRoute = input.route.matchedRoute;
   const byPath = new Map<string, CandidateEvidence>();
 
   const add = (candidate: CandidateEvidence): void => {
-    if (!isSafeRelativePath(candidate.filePath)) return;
+    const candidatePath = safePath(rootPath, candidate.filePath);
+    if (
+      !candidatePath ||
+      !fs.existsSync(candidatePath) ||
+      !isContainedPath(rootPath, candidatePath)
+    )
+      return;
     const key = candidate.filePath.toLowerCase();
     const existing = byPath.get(key);
     if (existing) {
@@ -660,7 +718,11 @@ function collectCandidates(input: HintInput, ctx: ScanContext): CandidateEvidenc
   let importClosure: Set<string> | null = null;
   if (matchedRoute?.file && isSafeRelativePath(matchedRoute.file)) {
     try {
-      importClosure = buildLocalDependencyClosure(rootPath, matchedRoute.file, ctx.budget);
+      importClosure = await buildLocalDependencyClosureAsync(
+        rootPath,
+        matchedRoute.file,
+        ctx.budget,
+      );
     } catch (error) {
       if (error instanceof ScanBudgetExceededError) throw error;
       importClosure = null;
@@ -744,7 +806,7 @@ function collectCandidates(input: HintInput, ctx: ScanContext): CandidateEvidenc
 
   // 4. Project file scan: visible text, stable identifiers, component refs.
   const textWords = extractTextWords(dc.text ?? '');
-  const signals = scanProjectFiles(input, ctx);
+  const signals = await scanProjectFiles(input, ctx);
 
   // Word frequency across the scanned scope — duplicate text is weak.
   const wordFrequency = new Map<string, number>();
@@ -812,21 +874,76 @@ export class SourceHintEngine {
   private hintsUnavailable = 0;
   private processingTimes: number[] = [];
   private eventBus: EventBus;
+  /** Phase 33A: filesystem read/parse instrumentation (engine-scoped). */
+  private activity: FsActivity;
+  /** Phase 33A: manifest-validated source fingerprint service (warm caches). */
+  private fingerprintService: SourceFingerprintService;
+  /** Phase 33A: scan generations — bumped on invalidation. */
+  private generation = 0;
+  /**
+   * One resolution consumes one coherent generation: the fingerprint is
+   * memoized per resolution so the hint key and the import-graph key observe
+   * the SAME source snapshot.
+   */
+  private lastFingerprint: { root: string; dirsKey: string; value: string } | null = null;
 
   constructor(eventBus: EventBus) {
     this.eventBus = eventBus;
+    this.activity = new FsActivityImpl();
+    this.fingerprintService = new SourceFingerprintService(new ManifestCache(), this.activity, {
+      skipDirs: SKIP_DIRS,
+      extensions: EXTENSION_PATTERNS,
+    });
+  }
+
+  /** Phase 33A: current scan generation (bumped by invalidateCache). */
+  get generationNumber(): number {
+    return this.generation;
+  }
+
+  /** Phase 33A: filesystem activity counters since construction/last reset. */
+  fsActivity(): FsActivitySnapshot {
+    return this.activity.snapshot();
+  }
+
+  /** Phase 33A: reset the filesystem activity counters. */
+  resetFsActivity(): void {
+    this.activity.reset();
+  }
+
+  private async currentFingerprint(
+    root: string,
+    dirs: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const dirsKey = [...new Set(dirs)].sort().join(',');
+    if (this.lastFingerprint?.root === root && this.lastFingerprint.dirsKey === dirsKey) {
+      return this.lastFingerprint.value;
+    }
+    const value = await this.fingerprintService.getFingerprint(root, dirs, signal);
+    this.lastFingerprint = { root, dirsKey, value };
+    return value;
   }
 
   async resolveUsageSiteHints(
     input: HintInput,
     maxHints?: number,
-    options?: { useImportGraph?: boolean; budget?: Partial<ScanBudget> },
+    options?: {
+      useImportGraph?: boolean;
+      budget?: Partial<ScanBudget>;
+      signal?: AbortSignal;
+      concurrency?: number;
+    },
   ): Promise<Result<RankingResult>> {
     const startTime = performance.now();
 
     try {
       // Generate base hints first
-      const hintResult = await this.generateHints(input, options);
+      const hintResult = await this.generateHints(input, {
+        budget: options?.budget,
+        signal: options?.signal,
+        concurrency: options?.concurrency,
+      });
       if (!hintResult.ok) {
         return ok({
           status: 'missing',
@@ -838,26 +955,44 @@ export class SourceHintEngine {
 
       const hints = hintResult.value;
 
-      // Build or retrieve import graph
+      // Build or retrieve import graph. Phase 33A: the graph key is scoped by
+      // the source fingerprint, so a source/config change rotates the key and
+      // the graph is rebuilt — the graph is always coherent with the hints.
       const rootPath = input.project.metadata.rootPath;
-      const dirs = input.project.componentIndex?.directories ?? [];
-      const graphKey = rootPath;
-      let importGraph =
-        options?.useImportGraph === false ? undefined : this.importGraphCache.get(graphKey);
-      if (!importGraph && options?.useImportGraph !== false && rootPath && dirs.length > 0) {
-        try {
-          importGraph = buildImportGraph(rootPath, dirs, this.resolveBudget(options?.budget));
-          this.importGraphCache.set(graphKey, importGraph);
-        } catch (error) {
-          if (error instanceof ScanBudgetExceededError) {
-            return ok({
-              status: 'missing',
-              resolution: 'unavailable',
-              topHints: [],
-              warnings: ['Source scan budget exceeded — source resolution unavailable'],
+      // The graph scans the SAME dir set as the hint fingerprint (workspace
+      // sourceRoots included), so the fingerprint memo serves both and one
+      // resolution observes one coherent repository generation.
+      const dirs = resolveWorkspaceDirs(
+        input.project.componentIndex?.directories ?? [],
+        input.project.workspace,
+      );
+      const budget = this.resolveBudget(options?.budget);
+      if (options?.signal) budget.signal = options.signal;
+      let importGraph: ImportGraphEntry[] | undefined = undefined;
+      if (rootPath && dirs.length > 0 && options?.useImportGraph !== false) {
+        const graphKey = `${await this.currentFingerprint(rootPath, dirs, budget.signal)}\u0000${rootPath}`;
+        importGraph = this.importGraphCache.get(graphKey);
+        if (!importGraph) {
+          try {
+            importGraph = await buildImportGraphAsync(rootPath, dirs, budget, {
+              concurrency: options?.concurrency,
+              activity: this.activity,
             });
+            this.importGraphCache.set(graphKey, importGraph);
+          } catch (error) {
+            if (error instanceof ScanBudgetExceededError || error instanceof ScanCancelledError) {
+              return ok({
+                status: 'missing',
+                resolution: 'unavailable',
+                topHints: [],
+                warnings:
+                  error instanceof ScanCancelledError
+                    ? ['Source scan cancelled — source resolution unavailable']
+                    : ['Source scan budget exceeded — source resolution unavailable'],
+              });
+            }
+            importGraph = undefined;
           }
-          importGraph = undefined;
         }
       }
 
@@ -914,10 +1049,18 @@ export class SourceHintEngine {
 
   async generateHints(
     input: HintInput,
-    options?: { budget?: Partial<ScanBudget> },
+    options?: { budget?: Partial<ScanBudget>; signal?: AbortSignal; concurrency?: number },
   ): Promise<Result<SourceHint[]>> {
     const startTime = performance.now();
     const budget = this.resolveBudget(options?.budget);
+    if (options?.signal) budget.signal = options.signal;
+    // Phase 33A: one resolution consumes one coherent repository generation.
+    const startGeneration = this.generation;
+    // The fingerprint memo is PER-RESOLUTION: cleared here so every
+    // resolution revalidates the manifest (change detection), while the
+    // hint-key and import-graph-key computations within THIS resolution share
+    // one coherent fingerprint.
+    this.lastFingerprint = null;
 
     try {
       if (!input.project?.metadata?.projectId) {
@@ -942,13 +1085,26 @@ export class SourceHintEngine {
         );
       }
 
-      const cacheKey = buildCacheKey(input);
+      const rootPath = input.project.metadata.rootPath;
+      const dirs = resolveWorkspaceDirs(
+        input.project.componentIndex?.directories ?? [],
+        input.project.workspace,
+      );
+      const fingerprint = await this.currentFingerprint(rootPath, dirs, budget.signal);
+      const cacheKey = buildCacheKey(fingerprint, input);
       const cached = this.cache.get(cacheKey);
       if (cached) return ok(cached);
 
-      // Budget-bounded evidence collection (Phase 30 latency guard).
-      const ctx: ScanContext = { files: 0, startMs: Date.now(), budget };
-      const candidates = collectCandidates(input, ctx);
+      // Budget-bounded evidence collection (Phase 30 latency guard; Phase 33A
+      // adds signal + bounded concurrency + fs instrumentation).
+      const ctx: ScanContext = {
+        files: 0,
+        startMs: Date.now(),
+        budget,
+        activity: this.activity,
+        concurrency: Math.max(1, Math.floor(options?.concurrency ?? DEFAULT_SCAN_CONCURRENCY)),
+      };
+      const candidates = await collectCandidates(input, ctx);
 
       // Score every candidate from its evidence families.
       const scored: Array<{
@@ -1038,7 +1194,14 @@ export class SourceHintEngine {
 
       if (hints[0]) hints[0].isPrimary = true;
 
-      this.cache.set(cacheKey, hints);
+      // Phase 33A generation guard: an in-flight resolution that started
+      // before an invalidation must never populate the NEW generation's
+      // cache — old inventory is never combined with new metadata. The
+      // computed result (coherent as of its start snapshot) is still
+      // returned; the next query recomputes.
+      if (this.generation === startGeneration) {
+        this.cache.set(cacheKey, hints);
+      }
       this.hintsGenerated++;
 
       this.eventBus.publish({
@@ -1065,6 +1228,17 @@ export class SourceHintEngine {
             'Source scan budget exceeded.',
             `Scan exceeded ${budget.maxFiles} files or ${budget.maxTimeMs}ms.`,
             'Source resolution is unavailable for this repository. Reduce repository size or wait for Phase 33 async scanning.',
+          ),
+        );
+      }
+      if (e instanceof ScanCancelledError) {
+        this.hintsUnavailable++;
+        return err(
+          shError(
+            'SH_SCAN_CANCELLED',
+            'Source scan cancelled.',
+            'The scan was aborted by its cancellation signal.',
+            'Retry the source resolution; no partial inventory is cached.',
           ),
         );
       }
@@ -1147,6 +1321,8 @@ export class SourceHintEngine {
       hintsGenerated: this.hintsGenerated,
       hintsFailed: this.hintsFailed,
       cacheSize: this.cache.size,
+      importGraphCacheSize: this.importGraphCache.size,
+      generation: this.generation,
       averageProcessingTimeMs: avgMs,
     };
   }
@@ -1154,15 +1330,24 @@ export class SourceHintEngine {
   async clearCache(): Promise<Result<void>> {
     this.cache.clear();
     this.importGraphCache.clear();
+    this.fingerprintService.cacheClear();
+    this.lastFingerprint = null;
     return ok(undefined);
   }
 
   /** Invalidate cached entries for a specific project root. */
   invalidateCache(rootPath: string): void {
+    // Phase 33A generation bump: fingerprint/config invalidation moves
+    // generation N → N+1. In-flight resolutions started at N may settle but
+    // never commit into the new generation.
+    void rootPath;
+    this.generation++;
     // For hints: clear the entire hint cache when workspace changes — acceptable
     // because workspace changes are rare events.
     this.cache.clear();
-    this.importGraphCache.delete(rootPath);
+    this.importGraphCache.clear();
+    this.fingerprintService.cacheClear();
+    this.lastFingerprint = null;
   }
 }
 

@@ -38,6 +38,9 @@
     },
     {
       "path": "../runtime-session"
+    },
+    {
+      "path": "../setup"
     }
   ]
 }

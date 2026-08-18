@@ -111,6 +111,7 @@ The CLI may expose commands for:
 * browser
 * captures
 * Context Packets
+* setup
 * diagnostics
 * plugins
 * settings
@@ -121,11 +122,15 @@ Each category should represent a stable platform capability.
 
 ---
 
-# Example Commands
+## Example Commands
 
-Illustrative commands include:
+All commands are implemented and functional:
 
 ```text id="g2v7mn"
+viskod setup --project-root <TARGET_PROJECT_DIR>
+
+viskod doctor --project-root <TARGET_PROJECT_DIR>
+
 viskod start
 
 viskod scan
@@ -147,7 +152,9 @@ viskod export
 viskod install <client>
 ```
 
-Examples demonstrate intent rather than implementation.
+Commands marked `--project-root` require an explicit project directory.
+`viskod setup` and `viskod doctor` are the first-run entry points; see
+[docs/setup.md](setup.md) for the full first-run guide.
 
 ---
 

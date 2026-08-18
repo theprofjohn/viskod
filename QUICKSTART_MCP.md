@@ -12,9 +12,18 @@ pointing at it, prepare an agent handoff, then verify the rendered fix.
 
 ## 1. Install Dependencies
 
+### Option A: Installed CLI (recommended)
+
+```bash
+npm i -g @viskod/cli
+```
+
+### Option B: From Source
+
 ```bash
 cd <REPO_PATH>
 pnpm install
+pnpm exec playwright install chromium
 ```
 
 The fixture server uses Node's built-in `http` module. No additional install
@@ -87,6 +96,16 @@ This section documents the exact machine-facing call order.
 
 ## Start the MCP Server
 
+### Option A: Installed CLI (recommended)
+
+```bash
+viskod setup --project-root ./your-app --install opencode
+viskod doctor --project-root ./your-app
+viskod serve --url http://localhost:3000 --project-root ./your-app
+```
+
+### Option B: From Source
+
 ```bash
 cd <REPO_PATH>
 pnpm viskod serve --url http://localhost:3000
@@ -145,15 +164,15 @@ Add the server entry to your `claude_desktop_config.json`.
 ## Verify the Connection
 
 The MCP client will send a `tools/list` request on startup. The response
-should include:
+should include **31 tools**. Key tools:
 
-- `viskod_select_element`
-- `viskod_capture_context`
-- `viskod_navigate`
-- `create_agent_handoff`
-- `create_visual_review`
-- `recapture_visual_review`
-- `get_visual_review`
+- `viskod_navigate`, `viskod_select_element`, `viskod_capture_context`
+- `create_agent_handoff`, `get_agent_handoff`, `list_agent_handoffs`
+- `create_visual_review`, `get_visual_review`, `recapture_visual_review`
+- `resolve_usage_site_hints`
+- `get_setup_state`, `run_setup_checks`, `complete_setup`
+
+See [docs/mcp.md](docs/mcp.md) for the full tool list.
 
 ## MCP Capture
 

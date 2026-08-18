@@ -16,7 +16,7 @@ export async function runBrowserSmoke(input: {
   const now = new Date().toISOString();
 
   try {
-    const { chromium } = require('playwright');
+    const { chromium } = await import('playwright');
     const browser = await chromium.launch({ headless: true, timeout: 15000 });
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const page = await context.newPage();
@@ -83,23 +83,15 @@ export async function runCaptureSmoke(input: {
       });
     }
 
-    // Step 2: Navigate to target URL
-    // If real app URL provided, use goto; otherwise use data URI
+    // A configured app URL is a real target and must pass the same navigation
+    // policy as production. Without one, keep the browser's blank page: the
+    // smoke proves browser/capture wiring without bypassing URL policy with a
+    // data: navigation.
     const targetUrl = input.url;
-    if (targetUrl && !targetUrl.startsWith('data:')) {
-      // Real app URL — navigate with goto
+    if (targetUrl) {
       const navResult = await vce.navigate(targetUrl);
       if (!navResult.ok) {
-        warnings.push(`Navigation to ${targetUrl}: ${navResult.error.message}`);
-      }
-    } else {
-      // Data URI fallback
-      const dataUri =
-        targetUrl ??
-        'data:text/html,<html><body><button id="test-btn">Test</button><p>Setup smoke</p></body></html>';
-      const navResult = await vce.navigate(dataUri);
-      if (!navResult.ok) {
-        warnings.push(`Navigation: ${navResult.error.message}`);
+        warnings.push(`Navigation failed for the configured target: ${navResult.error.message}`);
       }
     }
 

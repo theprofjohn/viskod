@@ -70,3 +70,10 @@ export function makeDeleteEvent(): VisualIssueEvent {
 export function makeCreatedEvent(): VisualIssueEvent {
   return createLifecycleEvent('created', 'Issue created from visual selection', 'system');
 }
+
+export function makeForkEvent(parentIssueId: string, childIssueId: string): VisualIssueEvent {
+  return createLifecycleEvent('forked', 'Issue forked', 'local-user', {
+    parentIssueId: { after: parentIssueId },
+    childIssueId: { after: childIssueId },
+  });
+}

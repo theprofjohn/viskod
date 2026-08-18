@@ -38,17 +38,24 @@ machine-facing call order lives here.
 
 Viskod exposes MCP tools that a coding agent can call. The core capture tools
 use the `viskod_` prefix; handoff, review, and setup tools use snake_case
-names:
+names.
+
+The MCP server registers **31 tools**. Key tools:
 
 | Tool | Purpose |
 |------|---------|
-| `viskod_navigate` | Navigate the browser to a URL. Must be called before selecting or capturing. |
+| `viskod_capture_context` | Capture the visual state of an element. Returns a context packet with DOM snapshot, computed styles, screenshot metadata, hierarchy, and confidence. |
 | `viskod_select_element` | Select an element by selector (optionally with x/y coordinates). |
-| `viskod_capture_context` | Capture the visual state of the selected element. Returns a context packet with DOM snapshot, computed styles, screenshot metadata, hierarchy, and confidence. |
 | `create_agent_handoff` | Create a handoff from an issue; the connected agent can fetch its context. |
 | `create_visual_review` | Create a before/after visual review from an issue. |
-| `recapture_visual_review` | Re-capture the same element after a fix and compare against the before snapshot. |
 | `get_visual_review` | Retrieve the full comparison for a review. |
+| `recapture_visual_review` | Re-capture the same element after a fix and compare against the before snapshot. |
+| `resolve_usage_site_hints` | Best-effort source file mapping for a captured element. |
+| `get_setup_state` | Read the current first-run setup state. |
+| `run_setup_checks` | Execute setup checks (Node.js, Chromium, target URL). |
+| `complete_setup` | Persist setup completion with optional limited mode. |
+
+See [docs/mcp.md](docs/mcp.md) for the full tool list.
 
 The capture response includes:
 
@@ -154,8 +161,10 @@ real value contains sensitive information.
 
 1. `viskod_capture_context` requires a running browser session started by
    `viskod serve`. It cannot capture from a detached or external browser.
-2. The element must be selectable by a CSS selector. Dynamic class names or
-   shadow DOM may complicate selection.
+2. Selection follows current document-root boundaries: regular DOM targets use
+   the normal path, while application Shadow DOM and iframe contents are not
+   traversed. Closed Shadow DOM and cross-origin iframes remain host/frame
+   boundaries.
 3. Source hints are best-effort. The engine may not find exact source file
    matches for all elements.
 4. Screenshots capture the element's current viewport state. Animations or

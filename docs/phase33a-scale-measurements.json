@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-08-18T19:06:19.372Z",
+  "machine": "linux-x64",
+  "fixture": {
+    "fileCount": 1200,
+    "seed": 61,
+    "type": "pnpm-workspace (apps/web, apps/admin, packages/ui, packages/utils)"
+  },
+  "note": "Single-machine observations only — not public performance guarantees.",
+  "operations": {
+    "cold_scan": {
+      "durationMs": 937.3,
+      "contentReads": 2406,
+      "contentParses": 2406,
+      "statCalls": 1205,
+      "readdirCalls": 8,
+      "resolution": "ambiguous"
+    },
+    "warm_repeated_query": {
+      "durationMs": 311.48,
+      "contentReads": 0,
+      "contentParses": 0,
+      "statCalls": 1205,
+      "readdirCalls": 4,
+      "resolution": "ambiguous"
+    },
+    "changed_file_refresh": {
+      "durationMs": 2091.59,
+      "contentReads": 2406,
+      "contentParses": 2406,
+      "statCalls": 1951,
+      "readdirCalls": 11,
+      "resolution": "ambiguous"
+    },
+    "ambiguous_query": {
+      "durationMs": 737.36,
+      "contentReads": 1203,
+      "contentParses": 1203,
+      "statCalls": 1205,
+      "readdirCalls": 8,
+      "resolution": "ambiguous"
+    },
+    "budget_exceeded_query": {
+      "durationMs": 264.77,
+      "contentReads": 0,
+      "contentParses": 0,
+      "statCalls": 1205,
+      "readdirCalls": 5,
+      "resolution": "unavailable"
+    }
+  }
+}

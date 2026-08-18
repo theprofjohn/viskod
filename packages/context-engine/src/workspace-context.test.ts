@@ -1,14 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { BrowserRuntime } from '@viskod/browser-runtime';
+import { EventBus } from '@viskod/event-bus';
+import { SourceHintEngine } from '@viskod/source-hint-engine';
+import { describe, expect, it } from 'vitest';
 import { VisualContextEngine } from './index';
 
 describe('VisualContextEngine workspace context', () => {
   it('accepts workspace metadata in setProjectContext', () => {
+    const bus = new EventBus();
     const vce = new VisualContextEngine({
-      browserRuntime: {} as any,
-      eventBus: { publish: () => {}, subscribe: () => () => {} } as any,
-      capturePipeline: {} as any,
-      selectionEngine: {} as any,
-      sourceHintEngine: {} as any,
+      browserRuntime: new BrowserRuntime(bus),
+      eventBus: bus,
+      sourceHintEngine: new SourceHintEngine(bus),
     });
     vce.setProjectContext({
       rootPath: '/repo',
@@ -40,12 +42,11 @@ describe('VisualContextEngine workspace context', () => {
   });
 
   it('getProjectContext returns workspace undefined when not set', () => {
+    const bus = new EventBus();
     const vce = new VisualContextEngine({
-      browserRuntime: {} as any,
-      eventBus: { publish: () => {}, subscribe: () => () => {} } as any,
-      capturePipeline: {} as any,
-      selectionEngine: {} as any,
-      sourceHintEngine: {} as any,
+      browserRuntime: new BrowserRuntime(bus),
+      eventBus: bus,
+      sourceHintEngine: new SourceHintEngine(bus),
     });
     vce.setProjectContext({
       rootPath: '/repo',

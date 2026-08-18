@@ -252,7 +252,7 @@ describe('Persistence', () => {
     expect(loadResult.ok).toBe(true);
     if (loadResult.ok && loadResult.value) {
       expect(loadResult.value.setupId).toBe(state.setupId);
-      expect(loadResult.value.schemaVersion).toBe(1);
+      expect(loadResult.value.schemaVersion).toBe(2);
     }
   });
 

@@ -7,6 +7,7 @@ import {
   createViskodError,
   err,
   ok,
+  validateTargetUrl,
 } from '@viskod/shared';
 import type { Browser, ElementHandle, Page } from 'playwright';
 import type { ConsoleEntry, NetworkEntry, SelectedElementInfo } from './evidence';
@@ -391,19 +392,33 @@ export class BrowserRuntime {
       return err(this.brError('BR_RELOAD_FAILED', `Page reload failed: ${String(error)}`));
     }
   }
-
   async navigate(handle: BrowserHandle, url: string): Promise<Result<PageHandle>> {
     const entry = this.handles.get(handle.contextId);
     if (!entry) return err(this.brError('BR_HANDLE_INVALID', 'Browser handle not found'));
 
+    const initial = validateTargetUrl(url);
+    if (!initial.valid) {
+      return err(this.brError('BR_TARGET_URL_REJECTED', initial.reason ?? 'Target URL rejected.'));
+    }
+
     try {
-      await entry.page.goto(url, {
+      await entry.page.goto(initial.normalizedUrl ?? url, {
         timeout: this.config.timeout.navigate,
         waitUntil: 'load',
       });
+      const finalUrl = entry.page.url();
+      const redirected = validateTargetUrl(finalUrl);
+      if (!redirected.valid) {
+        await entry.page.goto('about:blank', { timeout: this.config.timeout.navigate });
+        return err(
+          this.brError(
+            'BR_REDIRECT_URL_REJECTED',
+            'Navigation was blocked because the final target is not an allowed local URL.',
+          ),
+        );
+      }
 
       const pageId = crypto.randomUUID();
-
       this.eventBus.publish({
         eventId: crypto.randomUUID(),
         eventType: 'BR_EVENT:PAGE_LOADED',
@@ -411,13 +426,17 @@ export class BrowserRuntime {
         version: '1.0.0',
         source: 'browser-runtime',
         correlationId: handle.contextId,
-        payload: { browserContextId: handle.contextId, url, loadTimeMs: 0 },
+        payload: {
+          browserContextId: handle.contextId,
+          url: redirected.normalizedUrl,
+          loadTimeMs: 0,
+        },
       });
 
-      return ok({ contextId: handle.contextId, pageId, url });
-    } catch (error) {
+      return ok({ contextId: handle.contextId, pageId, url: redirected.normalizedUrl ?? finalUrl });
+    } catch {
       return err(
-        this.brError('BR_NAVIGATION_FAILED', `Navigation to ${url} failed: ${String(error)}`),
+        this.brError('BR_NAVIGATION_FAILED', 'Navigation failed for the requested target.'),
       );
     }
   }

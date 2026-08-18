@@ -34,6 +34,15 @@ const state: SharedState = { issueIds: [], page: null, service: null, persistenc
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function requireService(): IssueServiceImpl {
+  if (!state.service) throw new Error('state.service not initialized');
+  return state.service;
+}
+function requirePersistence(): IssuePersistence {
+  if (!state.persistence) throw new Error('state.persistence not initialized');
+  return state.persistence;
+}
+
 beforeAll(async () => {
   if (!fs.existsSync(TARGET_DIR)) {
     throw new Error(
@@ -320,8 +329,11 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
     expect(ev).not.toBeNull();
     expect(ev?.type).toBe('overlay:element-clicked');
 
-    const selection = makeVisualSelection(ev!, p.url(), 'shadcn-admin');
-    const result = await state.service!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    if (!ev) return;
+    const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
+    const svc = state.service;
+    if (!svc) return;
+    const result = await svc.createIssue(selection, 'dogfood-session', 'dogfood-page');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -366,8 +378,11 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
     expect(ev).not.toBeNull();
     expect(ev?.type).toBe('overlay:element-clicked');
 
-    const selection = makeVisualSelection(ev!, p.url(), 'shadcn-admin');
-    const result = await state.service!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    if (!ev) return;
+    const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
+    const svc = state.service;
+    if (!svc) return;
+    const result = await svc.createIssue(selection, 'dogfood-session', 'dogfood-page');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -410,8 +425,11 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
     expect(ev).not.toBeNull();
     expect(ev?.type).toBe('overlay:element-clicked');
 
-    const selection = makeVisualSelection(ev!, p.url(), 'shadcn-admin');
-    const result = await state.service!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    if (!ev) return;
+    const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
+    const svc = state.service;
+    if (!svc) return;
+    const result = await svc.createIssue(selection, 'dogfood-session', 'dogfood-page');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -454,8 +472,11 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
     expect(ev).not.toBeNull();
     expect(ev?.type).toBe('overlay:element-clicked');
 
-    const selection = makeVisualSelection(ev!, p.url(), 'shadcn-admin');
-    const result = await state.service!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    if (!ev) return;
+    const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
+    const svc = state.service;
+    if (!svc) return;
+    const result = await svc.createIssue(selection, 'dogfood-session', 'dogfood-page');
 
     if (result.ok) {
       console.log(
@@ -498,8 +519,11 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
     expect(ev).not.toBeNull();
     expect(ev?.type).toBe('overlay:element-clicked');
 
-    const selection = makeVisualSelection(ev!, p.url(), 'shadcn-admin');
-    const result = await state.service!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    if (!ev) return;
+    const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
+    const svc = state.service;
+    if (!svc) return;
+    const result = await svc.createIssue(selection, 'dogfood-session', 'dogfood-page');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -540,8 +564,11 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
     expect(ev).not.toBeNull();
     expect(ev?.type).toBe('overlay:element-clicked');
 
-    const selection = makeVisualSelection(ev!, p.url(), 'shadcn-admin');
-    const result = await state.service!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    if (!ev) return;
+    const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
+    const svc = state.service;
+    if (!svc) return;
+    const result = await svc.createIssue(selection, 'dogfood-session', 'dogfood-page');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -585,8 +612,11 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
     expect(ev).not.toBeNull();
     expect(ev?.type).toBe('overlay:element-clicked');
 
-    const selection = makeVisualSelection(ev!, p.url(), 'shadcn-admin');
-    const result = await state.service!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    if (!ev) return;
+    const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
+    const svc = state.service;
+    if (!svc) return;
+    const result = await svc.createIssue(selection, 'dogfood-session', 'dogfood-page');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -611,7 +641,9 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
         ),
       );
       if (cards.length === 0) return null;
-      const r = cards[0]!.getBoundingClientRect();
+      const first = cards[0];
+      if (!first) return null;
+      const r = first.getBoundingClientRect();
       return { x1: r.x + 5, y1: r.y + 5, x2: r.x + r.width - 5, y2: r.y + r.height - 5 };
     });
 
@@ -710,7 +742,7 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
       resolution: { status: 'resolved', confidence: 0.7, resolvedAt: new Date().toISOString() },
     };
 
-    const result = await state.service!.createIssue(selection, 'dogfood-session', 'dogfood-page');
+    const result = await requireService().createIssue(selection, 'dogfood-session', 'dogfood-page');
     if (result.ok) {
       console.log(
         `  DF22-08: issue ${result.value.issueId.slice(0, 8)}… title="${result.value.title}"`,
@@ -726,7 +758,7 @@ describe('Phase 22 Dogfood — Create Issues from Selected Elements', () => {
 
 describe('Phase 22 Dogfood — Issue Lifecycle', () => {
   it('DF22-09: lists all created issues', async () => {
-    const list = await state.service!.listIssues();
+    const list = await requireService().listIssues();
     expect(list.ok).toBe(true);
     if (list.ok) {
       expect(list.value.length).toBeGreaterThanOrEqual(state.issueIds.length);
@@ -735,7 +767,7 @@ describe('Phase 22 Dogfood — Issue Lifecycle', () => {
   });
 
   it('DF22-10: issues survive simulated restart (new service instance)', async () => {
-    const freshService = new IssueServiceImpl(new EventBus(), state.persistence!);
+    const freshService = new IssueServiceImpl(new EventBus(), requirePersistence());
     const list = await freshService.listIssues();
     expect(list.ok).toBe(true);
     if (list.ok) {
@@ -744,15 +776,19 @@ describe('Phase 22 Dogfood — Issue Lifecycle', () => {
 
       // Check deterministic ordering
       for (let i = 1; i < list.value.length; i++) {
-        expect(list.value[i - 1]!.updatedAt >= list.value[i]!.updatedAt).toBe(true);
+        const prev = list.value[i - 1];
+        const curr = list.value[i];
+        if (prev && curr) {
+          expect(prev.updatedAt >= curr.updatedAt).toBe(true);
+        }
       }
     }
   });
 
   it('DF22-11: opens issue detail', async () => {
-    if (state.issueIds.length === 0) return;
-    const issueId = state.issueIds[0]!;
-    const detail = await state.service!.getIssue(issueId);
+    const issueId = state.issueIds[0];
+    if (!issueId) return;
+    const detail = await requireService().getIssue(issueId);
     expect(detail.ok).toBe(true);
     if (detail.ok) {
       expect(detail.value.issueId).toBe(issueId);
@@ -770,10 +806,10 @@ describe('Phase 22 Dogfood — Issue Lifecycle', () => {
   });
 
   it('DF22-12: updates title/description/severity/status', async () => {
-    if (state.issueIds.length === 0) return;
-    const issueId = state.issueIds[0]!;
+    const issueId = state.issueIds[0];
+    if (!issueId) return;
 
-    const update = await state.service!.updateIssue(issueId, {
+    const update = await requireService().updateIssue(issueId, {
       title: 'Updated: Navigation issue',
       description: 'The nav item needs better contrast',
       severity: 'high',
@@ -794,10 +830,10 @@ describe('Phase 22 Dogfood — Issue Lifecycle', () => {
   });
 
   it('DF22-13: archives issue', async () => {
-    if (state.issueIds.length === 0) return;
-    const issueId = state.issueIds[0]!;
+    const issueId = state.issueIds[0];
+    if (!issueId) return;
 
-    const archive = await state.service!.archiveIssue(issueId);
+    const archive = await requireService().archiveIssue(issueId);
     expect(archive.ok).toBe(true);
     if (archive.ok) {
       expect(archive.value.status).toBe('archived');
@@ -807,7 +843,7 @@ describe('Phase 22 Dogfood — Issue Lifecycle', () => {
       console.log(`  DF22-13: issue ${issueId.slice(0, 8)}… archived`);
 
       // Verify archived issue hidden from default list
-      const list = await state.service!.listIssues();
+      const list = await requireService().listIssues();
       expect(list.ok).toBe(true);
       if (list.ok) {
         const stillListed = list.value.some((i) => i.issueId === issueId);
@@ -817,10 +853,10 @@ describe('Phase 22 Dogfood — Issue Lifecycle', () => {
   });
 
   it('DF22-14: reopens archived issue', async () => {
-    if (state.issueIds.length === 0) return;
-    const issueId = state.issueIds[0]!;
+    const issueId = state.issueIds[0];
+    if (!issueId) return;
 
-    const reopen = await state.service!.reopenIssue(issueId);
+    const reopen = await requireService().reopenIssue(issueId);
     expect(reopen.ok).toBe(true);
     if (reopen.ok) {
       expect(reopen.value.status).toBe('open');
@@ -830,7 +866,7 @@ describe('Phase 22 Dogfood — Issue Lifecycle', () => {
       console.log(`  DF22-14: issue ${issueId.slice(0, 8)}… reopened`);
 
       // Should now appear in list
-      const list = await state.service!.listIssues();
+      const list = await requireService().listIssues();
       expect(list.ok).toBe(true);
       if (list.ok) {
         const listed = list.value.some((i) => i.issueId === issueId);
@@ -840,10 +876,10 @@ describe('Phase 22 Dogfood — Issue Lifecycle', () => {
   });
 
   it('DF22-15: deletes issue', async () => {
-    if (state.issueIds.length < 2) return;
-    const issueId = state.issueIds[state.issueIds.length - 1]!;
+    const issueId = state.issueIds[state.issueIds.length - 1];
+    if (!issueId) return;
 
-    const del = await state.service!.deleteIssue(issueId);
+    const del = await requireService().deleteIssue(issueId);
     expect(del.ok).toBe(true);
     if (del.ok) {
       expect(del.value.deletedAt).toBeTruthy();
@@ -883,7 +919,7 @@ describe('Phase 22 Dogfood — Edge Cases', () => {
       resolution: { status: 'stale', confidence: 0.2, resolvedAt: new Date().toISOString() },
     };
 
-    const result = await state.service!.createIssue(
+    const result = await requireService().createIssue(
       staleSelection,
       'dogfood-session',
       'dogfood-page',
@@ -920,7 +956,7 @@ describe('Phase 22 Dogfood — Edge Cases', () => {
       resolution: { status: 'ambiguous', confidence: 0.5, resolvedAt: new Date().toISOString() },
     };
 
-    const result = await state.service!.createIssue(
+    const result = await requireService().createIssue(
       ambiguousSelection,
       'dogfood-session',
       'dogfood-page',
@@ -974,7 +1010,7 @@ describe('Phase 22 Dogfood — Edge Cases', () => {
         resolution: { status: 'resolved', confidence: 0.9, resolvedAt: new Date().toISOString() },
       };
 
-      const result = await state.service!.createIssue(
+      const result = await requireService().createIssue(
         secretSelection,
         'dogfood-session',
         'dogfood-page',

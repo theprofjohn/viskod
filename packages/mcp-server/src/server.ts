@@ -64,7 +64,12 @@ export class MCPServer {
       }
     });
 
-    process.stdin.on('end', () => {});
+    // MCP stdio contract: when the client closes stdin (EOF), the server's
+    // transport is gone — exit so no orphan keeps the stdio pipes/ports and
+    // the process tree alive.
+    process.stdin.on('end', () => {
+      process.exit(0);
+    });
 
     process.stderr.write('Viskod MCP Server started\n');
   }

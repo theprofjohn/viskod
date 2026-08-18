@@ -176,6 +176,38 @@ export class StudioWorkflow {
     this.visualReviewPolicy = policy;
     this.visualReviewPolicyAsked = asked;
   }
+  /**
+   * Reconstruct the durable portion of a workflow after Studio restart.
+   * Capture evidence and review artifacts remain owned by their persistence
+   * services; this method only restores opaque relation ids and stage.
+   */
+  async resumeIssue(
+    issueId: string,
+    handoffId?: string,
+    reviewId?: string,
+  ): Promise<Result<StudioWorkflowState>> {
+    const issue = await this.issueService.getIssue(issueId);
+    if (!issue.ok || issue.value.deletedAt) {
+      return this.fail('idle', 'This issue is no longer available.');
+    }
+    this.clearTransientState();
+    this.issueId = issueId;
+    this.handoffId = handoffId;
+    this.reviewId = reviewId;
+    if (reviewId) {
+      const preview = await this.userFacingReview.getPreview(reviewId);
+      if (!preview) return this.fail('handoff_ready', 'Review history is unavailable.');
+      this.reviewPreview = preview;
+      this.stage = preview.decision
+        ? 'decided'
+        : preview.after || preview.comparison
+          ? 'review_ready'
+          : 'verifying';
+    } else {
+      this.stage = handoffId ? 'handoff_ready' : 'describe';
+    }
+    return ok(this.buildState());
+  }
 
   /** Enter overlay selection mode and move to `selecting`. */
   async beginReport(): Promise<Result<StudioWorkflowState>> {
@@ -286,6 +318,7 @@ export class StudioWorkflow {
       description,
       input.severity ?? 'medium',
       evidence,
+      expected,
     );
     if (!createResult.ok) {
       return this.fail(this.stage, RECOVERY_RESEARCH);
@@ -401,6 +434,7 @@ export class StudioWorkflow {
         description,
         input.severity ?? 'medium',
         this.buildEvidenceSummary(this.capturedPacket),
+        expected,
       );
       if (!createResult.ok) {
         // Issue creation failed: no handoff attempt, remain recoverable at

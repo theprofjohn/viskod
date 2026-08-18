@@ -118,6 +118,22 @@ Only one Selection Overlay may exist at a time.
 
 ---
 
+## Keyboard Selection
+
+When selection mode is active, keyboard candidates are collected in
+deterministic document order from meaningful interactive and heading elements.
+The host page is not made globally tabbable.
+
+* `ArrowDown` / `ArrowRight` / `Tab` moves to the next candidate.
+* `ArrowUp` / `ArrowLeft` / `Shift+Tab` moves to the previous candidate.
+* `Enter` or `Space` accepts the highlighted candidate through the same
+  `overlay:element-clicked` target-resolution path as pointer selection.
+* `Escape` cancels an active drag, clears a selection, or exits selection mode.
+
+The overlay announces the current candidate and selected target through its
+bounded polite status indicator. Candidate navigation does not modify host
+application `tabindex` attributes.
+
 # Hover Overlay
 
 The Hover Overlay previews potential selections before activation.

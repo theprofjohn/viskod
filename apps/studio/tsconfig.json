@@ -13,6 +13,7 @@
     { "path": "../../packages/context-engine" },
     { "path": "../../packages/selection-engine" },
     { "path": "../../packages/project-scanner" },
+    { "path": "../../packages/setup" },
     { "path": "../../packages/source-hint-engine" },
     { "path": "../../packages/visual-selection" },
     { "path": "../../packages/visual-issue" },

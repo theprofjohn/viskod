@@ -42,6 +42,15 @@ const state: SharedState = {
   reviewService: null,
 };
 
+function requireIssueService(): IssueServiceImpl {
+  if (!state.issueService) throw new Error('state.issueService not initialized');
+  return state.issueService;
+}
+function requireReviewService(): ReviewServiceImpl {
+  if (!state.reviewService) throw new Error('state.reviewService not initialized');
+  return state.reviewService;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
@@ -334,7 +343,7 @@ async function createIssueFromOverlay(p: Page): Promise<string | null> {
   if (!ev) return null;
 
   const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-  const result = await state.issueService!.createIssue(
+  const result = await requireIssueService().createIssue(
     selection,
     'dogfood-p24-session',
     'dogfood-p24-page',
@@ -360,7 +369,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const result = await state.reviewService!.createReview(
+    const result = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -389,7 +398,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
     const adapter = makeMockAdapter({ text: 'Settings' });
     const service = new ReviewServiceImpl(
       bus,
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       adapter,
@@ -432,7 +441,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
     const adapter = makeMockAdapter({ text: 'Updated Settings Link', tagName: 'a' });
     const service = new ReviewServiceImpl(
       new EventBus(),
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       adapter,
@@ -474,7 +483,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
     const nullAdapter: RecaptureAdapter = async () => null;
     const service = new ReviewServiceImpl(
       new EventBus(),
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       nullAdapter,
@@ -517,7 +526,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       });
     const service = new ReviewServiceImpl(
       new EventBus(),
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       ambiguousAdapter,
@@ -557,7 +566,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -567,7 +576,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const get = await state.reviewService!.getReview(create.value.reviewId);
+    const get = await requireReviewService().getReview(create.value.reviewId);
     expect(get.ok).toBe(true);
     if (get.ok) {
       expect(get.value.before).toBeDefined();
@@ -588,7 +597,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
     const adapter = makeMockAdapter({ text: 'V2-after-recapture' });
     const service = new ReviewServiceImpl(
       new EventBus(),
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       adapter,
@@ -634,7 +643,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -644,7 +653,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const result = await state.reviewService!.recordDecision(create.value.reviewId, {
+    const result = await requireReviewService().recordDecision(create.value.reviewId, {
       decision: 'accepted',
     });
     expect(result.ok).toBe(true);
@@ -663,7 +672,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -673,7 +682,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const result = await state.reviewService!.recordDecision(create.value.reviewId, {
+    const result = await requireReviewService().recordDecision(create.value.reviewId, {
       decision: 'rejected',
       note: 'Still broken',
     });
@@ -694,7 +703,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -704,7 +713,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const result = await state.reviewService!.recordDecision(create.value.reviewId, {
+    const result = await requireReviewService().recordDecision(create.value.reviewId, {
       decision: 'needs_follow_up',
       note: 'Partial fix — check edge cases',
     });
@@ -727,7 +736,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -755,7 +764,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -765,7 +774,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const get = await state.reviewService!.getReview(create.value.reviewId);
+    const get = await requireReviewService().getReview(create.value.reviewId);
     expect(get.ok).toBe(true);
     if (get.ok) {
       expect(get.value.reviewId).toBe(create.value.reviewId);
@@ -783,7 +792,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -793,7 +802,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const decision = await state.reviewService!.recordDecision(create.value.reviewId, {
+    const decision = await requireReviewService().recordDecision(create.value.reviewId, {
       decision: 'accepted',
     });
     expect(decision.ok).toBe(true);
@@ -815,7 +824,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
     const adapter = makeMockAdapter();
     const service = new ReviewServiceImpl(
       new EventBus(),
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       adapter,
@@ -853,7 +862,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -863,7 +872,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const get = await state.reviewService!.getReview(create.value.reviewId);
+    const get = await requireReviewService().getReview(create.value.reviewId);
     if (get.ok) {
       const json = JSON.stringify(get.value);
       expect(json).not.toContain('.viskod');
@@ -883,7 +892,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -893,7 +902,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const get = await state.reviewService!.getReview(create.value.reviewId);
+    const get = await requireReviewService().getReview(create.value.reviewId);
     if (get.ok) {
       const json = JSON.stringify(get.value);
       expect(json).not.toContain('selectionSnapshot');
@@ -937,7 +946,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const create = await state.reviewService!.createReview(
+    const create = await requireReviewService().createReview(
       { issueId },
       'dogfood-p24-session',
       'dogfood-p24-page',
@@ -947,7 +956,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
       return;
     }
 
-    const get = await state.reviewService!.getReview(create.value.reviewId);
+    const get = await requireReviewService().getReview(create.value.reviewId);
     expect(get.ok).toBe(true);
     if (get.ok) {
       const resolved = resolveRecaptureTarget(get.value.before);
@@ -970,7 +979,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
     const adapter = makeMockAdapter({ text: 'Current page text' });
     const service = new ReviewServiceImpl(
       new EventBus(),
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       adapter,
@@ -1024,7 +1033,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
     const unchangedAdapter = makeMockAdapter({ text: 'Settings' });
     const unchangedService = new ReviewServiceImpl(
       new EventBus(),
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       unchangedAdapter,
@@ -1046,7 +1055,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
     const changedAdapter = makeMockAdapter({ text: 'Updated Settings' });
     const changedService = new ReviewServiceImpl(
       new EventBus(),
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       changedAdapter,
@@ -1067,7 +1076,7 @@ describe('Phase 24 Dogfood — Before/After Review', () => {
 
     const missingService = new ReviewServiceImpl(
       new EventBus(),
-      state.issueService!,
+      requireIssueService(),
       undefined,
       new ReviewPersistence(REVIEW_STORAGE),
       async () => null,

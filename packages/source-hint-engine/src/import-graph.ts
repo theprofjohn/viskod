@@ -1,7 +1,20 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { WorkspacePackageMetadata } from '@viskod/shared';
+import { mapWithConcurrency } from './async-pool';
 import type { ImportGraphEntry } from './classifier';
+import type { FsActivity } from './fs-activity';
+import {
+  type BudgetState,
+  DEFAULT_SCAN_BUDGET,
+  type ScanBudget,
+  ScanBudgetExceededError,
+  ScanCancelledError,
+  touchBudget,
+} from './scan-control';
+
+export { DEFAULT_SCAN_BUDGET, ScanBudgetExceededError, ScanCancelledError };
+export type { ScanBudget };
 
 const NAMED_IMPORT_PATTERN = /\{([^}]+)\}/;
 const DEFAULT_IMPORT_PATTERN = /import\s+(\w+)\s+from/;
@@ -10,34 +23,10 @@ const NAMESPACE_IMPORT_PATTERN = /import\s+\*\s+as\s+(\w+)\s+from/;
 const CODE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.vue', '.svelte'];
 const INDEX_SUFFIXES = ['index.tsx', 'index.ts', 'index.jsx', 'index.js', 'index.vue'];
 
-export interface ScanBudget {
-  maxFiles: number;
-  maxTimeMs: number;
-}
+/** Phase 33A — bounded parallelism for per-file work (never unbounded Promise.all). */
+export const DEFAULT_SCAN_CONCURRENCY = 16;
 
-/** Default scan budget — Phase 30 latency boundary (finite, bounded). */
-export const DEFAULT_SCAN_BUDGET: ScanBudget = { maxFiles: 3000, maxTimeMs: 2500 };
-
-/** Thrown when a scan exceeds its budget; the engine maps it to `unavailable`. */
-export class ScanBudgetExceededError extends Error {
-  constructor() {
-    super('Source scan budget exceeded');
-    this.name = 'ScanBudgetExceededError';
-  }
-}
-
-interface BudgetState {
-  files: number;
-  startMs: number;
-  budget: ScanBudget;
-}
-
-function touchBudget(state: BudgetState): void {
-  state.files++;
-  if (state.files > state.budget.maxFiles || Date.now() - state.startMs > state.budget.maxTimeMs) {
-    throw new ScanBudgetExceededError();
-  }
-}
+const SKIP_DIR_NAMES = ['node_modules', 'dist', 'build', '.next', '.cache', '.output', 'coverage'];
 
 export function buildImportGraph(
   rootPath: string,
@@ -428,6 +417,129 @@ export function buildWorkspaceDependencyClosure(
   }
 
   return closure;
+}
+
+export async function resolveLocalImportAsync(
+  rootPath: string,
+  sourceFile: string,
+  spec: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const sourceDir = path.posix.dirname(sourceFile);
+  const base = path.posix.normalize(`${sourceDir}/${spec}`);
+  if (base === '..' || base.startsWith('../') || path.posix.isAbsolute(base)) return null;
+  const candidates = [
+    base,
+    ...CODE_EXTENSIONS.map((ext) => `${base}${ext}`),
+    ...INDEX_SUFFIXES.map((s) => `${base}/${s}`),
+  ];
+  for (const candidate of candidates) {
+    if (signal?.aborted) throw new ScanCancelledError();
+    if (candidate === '..' || candidate.startsWith('../') || path.posix.isAbsolute(candidate))
+      continue;
+    try {
+      await fs.promises.access(path.join(rootPath, candidate.replace(/\//g, path.sep)));
+      return candidate;
+    } catch {
+      // Try the next extension/index candidate.
+    }
+  }
+  return null;
+}
+
+export async function buildLocalDependencyClosureAsync(
+  rootPath: string,
+  entryFile: string,
+  budget: ScanBudget = DEFAULT_SCAN_BUDGET,
+  activity?: FsActivity,
+): Promise<Set<string>> {
+  const closure = new Set<string>();
+  const queue = [entryFile];
+  const state: BudgetState = { files: 0, startMs: Date.now(), budget };
+  while (queue.length > 0) {
+    const current = queue.shift() ?? '';
+    if (closure.has(current)) continue;
+    closure.add(current);
+    touchBudget(state);
+    let content: string;
+    try {
+      content = await fs.promises.readFile(
+        path.join(rootPath, current.replace(/\//g, path.sep)),
+        'utf-8',
+      );
+      activity?.record('contentRead');
+      activity?.record('contentParse');
+    } catch (error) {
+      if (error instanceof ScanBudgetExceededError || error instanceof ScanCancelledError)
+        throw error;
+      continue;
+    }
+    for (const entry of parseImports(rootPath, current, content)) {
+      if (!entry.isLocal || !entry.importedFile || entry.importedFile.startsWith('.')) continue;
+      if (!closure.has(entry.importedFile)) queue.push(entry.importedFile);
+    }
+  }
+  return closure;
+}
+
+export async function buildImportGraphAsync(
+  rootPath: string,
+  dirs: string[],
+  budget: ScanBudget = DEFAULT_SCAN_BUDGET,
+  options: { concurrency?: number; activity?: FsActivity } = {},
+): Promise<ImportGraphEntry[]> {
+  const entries: ImportGraphEntry[] = [];
+  const seen = new Set<string>();
+  const state: BudgetState = { files: 0, startMs: Date.now(), budget };
+  const files: Array<{ relPath: string; fullPath: string }> = [];
+
+  const walk = async (dirPath: string): Promise<void> => {
+    if (budget.signal?.aborted) throw new ScanCancelledError();
+    let items: fs.Dirent[];
+    try {
+      items = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    items.sort((a, b) => a.name.localeCompare(b.name));
+    for (const item of items) {
+      if (budget.signal?.aborted) throw new ScanCancelledError();
+      if (item.name.startsWith('.') || SKIP_DIR_NAMES.includes(item.name)) continue;
+      const fullPath = path.join(dirPath, item.name);
+      if (item.isDirectory()) {
+        await walk(fullPath);
+        continue;
+      }
+      if (!item.isFile() || !CODE_EXTENSIONS.includes(path.extname(item.name).toLowerCase()))
+        continue;
+      touchBudget(state);
+      const relPath = path.relative(rootPath, fullPath).replace(/\\/g, '/');
+      if (seen.has(relPath)) continue;
+      seen.add(relPath);
+      files.push({ relPath, fullPath });
+    }
+  };
+  for (const dir of dirs) await walk(path.resolve(rootPath, dir));
+
+  // Bounded concurrency: parse each collected file, never fanning out with
+  // unbounded Promise.all. The file/time budget was enforced during
+  // enumeration; the pool's own signal check stops scheduling new reads once
+  // aborted, and the bounded in-flight window settles before the error
+  // propagates.
+  const concurrency = Math.max(1, Math.floor(options.concurrency ?? DEFAULT_SCAN_CONCURRENCY));
+  const parsed = await mapWithConcurrency(
+    files,
+    concurrency,
+    async ({ relPath, fullPath }) => {
+      const content = await fs.promises.readFile(fullPath, 'utf-8');
+      options.activity?.record('contentRead');
+      options.activity?.record('contentParse');
+      return parseImports(rootPath, relPath, content);
+    },
+    { signal: budget.signal },
+  );
+  for (const fileEntries of parsed) entries.push(...fileEntries);
+  return entries;
 }
 
 export function findImporters(graph: ImportGraphEntry[], targetPackage: string): string[] {

@@ -413,7 +413,13 @@ describe('Phase 21 Dogfood — Click Selection', () => {
     }
 
     // Click first nav link
-    const ev = await clickAt(p, links[0]!.x, links[0]!.y);
+    const firstLink = links[0];
+    if (!firstLink) {
+      record('DF-02', 'Sidebar nav item', false, 'No nav links found');
+      await cleanup(p);
+      return;
+    }
+    const ev = await clickAt(p, firstLink.x, firstLink.y);
     const clicked = ev !== null && ev.type === 'overlay:element-clicked';
     expect(clicked).toBe(true);
     record(
@@ -1111,5 +1117,83 @@ describe('Phase 21 Dogfood — Reset/Clear Behavior', () => {
     expect(cleared && reselected).toBe(true);
     record('DF-CLEAR', 'Clear/reselect', true, `cleared=${cleared} reselected=${reselected}`);
     await cleanup(p);
+  });
+});
+
+describe('Phase 34 Dogfood — Keyboard Selection', () => {
+  it('DF34-KB: navigates candidates and accepts without pointer input', async () => {
+    const p = await makePage();
+    await setupCapture(p);
+    await activateOverlay(p);
+    await p.keyboard.press('ArrowDown');
+    await p.keyboard.press('Enter');
+    await sleep(300);
+    const event = await p.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __vs_events: Array<{ type: string; data?: { selector?: string; tagName?: string } }>;
+          }
+        ).__vs_events?.slice(-1)[0],
+    );
+    expect(event?.type).toBe('overlay:element-clicked');
+    expect(event?.data?.tagName).toBeTruthy();
+    await cleanup(p);
+    record('DF34-KB', 'Keyboard candidate navigation and accept', true);
+  });
+  it('DF34-MOTION: reduced motion disables the rendered overlay transition', async () => {
+    const p = await makePage();
+    await p.emulateMedia({ reducedMotion: 'reduce' });
+    await setupCapture(p);
+    await activateOverlay(p);
+    const reduced = await p.evaluate(() => {
+      const host = document.getElementById('__viskod_overlay_root');
+      return host
+        ? getComputedStyle(host).getPropertyValue('--viskod-highlight-transition').trim()
+        : null;
+    });
+    expect(reduced).toBe('none');
+    await cleanup(p);
+    record('DF34-MOTION', 'Reduced-motion transition is disabled in Chromium', true, reduced ?? '');
+  });
+
+  it('DF34-KB-B: selects the second duplicate-selector candidate by keyboard', async () => {
+    const p = await makePage();
+    await p.setContent(
+      '<main><button class="duplicate-card">FIRST CANDIDATE</button><button class="duplicate-card">SECOND CANDIDATE</button></main>',
+    );
+    await setupCapture(p);
+    await activateOverlay(p);
+
+    // The fixture contains exactly two selectable candidates. ArrowDown twice
+    // deliberately chooses candidate B; no pointer or overlay event is used.
+    await p.keyboard.press('ArrowDown');
+    await p.keyboard.press('ArrowDown');
+    await p.keyboard.press('Enter');
+    await sleep(300);
+    const event = await p.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __vs_events: Array<{
+              type: string;
+              data?: { textPreview?: string; selector?: string };
+            }>;
+          }
+        ).__vs_events?.slice(-1)[0],
+    );
+    expect(event?.type).toBe('overlay:element-clicked');
+    expect(event?.data?.textPreview).toContain('SECOND CANDIDATE');
+    const selector = event?.data?.selector;
+    expect(selector).toMatch(/button:nth-of-type\(2\)$/);
+    if (!selector) throw new Error('keyboard selection did not provide a selector');
+    expect(
+      await p.evaluate(
+        (candidateSelector) => document.querySelector(candidateSelector)?.textContent,
+        selector,
+      ),
+    ).toContain('SECOND CANDIDATE');
+    await cleanup(p);
+    record('DF34-KB-B', 'Keyboard duplicate-selector identity', true);
   });
 });

@@ -37,7 +37,7 @@ const OVERLAY_SCRIPT = `
   var tBadge = prefersReducedMotion ? 'none' : 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease-out';
   var tConfirm = prefersReducedMotion ? 'none' : 'transform 0.3s ease-out, opacity 0.3s ease-out';
   var tIndicator = prefersReducedMotion ? 'none' : 'opacity 0.2s ease-out';
-
+  host.style.setProperty('--viskod-highlight-transition', tHighlight);
   var style = document.createElement('style');
   style.textContent = [
     '.' + PREFIX + 'highlight-box {',
@@ -221,6 +221,8 @@ const OVERLAY_SCRIPT = `
   var selectedElements = []; // array of { el, info, key, number } for multi-select
   var currentElementInfo = null;
   var lastHoveredElement = null;
+  var keyboardCandidates = [];
+  var keyboardCandidateIndex = -1;
   var throttleTimer = null;
   var diagnosticsOn = false;
   var diagOptions = { showBoundingBoxes: true, showSpacing: false };
@@ -655,6 +657,36 @@ const OVERLAY_SCRIPT = `
     if (el.getAttribute && el.getAttribute('data-viskod-overlay') !== null) return null;
     return el;
   }
+  function refreshKeyboardCandidates() {
+    var nodes = Array.prototype.slice.call(document.querySelectorAll(
+      'button,a,input,textarea,select,[role="button"],[tabindex],h1,h2,h3,[data-testid]'
+    ));
+    keyboardCandidates = nodes.filter(function(el) {
+      if (!el || el === host || host.contains(el)) return false;
+      if (el.closest && el.closest('[data-viskod-overlay]')) return false;
+      var rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    keyboardCandidates.sort(function(a, b) {
+      return getDocumentOrder(a) - getDocumentOrder(b);
+    });
+    if (keyboardCandidateIndex >= keyboardCandidates.length) keyboardCandidateIndex = -1;
+  }
+
+  function moveKeyboardCandidate(delta) {
+    refreshKeyboardCandidates();
+    if (!keyboardCandidates.length) return;
+    keyboardCandidateIndex = (keyboardCandidateIndex + delta + keyboardCandidates.length) % keyboardCandidates.length;
+    var candidate = keyboardCandidates[keyboardCandidateIndex];
+    var info = getElementInfo(candidate, false);
+    currentElementInfo = info;
+    showHighlight(info.boundingBox, 'Keyboard candidate ' + (keyboardCandidateIndex + 1) + ' of ' + keyboardCandidates.length, 'hover');
+    sendMessage('overlay:keyboard-candidate', {
+      index: keyboardCandidateIndex,
+      count: keyboardCandidates.length,
+      target: info,
+    });
+  }
 
   function handlePointerMove(clientX, clientY) {
     if (mode !== 'hover' && mode !== 'selection') return;
@@ -688,13 +720,8 @@ const OVERLAY_SCRIPT = `
     }
   }
 
-  function handleClick(clientX, clientY) {
-    if (mode !== 'selection') return;
-    if (isDragging) return;
-
-    var el = getTargetElement(clientX, clientY);
-    if (!el) return;
-
+  function handleElementClick(el) {
+    if (mode !== 'selection' || isDragging || !el) return;
     var info = getElementInfo(el, undefined, true);
     currentElementInfo = info;
     var selectionKey = getSelectionKey(info);
@@ -735,17 +762,17 @@ const OVERLAY_SCRIPT = `
     clearHighlight();
     renderSelectedElements();
     count = selectedElements.length;
-    if (count > 1) {
-      showConfirmation(count + ' elements selected \\u00B7 click a highlighted element to remove');
-    } else {
-      showConfirmation('1 element selected \\u00B7 click it again to remove');
-    }
-
+    showConfirmation(count + ' element' + (count === 1 ? '' : 's') + ' selected');
     selectionMsg.selectionCount = count;
     selectionMsg.selectedElements = selectedElements.map(function(s) {
       return Object.assign({}, s.info, { selectionNumber: s.number });
     });
     sendMessage(wasDeselected ? 'overlay:element-deselected' : 'overlay:element-clicked', selectionMsg);
+  }
+
+  function handleClick(clientX, clientY) {
+    if (mode !== 'selection' || isDragging) return;
+    handleElementClick(getTargetElement(clientX, clientY));
   }
 
   function handlePointerDown(clientX, clientY) {
@@ -889,17 +916,24 @@ const OVERLAY_SCRIPT = `
         sendMessage('overlay:exit-requested', {});
         e.preventDefault();
       }
+      return;
+    }
+    if (mode !== 'selection' || isDragging) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'Tab') {
+      moveKeyboardCandidate(e.shiftKey ? -1 : 1);
+      e.preventDefault();
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      moveKeyboardCandidate(-1);
+      e.preventDefault();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      refreshKeyboardCandidates();
+      var candidate = keyboardCandidates[keyboardCandidateIndex];
+      if (candidate) {
+        handleElementClick(candidate);
+        e.preventDefault();
+      }
     }
   });
-
-  // Keep selected boxes aligned after scrolling by recalculating their live DOM rects.
-  window.addEventListener('scroll', function() {
-    lastHoveredElement = null;
-    if (hasSelection) {
-      clearHighlight();
-      renderSelectedElements();
-    }
-  }, { passive: true });
   window.addEventListener('message', function(event) {
     if (event.data && event.data.source === '__viskod_browser') {
       var cmd = event.data.command;

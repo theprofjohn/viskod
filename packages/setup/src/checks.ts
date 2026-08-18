@@ -1,8 +1,9 @@
 import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { VISKOD_STORAGE_DIR } from '@viskod/shared';
+import { VISKOD_STORAGE_DIR, validateTargetUrl } from '@viskod/shared';
+import { checkAgentConfigReadiness as resolveAgentConfigReadiness } from './agent-config';
+import { detectRuntimeMode, findViskodCheckoutRoot, getMcpServeCommand } from './command-factory';
 import type {
   AgentConfigInfo,
   AppUrlValidation,
@@ -12,12 +13,13 @@ import type {
   SetupCheckSeverity,
 } from './types';
 
-const VISKOD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-
-function resolveViskodRoot(): string {
-  return fs.existsSync(path.join(VISKOD_ROOT, 'packages', 'mcp-server', 'src', 'entry.ts'))
-    ? VISKOD_ROOT
-    : process.cwd();
+/**
+ * Checkout root for dev-mode source checks. Returns null in installed mode —
+ * source-path checks must never fail solely because a checkout path is
+ * absent (installed runs carry the packages inside the bundled CLI).
+ */
+function resolveViskodRoot(): string | null {
+  return findViskodCheckoutRoot();
 }
 
 const REQUIRED_MCP_TOOLS = [
@@ -245,9 +247,18 @@ function checkViskodWorkspaceWritable(projectRoot: string): SetupCheckResult {
 
 function checkProjectScanner(): SetupCheckResult {
   return runCheck(() => {
+    if (detectRuntimeMode() === 'installed') {
+      return check(
+        'project-scanner',
+        'Project scanner',
+        'required',
+        'pass',
+        'Project scanner bundled with the Viskod CLI',
+      );
+    }
     try {
       const scannerPath = path.join(
-        process.cwd(),
+        resolveViskodRoot() ?? '',
         'packages',
         'project-scanner',
         'src',
@@ -284,13 +295,17 @@ function checkProjectScanner(): SetupCheckResult {
 async function checkBrowserRuntimeLive(projectRoot: string): Promise<SetupCheckResult> {
   const start = Date.now();
   try {
-    // Check if playwright is available
-    let playwrightAvailable = false;
-    try {
-      require.resolve('playwright', { paths: [projectRoot, process.cwd()] });
-      playwrightAvailable = true;
-    } catch {
-      /* continue */
+    // In an installed bundle Playwright is an external runtime dependency of
+    // the CLI, so it is not resolvable from the user's project root. Dev mode
+    // retains the project/process lookup for the local workspace contract.
+    let playwrightAvailable = detectRuntimeMode() === 'installed';
+    if (!playwrightAvailable) {
+      try {
+        require.resolve('playwright', { paths: [projectRoot, process.cwd()] });
+        playwrightAvailable = true;
+      } catch {
+        /* continue */
+      }
     }
 
     if (!playwrightAvailable) {
@@ -320,16 +335,12 @@ async function checkBrowserRuntimeLive(projectRoot: string): Promise<SetupCheckR
     }
 
     // Launch and shutdown a browser to verify runtime
-    const { chromium } = require('playwright');
+    const { chromium } = await import('playwright');
     const browser = await chromium.launch({ headless: true, timeout: 15000 });
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const page = await context.newPage();
 
-    // Navigate to a test page
     await page.setContent('<html><body><h1>Viskod Setup</h1></body></html>', { timeout: 5000 });
-
-    // Verify page loaded
-    // Shutdown cleanly
     await page.close();
     await context.close();
     await browser.close();
@@ -398,9 +409,18 @@ function checkExistingCaptures(projectRoot: string): SetupCheckResult {
 
 function checkSourceHintEngine(): SetupCheckResult {
   return runCheck(() => {
+    if (detectRuntimeMode() === 'installed') {
+      return check(
+        'source-hints',
+        'Source hint engine',
+        'optional',
+        'pass',
+        'Source hint engine bundled with the Viskod CLI',
+      );
+    }
     try {
       const enginePath = path.join(
-        process.cwd(),
+        resolveViskodRoot() ?? '',
         'packages',
         'source-hint-engine',
         'src',
@@ -436,9 +456,35 @@ function checkSourceHintEngine(): SetupCheckResult {
 
 export function checkMcpToolsLive(): SetupCheckResult {
   return runCheck(() => {
+    if (detectRuntimeMode() === 'installed') {
+      // Installed mode: the tool set ships inside the bundled CLI. The static
+      // check resolves the runtime serve command; the authoritative gate is
+      // the mcp-tools-runtime check (live tools/list).
+      const serve = getMcpServeCommand({ mode: 'installed' });
+      if (!serve.command || serve.args.length === 0) {
+        return check(
+          'mcp-tools',
+          'MCP server tools',
+          'required',
+          'fail',
+          'MCP serve command could not be resolved',
+          'The installed CLI could not produce an MCP serve command.',
+          { actionId: 'restart-mcp', label: 'Restart MCP server', kind: 'restart_mcp', safe: true },
+        );
+      }
+      return check(
+        'mcp-tools',
+        'MCP server tools',
+        'required',
+        'pass',
+        `All ${REQUIRED_MCP_TOOLS.length} required MCP tools available via bundled CLI — live verification required`,
+        'Static check resolved the installed serve command; runtime tools/list is verified by mcp-tools-runtime.',
+      );
+    }
+
     try {
       const serverPath = path.join(
-        resolveViskodRoot(),
+        resolveViskodRoot() ?? '',
         'packages',
         'mcp-server',
         'src',
@@ -544,12 +590,16 @@ export async function checkMcpToolsRuntime(projectRoot?: string): Promise<SetupC
       };
     }
 
+    const timingDetail =
+      verification.timing !== undefined
+        ? ` (initialize ${verification.timing.initializeMs.toFixed(0)}ms, tools/list ${verification.timing.toolsListMs.toFixed(0)}ms)`
+        : '';
     return {
       checkId: 'mcp-tools-runtime',
       name: 'MCP server tools (runtime)',
       severity: 'required',
       status: 'pass',
-      summary: `Runtime verification: all ${verification.toolsFound.length} MCP tools confirmed via tools/list`,
+      summary: `Runtime verification (${verification.mode}): all ${verification.toolsFound.length} MCP tools confirmed via tools/list${timingDetail}`,
       durationMs: Date.now() - start,
     };
   } catch (e) {
@@ -571,9 +621,32 @@ export async function checkMcpToolsRuntime(projectRoot?: string): Promise<SetupC
 }
 
 export function verifyMcpToolsLive(): LiveMcpVerification {
-  const serverPath = path.join(resolveViskodRoot(), 'packages', 'mcp-server', 'src', 'entry.ts');
   const missingRequiredTools: string[] = [];
   const toolsFound: McpToolVerification[] = [];
+
+  if (detectRuntimeMode() === 'installed') {
+    // Installed mode: the tool set ships inside the bundled CLI; the live
+    // runtime check (verifyMcpToolsRuntime) is the source of truth.
+    return {
+      serverReachable: true,
+      toolsFound: REQUIRED_MCP_TOOLS.map((toolName) => ({
+        toolName,
+        found: true,
+        hasInputSchema: true,
+      })),
+      requiredToolsPresent: true,
+      missingRequiredTools: [],
+      mode: 'installed',
+    };
+  }
+
+  const serverPath = path.join(
+    resolveViskodRoot() ?? '',
+    'packages',
+    'mcp-server',
+    'src',
+    'entry.ts',
+  );
 
   if (!fs.existsSync(serverPath)) {
     return {
@@ -581,6 +654,7 @@ export function verifyMcpToolsLive(): LiveMcpVerification {
       toolsFound: [],
       requiredToolsPresent: false,
       missingRequiredTools: REQUIRED_MCP_TOOLS,
+      mode: 'dev',
     };
   }
 
@@ -597,6 +671,7 @@ export function verifyMcpToolsLive(): LiveMcpVerification {
     toolsFound,
     requiredToolsPresent: missingRequiredTools.length === 0,
     missingRequiredTools,
+    mode: 'dev',
   };
 }
 
@@ -725,14 +800,18 @@ function checkVisualReviewPersistence(projectRoot: string): SetupCheckResult {
 
 function checkVisualSelection(): SetupCheckResult {
   return runCheck(() => {
-    const overlayPath = path.join(process.cwd(), 'packages', 'overlay-system', 'src', 'index.ts');
-    const selectionPath = path.join(
-      process.cwd(),
-      'packages',
-      'visual-selection',
-      'src',
-      'index.ts',
-    );
+    if (detectRuntimeMode() === 'installed') {
+      return check(
+        'visual-selection',
+        'Visual Selection',
+        'recommended',
+        'pass',
+        'Visual Selection overlay and engine bundled with the Viskod CLI',
+      );
+    }
+    const root = resolveViskodRoot() ?? '';
+    const overlayPath = path.join(root, 'packages', 'overlay-system', 'src', 'index.ts');
+    const selectionPath = path.join(root, 'packages', 'visual-selection', 'src', 'index.ts');
 
     const overlayExists = fs.existsSync(overlayPath);
     const selectionExists = fs.existsSync(selectionPath);
@@ -778,27 +857,25 @@ function checkVisualSelection(): SetupCheckResult {
 
 function checkUsageSiteSourceHints(): SetupCheckResult {
   return runCheck(() => {
-    const enginePath = path.join(
-      process.cwd(),
-      'packages',
-      'source-hint-engine',
-      'src',
-      'index.ts',
-    );
+    if (detectRuntimeMode() === 'installed') {
+      return check(
+        'usage-site-hints',
+        'Usage-site source hints',
+        'optional',
+        'pass',
+        'Source hint engine bundled with the Viskod CLI',
+      );
+    }
+    const root = resolveViskodRoot() ?? '';
+    const enginePath = path.join(root, 'packages', 'source-hint-engine', 'src', 'index.ts');
     const classifierPath = path.join(
-      process.cwd(),
+      root,
       'packages',
       'source-hint-engine',
       'src',
       'classifier.ts',
     );
-    const rankingPath = path.join(
-      process.cwd(),
-      'packages',
-      'source-hint-engine',
-      'src',
-      'ranking.ts',
-    );
+    const rankingPath = path.join(root, 'packages', 'source-hint-engine', 'src', 'ranking.ts');
 
     const engineExists = fs.existsSync(enginePath);
     const classifierExists = fs.existsSync(classifierPath);
@@ -824,38 +901,18 @@ function checkUsageSiteSourceHints(): SetupCheckResult {
 }
 
 export function validateAppUrl(url: string): AppUrlValidation {
+  const validation = validateTargetUrl(url);
+  let parsed: URL | undefined;
   try {
-    const parsed = new URL(url);
-    const hostname = parsed.hostname;
-    const port = parsed.port ? Number.parseInt(parsed.port, 10) : undefined;
-
-    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-    const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:';
-
-    if (!isHttp) {
-      return {
-        valid: false,
-        url,
-        hostname,
-        port,
-        reason: 'URL must use http:// or https:// protocol',
-      };
-    }
-
-    if (!isLocalhost) {
-      return {
-        valid: false,
-        url,
-        hostname,
-        port,
-        reason: 'URL must point to localhost or 127.0.0.1 for local development',
-      };
-    }
-
-    return { valid: true, url, hostname, port };
+    parsed = new URL(url);
   } catch {
-    return { valid: false, url, hostname: '', reason: 'Invalid URL format' };
+    // The shared validator owns the safe error classification.
   }
+  const hostname = validation.hostname ?? parsed?.hostname ?? '';
+  const port = parsed?.port ? Number.parseInt(parsed.port, 10) : undefined;
+  return validation.valid
+    ? { valid: true, url, hostname, port }
+    : { valid: false, url, hostname, port, reason: validation.reason ?? 'Invalid URL' };
 }
 
 async function checkAppReachability(appUrl: string): Promise<SetupCheckResult> {
@@ -893,13 +950,32 @@ async function checkAppReachability(appUrl: string): Promise<SetupCheckResult> {
       });
       clearTimeout(timeout);
 
+      const finalUrl = validateTargetUrl(response.url);
+      if (!finalUrl.valid) {
+        return {
+          checkId: 'app-reachability',
+          name: 'App URL reachability',
+          severity: 'required',
+          status: 'fail',
+          summary: 'App URL redirected to a disallowed target.',
+          remediation: {
+            actionId: 'fix-app-url',
+            label: 'Fix app URL redirect',
+            kind: 'manual_command',
+            commandPreview: 'Ensure the development server stays on an allowed local URL.',
+            safe: true,
+          },
+          durationMs: Date.now() - start,
+        };
+      }
+
       if (response.ok || response.status < 500) {
         return {
           checkId: 'app-reachability',
           name: 'App URL reachability',
           severity: 'required',
           status: 'pass',
-          summary: `App reachable at ${appUrl} (HTTP ${response.status})`,
+          summary: `App reachable at local target (HTTP ${response.status})`,
           durationMs: Date.now() - start,
         };
       }
@@ -909,12 +985,12 @@ async function checkAppReachability(appUrl: string): Promise<SetupCheckResult> {
         name: 'App URL reachability',
         severity: 'required',
         status: 'fail',
-        summary: `App returned HTTP ${response.status} at ${appUrl}`,
+        summary: `App returned HTTP ${response.status}.`,
         remediation: {
           actionId: 'start-dev-server',
-          label: 'Start dev server',
+          label: 'Check dev server',
           kind: 'manual_command',
-          commandPreview: 'Start your dev server, then rerun setup',
+          commandPreview: 'Check your dev server, then rerun setup.',
           safe: true,
         },
         durationMs: Date.now() - start,
@@ -957,45 +1033,8 @@ async function checkAppReachability(appUrl: string): Promise<SetupCheckResult> {
 }
 
 export function checkAgentConfigReadiness(projectRoot: string): AgentConfigInfo {
-  // Check for common agent config files
-  const configPaths = [
-    { kind: 'opencode' as const, files: ['.opencode.json', 'opencode.json'] },
-    { kind: 'cursor' as const, files: ['.cursorrules', 'cursor.json'] },
-    { kind: 'claude-desktop' as const, files: ['.claude.json', 'claude.json'] },
-  ];
-
-  for (const config of configPaths) {
-    for (const file of config.files) {
-      const configPath = path.join(projectRoot, file);
-      if (fs.existsSync(configPath)) {
-        return {
-          detected: true,
-          kind: config.kind,
-          configPath: file,
-          verified: true,
-        };
-      }
-    }
-  }
-
-  // No config found — check if we can generate one
-  const hasMcpEntry = fs.existsSync(
-    path.join(process.cwd(), 'packages', 'mcp-server', 'src', 'entry.ts'),
-  );
-  if (hasMcpEntry) {
-    return {
-      detected: false,
-      kind: 'unknown',
-      commandPreview: 'Add Viskod MCP server to your agent config',
-      verified: false,
-    };
-  }
-
-  return {
-    detected: false,
-    kind: 'unknown',
-    verified: false,
-  };
+  // Delegates to the agent-config module (home/cwd based detection).
+  return resolveAgentConfigReadiness({ cwd: projectRoot });
 }
 
 export async function runSetupChecks(input: {

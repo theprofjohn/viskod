@@ -120,16 +120,20 @@ describe('User Flow: Issue → Review fix → Decision', () => {
     expect(start.reviewId).toMatch(/^review_/);
     expect(start.status).toBe('ready');
 
-    const preview = await ux.getPreview(start.reviewId!);
+    const reviewId = start.reviewId;
+    expect(reviewId).toBeTruthy();
+    if (!reviewId) return;
+
+    const preview = await ux.getPreview(reviewId);
     expect(preview).not.toBeNull();
-    expect(preview?.reviewId).toBe(start.reviewId);
+    expect(preview?.reviewId).toBe(reviewId);
     expect(preview?.before.targetSummary.label).toBe('Save changes');
     expect(preview?.status).toBe('ready');
 
-    const accepted = await ux.acceptReview(start.reviewId!);
+    const accepted = await ux.acceptReview(reviewId);
     expect(accepted).toBe(true);
 
-    const afterDecision = await ux.getPreview(start.reviewId!);
+    const afterDecision = await ux.getPreview(reviewId);
     expect(afterDecision?.status).toBe('accepted');
     expect(afterDecision?.decision).toBeDefined();
     expect(afterDecision?.decision?.decision).toBe('accepted');

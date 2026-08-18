@@ -18,6 +18,7 @@ export interface VisualIssueEvent {
     | 'selection_refreshed'
     | 'archived'
     | 'reopened'
+    | 'forked'
     | 'deleted';
   createdAt: string;
   actor: 'local-user' | 'system';
@@ -56,6 +57,11 @@ export interface VisualIssue {
   schemaVersion: 1;
   issueId: string;
   projectId?: string;
+  /** Parent issue for an explicit fork; absent for root issues. */
+  parentIssueId?: string;
+  /** Stable root lineage id. Root issues point to themselves. */
+  rootIssueId?: string;
+  forkedAt?: string;
   sessionId: string;
   pageId: string;
   createdAt: string;
@@ -66,6 +72,7 @@ export interface VisualIssue {
   severity: VisualIssueSeverity;
   title: string;
   description?: string;
+  expectedResult?: string;
   source: {
     createdFrom: 'visual-selection';
     selectionId: string;

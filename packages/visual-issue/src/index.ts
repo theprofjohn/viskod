@@ -28,6 +28,7 @@ export {
   makeReopenEvent,
   makeDeleteEvent,
   makeCreatedEvent,
+  makeForkEvent,
 } from './lifecycle';
 
 export { createIssueIntegration } from './integration';

@@ -68,12 +68,15 @@ describe('resolveUsageSiteHints', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.topHints.length).toBeGreaterThan(0);
-      const topHint = result.value.topHints[0]!;
-      expect(topHint.schemaVersion).toBe(1);
-      expect(topHint.kind).toBeTruthy();
-      expect(topHint.ranking).toBeDefined();
-      expect(topHint.ranking.score).toBeGreaterThanOrEqual(0);
-      expect(topHint.ranking.rank).toBe(1);
+      const topHint = result.value.topHints[0];
+      expect(topHint).toBeDefined();
+      if (topHint) {
+        expect(topHint.schemaVersion).toBe(1);
+        expect(topHint.kind).toBeTruthy();
+        expect(topHint.ranking).toBeDefined();
+        expect(topHint.ranking.score).toBeGreaterThanOrEqual(0);
+        expect(topHint.ranking.rank).toBe(1);
+      }
     }
 
     rmSync(tmpDir, { recursive: true, force: true });

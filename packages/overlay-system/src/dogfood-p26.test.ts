@@ -168,10 +168,14 @@ describe('Phase 26 Dogfood — First-Run Setup', () => {
       expect(result.value.packetId).toBeTruthy();
       expect(result.value.packetId?.length).toBeGreaterThan(0);
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-      expect(uuidPattern.test(result.value.packetId!)).toBe(true);
+      const packetId = result.value.packetId;
+      expect(packetId).toBeTruthy();
+      if (packetId) {
+        expect(uuidPattern.test(packetId)).toBe(true);
+      }
 
       // Truncated/opaque form for display
-      const truncated = `${result.value.packetId?.slice(0, 8)}…`;
+      const truncated = `${packetId?.slice(0, 8)}…`;
       console.log(
         `  DF26-07: packetId=${result.value.packetId} (opaque UUID from VCE generatePacket)`,
       );
@@ -385,20 +389,33 @@ describe('Phase 26 Dogfood — First-Run Setup', () => {
     }
   }, 60000);
 
-  it('DF26-19: real first capture smoke against local app URL', async () => {
-    // Use a data URI as a lightweight test (no server needed)
-    const result = await runSmoke({
-      projectRoot: TARGET_DIR,
-      url: 'data:text/html,<html><body><h1>Smoke Test</h1></body></html>',
-    });
+  it('DF26-19: real first capture smoke without unsafe URL fallback', async () => {
+    // The smoke still runs the real VCE pipeline (browser launch →
+    // generatePacket → stop). It intentionally omits a target URL: data:
+    // navigation is forbidden by the production target policy.
+    const result = await runSmoke({ projectRoot: TARGET_DIR });
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.packetId).toBeTruthy();
-      // Verify packetId is opaque UUID
-      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-      expect(uuidPattern.test(result.value.packetId!)).toBe(true);
-      console.log(`  DF26-19: capture smoke — packetId=${result.value.packetId} (opaque UUID)`);
+    if (!result.ok) {
+      // err Result: the smoke itself threw — a real regression.
+      throw new Error(`runSmoke failed: ${result.error.message}`);
     }
+
+    // Real capture success contract:
+    //  - smoke status = pass
+    //  - packetId exists and is a valid opaque UUID
+    //  - browser/runtime shutdown completed (no stop/start failure warnings)
+    expect(result.value.status).toBe('pass');
+    expect(result.value.packetId).toBeTruthy();
+    const packetId = result.value.packetId;
+    if (packetId === undefined) {
+      throw new Error('capture smoke passed without a packetId');
+    }
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    expect(uuidPattern.test(packetId)).toBe(true);
+    expect(result.value.warnings.join('\n')).not.toMatch(/Browser stop/);
+    expect(result.value.warnings.join('\n')).not.toMatch(/Browser start failed/);
+    expect(result.value.warnings.join('\n')).not.toMatch(/Capture failed/);
+    console.log(`  DF26-19: capture smoke — packetId=${packetId} (opaque UUID from VCE)`);
   }, 120000);
 
   it('DF26-20: no packet paths/raw JSON/selectors in setup output', async () => {

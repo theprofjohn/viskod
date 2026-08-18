@@ -18,6 +18,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import * as net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,7 +69,14 @@ async function httpJson(url, options = {}) {
 }
 
 function spawnProc(cmd, args, cwd) {
-  const proc = spawn(cmd, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], shell: true });
+  const proc = spawn(cmd, args, {
+    cwd,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: true,
+    // Detached on POSIX makes the child a process-group leader so killTree
+    // can terminate the whole npx → tsx → node tree (no orphaned servers).
+    detached: process.platform !== 'win32',
+  });
   let stdout = '';
   let stderr = '';
   proc.stdout.on('data', (d) => {
@@ -82,11 +90,39 @@ function spawnProc(cmd, args, cwd) {
 
 function killTree(procState) {
   if (!procState?.proc || procState.proc.killed) return;
+  const pid = procState.proc.pid;
+  if (pid === undefined) return;
   try {
     if (process.platform === 'win32') {
-      spawnSync('taskkill', ['/PID', String(procState.proc.pid), '/T', '/F'], { stdio: 'ignore' });
-    } else {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+      return;
+    }
+    try {
+      process.kill(-pid, 'SIGTERM');
+    } catch {
       procState.proc.kill('SIGTERM');
+    }
+  } catch {
+    /* already gone */
+  }
+}
+
+// SIGKILL escalation: some children (MCP serve after a Playwright launch)
+// swallow SIGTERM. Called after the SIGTERM grace period in the finally
+// block so no child survives teardown.
+function killTreeHard(procState) {
+  if (!procState?.proc) return;
+  const pid = procState.proc.pid;
+  if (pid === undefined) return;
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+      return;
+    }
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      procState.proc.kill('SIGKILL');
     }
   } catch {
     /* already gone */
@@ -156,6 +192,61 @@ if (existsSync(FIXTURE_HTML)) {
   writeFileSync(FIXTURE_HTML_BROKEN, staleHtml, 'utf-8');
   writeFileSync(FIXTURE_HTML, staleHtml, 'utf-8');
   console.log('Fixture description set to stale copy');
+}
+
+// Port ownership contract: this smoke NEVER terminates an unknown process.
+// Before starting, it probes the required ports; if any is occupied by a
+// process this invocation did not create, it fails with a controlled
+// PORT_IN_USE error and leaves the owner untouched. Only children spawned by
+// THIS invocation are killed (killTree on teardown).
+function probePort(port) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let done = false;
+    const finish = (inUse) => {
+      if (done) return;
+      done = true;
+      socket.destroy();
+      resolve(inUse);
+    };
+    socket.setTimeout(1000);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+    socket.connect(port, '127.0.0.1');
+  });
+}
+
+async function assertPortsFree() {
+  const required = [
+    { port: 3000, label: 'fixture server (examples/phase12-source-hint-app)' },
+    { port: 3001, label: 'Studio server' },
+  ];
+  for (const { port, label } of required) {
+    const inUse = await probePort(port);
+    if (inUse) {
+      throw new Error(
+        `PORT_IN_USE: port ${port} is already occupied by another process (${label}). The smoke test never kills unknown processes. Stop the process listening on port ${port} (or choose a free machine) and rerun the smoke.`,
+      );
+    }
+  }
+}
+
+// Port ownership: probe first; fail with PORT_IN_USE if occupied by an
+// unknown process. Never kill a port owner. Spawning happens only after
+// both required ports are free, so every child is owned by this invocation.
+try {
+  await assertPortsFree();
+} catch (e) {
+  console.error(`\nSMOKE FAILED: ${e.message}`);
+  if (htmlBackup) writeFileSync(FIXTURE_HTML, htmlBackup, 'utf-8');
+  try {
+    if (existsSync(FIXTURE_HTML_BROKEN)) rmSync(FIXTURE_HTML_BROKEN, { force: true });
+  } catch {}
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {}
+  process.exit(1);
 }
 
 const fixtureProc = spawnProc('node', ['examples/phase12-source-hint-app/server.cjs'], ROOT);
@@ -461,5 +552,10 @@ try {
   killTree(studioProc);
   killTree(fixtureProc);
   await sleep(1000);
+  // SIGKILL escalation after the SIGTERM grace period: guarantees the tree
+  // dies even when a child (e.g. MCP serve after Playwright launch)
+  // swallows SIGTERM.
+  killTreeHard(studioProc);
+  killTreeHard(fixtureProc);
   process.exit(exitCode);
 }

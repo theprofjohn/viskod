@@ -356,7 +356,11 @@ describe('Persistence', () => {
     expect(listResult.ok).toBe(true);
     if (listResult.ok) {
       expect(listResult.value.length).toBe(2);
-      expect(listResult.value[0]!.createdAt >= listResult.value[1]!.createdAt).toBe(true);
+      const first = listResult.value[0];
+      const second = listResult.value[1];
+      if (first && second) {
+        expect(first.createdAt >= second.createdAt).toBe(true);
+      }
     }
   });
 });
@@ -930,5 +934,23 @@ describe('Lifecycle Events', () => {
     expect(evt.type).toBe('created');
     expect(evt.actor).toBe('system');
     expect(evt.createdAt).toBeTruthy();
+  });
+});
+
+describe('Fork lineage', () => {
+  it('creates an independent child with durable parent and root lineage', async () => {
+    const svc = makeService();
+    const parentResult = await svc.createIssue(makeSelection(), TEST_SESSION_ID, TEST_PAGE_ID);
+    expect(parentResult.ok).toBe(true);
+    if (!parentResult.ok) return;
+    const childResult = await svc.forkIssue?.(parentResult.value.issueId);
+    expect(childResult?.ok).toBe(true);
+    if (!childResult?.ok) return;
+    expect(childResult.value.issueId).not.toBe(parentResult.value.issueId);
+    expect(childResult.value.parentIssueId).toBe(parentResult.value.issueId);
+    expect(childResult.value.rootIssueId).toBe(parentResult.value.issueId);
+    expect(childResult.value.status).toBe('open');
+    const reloaded = await svc.getIssue(childResult.value.issueId);
+    expect(reloaded.ok).toBe(true);
   });
 });

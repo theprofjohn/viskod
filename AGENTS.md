@@ -88,7 +88,6 @@ The `pnpm check` gate runs local dogfood tests. For a CI-equivalent run that avo
 
 - Use Node.js `>=22` and pnpm `9.15.0` (the repository declares `pnpm@9.15.0`). Use `tsx` for source CLI execution; use esbuild output for the distributed CLI.
 - Playwright is the production browser runtime. Install Chromium through the CLI package lifecycle or run the appropriate Playwright install when developing browser workflows.
-- Gortex is a development-time repository intelligence tool only. Viskod runtime code must never depend on it.
 - Keep execution local-first: bind services to `127.0.0.1`, do not add telemetry/cloud dependencies, and redact sensitive values before they reach agents or persisted user-facing state.
 - `@viskod/cli` is the publishable package. Its bundle targets Node 22 ESM and externalizes Playwright; other workspace packages are internal implementation packages.
 

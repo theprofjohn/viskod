@@ -222,13 +222,12 @@ Invisible elements should still be represented when explicitly selected.
 
 # Shadow DOM
 
-The engine should correctly traverse:
-
-* open shadow roots
-* nested shadow trees
-* distributed nodes
-
-Closed shadow roots should be treated according to browser capabilities.
+The current Viskod selection path is document-root scoped. It does not
+traverse application Shadow DOM, including open or nested shadow roots.
+Selecting a visible open or closed shadow tree target therefore resolves to
+the host boundary when the overlay can emit a target; inner content is not
+claimed as selected or captured. Closed roots remain inaccessible by browser
+design.
 
 ---
 
@@ -276,13 +275,11 @@ Invalid selections should be rejected before capture proceeds.
 
 # Cross-Frame Support
 
-Future versions may support:
-
-* same-origin iframes
-* nested frames
-* embedded applications
-
-Cross-origin restrictions should always be respected.
+The current Viskod overlay and selector-resolution path does not traverse
+same-origin or cross-origin iframe contents. Same-origin child documents are
+separate browser documents; cross-origin contents are additionally protected
+by the browser. The top-level iframe may be observed as a boundary, or the
+inner target may be unavailable. No inner-frame capture is claimed.
 
 ---
 

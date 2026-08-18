@@ -603,7 +603,11 @@ describe('List reviews', () => {
     if (list.ok) {
       expect(list.value.length).toBeGreaterThan(0);
       for (let i = 1; i < list.value.length; i++) {
-        expect(list.value[i - 1]!.updatedAt >= list.value[i]!.updatedAt).toBe(true);
+        const prev = list.value[i - 1];
+        const curr = list.value[i];
+        if (prev && curr) {
+          expect(prev.updatedAt >= curr.updatedAt).toBe(true);
+        }
       }
     }
   });

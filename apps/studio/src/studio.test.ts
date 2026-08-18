@@ -177,6 +177,27 @@ describe('Studio workflow HTTP surface', () => {
       expect(html).not.toContain('daemon-token');
     });
   });
+  it('accepts a body under the JSON limit and rejects oversized bodies early', async () => {
+    await withStudioServer(async (baseUrl) => {
+      const under = await fetch(`${baseUrl}/settings`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ value: 'x'.repeat(256 * 1024 - 32) }),
+      });
+      expect(under.status).toBe(200);
+
+      const over = await fetch(`${baseUrl}/settings`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ value: 'x'.repeat(256 * 1024) }),
+      });
+      expect(over.status).toBe(413);
+      expect(await over.json()).toEqual({
+        ok: false,
+        error: 'Request body exceeds the 256 KiB limit.',
+      });
+    });
+  });
 
   it('returns a sanitized workflow state with no internal fields', async () => {
     await withStudioServer(async (baseUrl) => {

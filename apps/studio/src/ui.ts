@@ -1,8 +1,30 @@
 import type { StudioWorkflowState } from './workflow';
 
+/**
+ * Phase 32: truthful first-run/setup status surfaced in Studio. Built from
+ * the persisted @viskod/setup state plus Studio's own live light-check
+ * facts. Never contains absolute paths — `projectName` is a display name
+ * only (basename or scanned project name), never the configured root path.
+ */
+export interface StudioSetupStatus {
+  status: 'never' | 'complete' | 'limited' | 'incomplete';
+  limitedReasons?: string[];
+  verifiedAt?: string;
+  setupVersion?: string;
+  sourceResolution?: 'ready' | 'unavailable' | 'invalid';
+  agentConfig?: { detected: boolean; kind?: string } | null;
+  browserVerified: boolean;
+  /** User-facing project display name for instructions; never an absolute path. */
+  projectName?: string;
+  /** Persisted state claims complete/limited but a live light check fails. */
+  stale: boolean;
+  staleReason?: string;
+}
+
 export interface StudioUiState extends StudioWorkflowState {
   browserConnected?: boolean;
   pageUrl?: string;
+  setup?: StudioSetupStatus;
 }
 
 function escapeHtml(value: string | undefined): string {
@@ -252,7 +274,7 @@ function screenHtml(state: StudioWorkflowState, browserConnected: boolean): stri
             <button id="selection-accept" class="primary" data-action="selection-accept" ${state.selection ? '' : 'disabled'}>Continue</button>
             <button class="secondary" data-action="cancel">Cancel</button>
           </div>
-          ${state.error ? `<p class="warning">${escapeHtml(state.error)}</p>` : ''}
+          ${state.error ? `<p class="warning" role="alert" tabindex="-1">${escapeHtml(state.error)}</p>` : ''}
           ${disconnected ? `<p class="warning">${disconnected}</p>` : ''}
         </section>`;
 
@@ -281,7 +303,7 @@ function screenHtml(state: StudioWorkflowState, browserConnected: boolean): stri
             <button class="secondary" data-action="reselect">Reselect</button>
             <button class="secondary" data-action="cancel">Cancel</button>
           </div>
-          ${state.error ? `<p class="warning">${escapeHtml(state.error)}</p>` : ''}
+          ${state.error ? `<p class="warning" role="alert" tabindex="-1">${escapeHtml(state.error)}</p>` : ''}
           ${disconnected ? `<p class="warning">${disconnected}</p>` : ''}
         </section>`;
 
@@ -300,7 +322,7 @@ function screenHtml(state: StudioWorkflowState, browserConnected: boolean): stri
           ${visualReviewBannerHtml(state)}
           ${sourceStatusHtml(state)}
           ${handoff && handoff.whatAgentReceives.length > 0 ? `<ul class="receives">${handoff.whatAgentReceives.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>` : ''}
-          ${state.error ? `<p class="warning">${escapeHtml(state.error)}</p>` : ''}
+          ${state.error ? `<p class="warning" role="alert" tabindex="-1">${escapeHtml(state.error)}</p>` : ''}
           <button class="primary" data-action="verify-start">Verify fix</button>
           ${disconnected ? `<p class="warning">${disconnected}</p>` : ''}
         </section>`;
@@ -312,7 +334,7 @@ function screenHtml(state: StudioWorkflowState, browserConnected: boolean): stri
           <h2>Verify fix</h2>
           <p class="hint">Reloading the page and recapturing the selected element…</p>
           ${visualReviewBannerHtml(state)}
-          ${state.error ? `<p class="warning">${escapeHtml(state.error)}</p>` : ''}
+          ${state.error ? `<p class="warning" role="alert" tabindex="-1">${escapeHtml(state.error)}</p>` : ''}
           <button class="primary" data-action="verify-recapture">Verify the fix now</button>
           ${disconnected ? `<p class="warning">${disconnected}</p>` : ''}
         </section>`;
@@ -322,7 +344,7 @@ function screenHtml(state: StudioWorkflowState, browserConnected: boolean): stri
         <section class="screen" data-stage="review_ready">
           <h2>Verify fix</h2>
           <div class="comparison-status">${escapeHtml(comparisonMessage(state))}</div>
-          ${state.error ? `<p class="warning">${escapeHtml(state.error)}</p>` : ''}
+          ${state.error ? `<p class="warning" role="alert" tabindex="-1">${escapeHtml(state.error)}</p>` : ''}
           ${state.review?.comparison?.warnings?.length ? `<p class="warning">${state.review.comparison.warnings.map(escapeHtml).join(' ')}</p>` : ''}
           ${reviewVisualPanelHtml(state)}
           ${evidenceDetailsHtml(state)}
@@ -393,6 +415,11 @@ export function renderStudioHtml(): string {
   .screen h2 { margin: 0 0 12px; font-size: 18px; }
   .hint { color: #667; font-size: 14px; }
   .warning { background: #fff4e5; border: 1px solid #f0c36d; color: #7a4d00; border-radius: 6px; padding: 8px 12px; font-size: 13px; }
+  .status-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .issue-history { margin-bottom: 14px; background: #fff; border: 1px solid #e2e4ea; border-radius: 10px; padding: 16px; }
+  .issue-history h2 { font-size: 16px; margin: 0 0 10px; }
+  .issue-entry { display: flex; justify-content: space-between; gap: 8px; align-items: center; border-top: 1px solid #eef0f4; padding: 8px 0; }
+  .issue-entry button { margin-top: 0; padding: 5px 9px; font-size: 12px; }
   .target-summary { background: #eef4ff; border-radius: 6px; padding: 10px 14px; margin: 12px 0; font-size: 14px; }
   .source-status { background: #f4f7fb; border: 1px solid #dde3ee; border-radius: 6px; padding: 10px 14px; margin: 12px 0; font-size: 13px; }
   .source-status ul { margin: 6px 0 0; padding-left: 18px; }
@@ -413,6 +440,12 @@ export function renderStudioHtml(): string {
   .evidence-details summary { cursor: pointer; font-weight: 600; }
   .policy-banner { background: #fff8ec; border: 1px solid #f0c36d; border-radius: 6px; padding: 10px 14px; margin: 12px 0; font-size: 13px; }
   .policy-banner p { margin: 0 0 4px; }
+  .setup-banner { border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; line-height: 1.5; }
+  .setup-banner code { background: rgba(0,0,0,0.07); border-radius: 3px; padding: 1px 5px; font-size: 12px; }
+  .setup-banner.setup-never, .setup-banner.setup-limited { background: #fff8ec; border: 1px solid #f0c36d; color: #7a4d00; }
+  .setup-banner.setup-complete { background: #eef7ee; border: 1px solid #b8d8b8; color: #1e5e1e; }
+  .setup-banner.setup-incomplete { background: #fdecec; border: 1px solid #e5a0a0; color: #7a1f1f; }
+  .setup-banner.setup-stale { background: #fdf3e3; border: 1px solid #e0a84c; color: #7a4d00; }
   .review-visual { margin: 14px 0; border: 1px solid #dde3ee; border-radius: 8px; padding: 12px; background: #fafbfd; }
   .review-visual[data-visual-status="changed"] { border-color: #f0c36d; background: #fffdf6; }
   .review-visual[data-visual-status="unchanged"] { border-color: #cfe3cf; background: #f7fbf7; }
@@ -425,14 +458,22 @@ export function renderStudioHtml(): string {
   .review-image-missing { border: 1px dashed #c9cdd6; border-radius: 6px; padding: 24px 8px; text-align: center; color: #889; font-size: 12px; }
   #decision-note { min-height: 52px; }
 </style>
-</head>
 <body>
 <header>
   <h1>Viskod Studio</h1>
   <span class="stage-pill" id="stage-pill">Report</span>
 </header>
-<main id="app">
-  <section class="screen"><p>Loading…</p></section>
+<main>
+  <div id="setup-banner"></div>
+  <div id="status-live" class="status-live" role="status" aria-live="polite"></div>
+  <section class="issue-history" aria-labelledby="issue-history-title">
+    <h2 id="issue-history-title">Issue history <button type="button" class="secondary" id="show-archived">Show archived</button></h2>
+    <div id="issue-history-list"><p class="hint">Loading issue history…</p></div>
+  </section>
+  <div id="issue-detail" class="issue-history" hidden></div>
+  <div id="app">
+    <section class="screen"><p>Loading…</p></section>
+  </div>
 </main>
 <script>
 (function () {
@@ -443,6 +484,11 @@ export function renderStudioHtml(): string {
   // so the user never loses their entered text (VISKOD-AUDIT-001 retry).
   var form = { problem: '', expected: '', severity: 'medium' };
   var pending = false;
+  // Phase 32: truthful first-run/setup status strip, updated from /state and
+  // WebSocket broadcasts. Never claims readiness the persisted state does not
+  // vouch for; stale (persisted complete/limited + failing light check) is
+  // shown as a runtime-check failure, never as green.
+  var setupStatus = null;
 
   function esc(value) {
     return String(value == null ? '' : value)
@@ -451,6 +497,53 @@ export function renderStudioHtml(): string {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+  var issueHistory = [];
+  var selectedIssueId = null;
+  var forkPending = false;
+
+  // Focus is restored only across routine renders when the same control still
+  // exists. Stage transitions intentionally move focus to the stage primary
+  // control; WebSocket/state broadcasts in the same stage must not interrupt
+  // typing or keyboard navigation.
+  var lastRenderedStage = null;
+
+  function announce(message) {
+    var live = document.getElementById('status-live');
+    if (live) live.textContent = message || '';
+  }
+
+  function renderIssueHistory() {
+    var list = document.getElementById('issue-history-list');
+    if (!list) return;
+    if (!issueHistory.length) {
+      list.innerHTML = '<p class="hint">No active issues.</p>';
+      return;
+    }
+    list.innerHTML = issueHistory.map(function (issue) {
+      var relation = issue.handoff ? 'handoff ' + issue.handoff.status : 'not handed off';
+      var lifecycleAction = issue.status === 'archived' ? 'reopen' : 'archive';
+      return '<div class="issue-entry">' +
+        '<span><strong>' + esc(issue.title) + '</strong><br><small>' + esc(issue.status) + ' · ' + esc(relation) + '</small></span>' +
+        '<span class="actions">' +
+        '<button type="button" class="secondary" data-issue-action="open" data-issue-id="' + esc(issue.issueId) + '" aria-label="Open issue ' + esc(issue.title) + '">Open</button>' +
+        '<button type="button" class="secondary" data-issue-action="' + lifecycleAction + '" data-issue-id="' + esc(issue.issueId) + '">' + lifecycleAction + '</button>' +
+        '<button type="button" class="secondary" data-issue-action="fork" data-issue-id="' + esc(issue.issueId) + '">Fork</button>' +
+        '</span></div>';
+    }).join('');
+  }
+
+  async function refreshIssueHistory(includeArchived) {
+    try {
+      var response = await fetch('/issues?limit=50' + (includeArchived ? '&archived=true' : ''));
+      var data = await response.json();
+      issueHistory = data.issues || [];
+      renderIssueHistory();
+    } catch (error) {
+      issueHistory = [];
+      renderIssueHistory();
+      announce('Issue history unavailable.');
+    }
   }
 
   function selectionSummary(state) {
@@ -566,9 +659,44 @@ export function renderStudioHtml(): string {
     return '<details class="evidence-details"><summary>Evidence details</summary><ul>' + rows.join('') + '</ul></details>';
   }
 
+  function setupBannerHtml(setup) {
+    if (!setup) return '';
+    if (setup.stale) {
+      return '<div class="setup-banner setup-stale" data-setup-status="stale"><strong>Configured, runtime check currently failing</strong> \u2014 ' + esc(setup.staleReason || 'Chromium missing') + '</div>';
+    }
+    if (setup.status === 'never') {
+      var cmd = setup.projectName ? 'viskod setup --project-root ' + setup.projectName : 'viskod setup --project-root <dir>';
+      return '<div class="setup-banner setup-never" data-setup-status="never"><strong>Setup has not been run.</strong> Run: <code>' + esc(cmd) + '</code></div>';
+    }
+    if (setup.status === 'complete') {
+      var verified = setup.verifiedAt ? ' (' + esc(new Date(setup.verifiedAt).toLocaleDateString()) + ')' : '';
+      return '<div class="setup-banner setup-complete" data-setup-status="complete"><strong>Setup complete</strong>' + verified + '</div>';
+    }
+    if (setup.status === 'limited') {
+      var reasons = (setup.limitedReasons || []).filter(Boolean);
+      var details = reasons.length > 0 ? ' \u2014 ' + reasons.map(esc).join('; ') : '';
+      return '<div class="setup-banner setup-limited" data-setup-status="limited"><strong>Limited setup</strong>' + details + '</div>';
+    }
+    if (setup.status === 'incomplete') {
+      return '<div class="setup-banner setup-incomplete" data-setup-status="incomplete"><strong>Setup incomplete</strong> \u2014 run <code>viskod setup</code> to complete setup.</div>';
+    }
+    return '';
+  }
+
+  function updateSetupBanner() {
+    var el = document.getElementById('setup-banner');
+    if (el) el.innerHTML = setupBannerHtml(setupStatus);
+  }
+
   function render(state, connected) {
+    var previousStage = lastRenderedStage;
+    var active = document.activeElement;
+    var activeId = active && active.id ? active.id : null;
+    var activeAction = active && active.getAttribute ? active.getAttribute('data-action') : null;
     current = state || { stage: 'idle', selection: null };
+    lastRenderedStage = current.stage;
     browserConnected = !!connected;
+
     var html = '';
     var disconnected = !browserConnected && state && state.stage !== 'idle' ? '<p class="warning">Browser disconnected \u2014 reconnect or reopen the app</p>' : '';
 
@@ -577,7 +705,7 @@ export function renderStudioHtml(): string {
         '<form id="open-app-form" data-action="open-app"><input id="app-url" type="url" placeholder="http://localhost:3000" aria-label="App URL" /><button type="submit" class="primary">Open app</button></form>' +
         (pageUrl ? '<p class="hint">Current app: ' + esc(pageUrl) + '</p>' : '<p class="hint">Start your local app, then open it here.</p>') +
         (pageUrl ? '<button id="report-start" class="primary" data-action="report-start">Report UI issue</button>' : '') +
-        (state.error ? '<p class="warning">' + esc(state.error) + '</p>' : '') + disconnected + '</section>';
+        (state.error ? '<p class="warning" role="alert" tabindex="-1">' + esc(state.error) + '</p>' : '') + disconnected + '</section>';
     } else if (state.stage === 'selecting') {
       html = '<section class="screen" data-stage="selecting"><h2>Report UI issue</h2>' +
         '<p class="hint">Hover over the problem and click it</p>' + policyBanner(state) + selectionSummary(state) +
@@ -585,7 +713,7 @@ export function renderStudioHtml(): string {
         '<button id="selection-accept" class="primary" data-action="selection-accept"' + (state.selection ? '' : ' disabled') + '>Continue</button>' +
         '<button class="secondary" data-action="cancel">Cancel</button>' +
         '</div>' +
-        (state.error ? '<p class="warning">' + esc(state.error) + '</p>' : '') + disconnected + '</section>';
+        (state.error ? '<p class="warning" role="alert" tabindex="-1">' + esc(state.error) + '</p>' : '') + disconnected + '</section>';
     } else if (state.stage === 'describe') {
       html = '<section class="screen" data-stage="describe"><h2>Describe the problem</h2>' + selectionSummary(state) + policyBanner(state) + sourceStatus(state) +
         '<form id="issue-form" data-action="prepare-handoff">' +
@@ -597,7 +725,7 @@ export function renderStudioHtml(): string {
         '<button class="secondary" data-action="reselect">Reselect</button>' +
         '<button class="secondary" data-action="cancel">Cancel</button>' +
         '</div>' +
-        (state.error ? '<p class="warning">' + esc(state.error) + '</p>' : '') + disconnected + '</section>';
+        (state.error ? '<p class="warning" role="alert" tabindex="-1">' + esc(state.error) + '</p>' : '') + disconnected + '</section>';
     } else if (state.stage === 'handoff_ready') {
       var prompt = state.handoff ? 'Fix the Viskod UI issue "' + state.handoff.title + '" (handoff ' + state.handoff.handoffId + '). Fetch the issue context through Viskod MCP.' : 'Viskod handoff ' + (state.handoffId || '') + ' is ready for your coding agent.';
       var receives = state.handoff && state.handoff.whatAgentReceives.length ? '<ul class="receives">' + state.handoff.whatAgentReceives.map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('') + '</ul>' : '';
@@ -606,18 +734,18 @@ export function renderStudioHtml(): string {
         '<input id="handoff-prompt" readonly value="' + esc(prompt) + '" aria-label="Agent prompt" />' +
         '<button class="secondary" data-action="copy-handoff">Copy</button>' +
         '<p class="hint">Handoff ID: ' + esc(state.handoffId || '') + '</p>' + policyBanner(state) + sourceStatus(state) + receives +
-        (state.error ? '<p class="warning">' + esc(state.error) + '</p>' : '') +
+        (state.error ? '<p class="warning" role="alert" tabindex="-1">' + esc(state.error) + '</p>' : '') +
         '<button class="primary" data-action="verify-start">Verify fix</button>' + disconnected + '</section>';
     } else if (state.stage === 'verifying') {
       html = '<section class="screen" data-stage="verifying"><h2>Verify fix</h2>' +
         '<p class="hint">Reloading the page and recapturing the selected element\u2026</p>' + policyBanner(state) +
-        (state.error ? '<p class="warning">' + esc(state.error) + '</p>' : '') +
+        (state.error ? '<p class="warning" role="alert" tabindex="-1">' + esc(state.error) + '</p>' : '') +
         '<button class="primary" data-action="verify-recapture">Verify the fix now</button>' + disconnected + '</section>';
     } else if (state.stage === 'review_ready') {
       var warnings = (state.review && state.review.comparison && state.review.comparison.warnings && state.review.comparison.warnings.length) ? '<p class="warning">' + state.review.comparison.warnings.map(esc).join(' ') + '</p>' : '';
       html = '<section class="screen" data-stage="review_ready"><h2>Verify fix</h2>' +
         '<div class="comparison-status">' + esc(comparisonMessage(state)) + '</div>' +
-        (state.error ? '<p class="warning">' + esc(state.error) + '</p>' : '') + warnings + reviewVisualPanel(state) + evidenceDetails(state) +
+        (state.error ? '<p class="warning" role="alert" tabindex="-1">' + esc(state.error) + '</p>' : '') + warnings + reviewVisualPanel(state) + evidenceDetails(state) +
         '<label for="decision-note">Decision note (optional)</label>' +
         '<textarea id="decision-note" placeholder="Why did you accept or reject this change?"></textarea>' +
         '<div class="actions">' +
@@ -654,11 +782,38 @@ export function renderStudioHtml(): string {
         submitBtn.textContent = pending ? 'Preparing…' : 'Prepare agent handoff';
       }
     }
+    var stageChanged = previousStage !== null && previousStage !== current.stage;
+    var focusSelector = current.error ? '.warning[role="alert"]' :
+      stageChanged ? (state.stage === 'describe' ? '#problem' :
+        state.stage === 'selecting' ? '#selection-accept' :
+        state.stage === 'handoff_ready' ? '[data-action="verify-start"]' :
+        state.stage === 'review_ready' ? '[data-action="decision-accepted"]' :
+        state.stage === 'decided' ? '[data-action="report-start"]' :
+        state.stage === 'idle' ? '#report-start, #app-url' : null) : null;
+    var focusTarget = focusSelector ? document.querySelector(focusSelector) : null;
+    if (!focusTarget && !stageChanged && !current.error) {
+      focusTarget = activeId ? document.getElementById(activeId) :
+        activeAction ? document.querySelector('[data-action="' + activeAction + '"]') : null;
+    }
+    if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+    if (stageChanged || current.error) announce(current.error || stageAnnouncement(current.stage));
   }
 
   function stageLabel(stage) {
     var labels = { idle: 'Report', selecting: 'Report', describe: 'Prepare for agent', handoff_ready: 'Prepare for agent', verifying: 'Verify', review_ready: 'Verify', decided: 'Verify' };
     return labels[stage] || 'Report';
+  }
+  function stageAnnouncement(stage) {
+    var messages = {
+      idle: 'Ready to report a UI issue.',
+      selecting: 'Select the target for this issue.',
+      describe: 'Target selected. Describe the problem.',
+      handoff_ready: 'Handoff ready. Verify the fix.',
+      verifying: 'Verification in progress.',
+      review_ready: 'Verification complete. Review the comparison.',
+      decided: 'Review decision saved.',
+    };
+    return messages[stage] || 'Studio state updated.';
   }
 
   async function post(url, body) {
@@ -673,11 +828,114 @@ export function renderStudioHtml(): string {
       var res = await fetch('/state');
       var state = await res.json();
       pageUrl = state.pageUrl || null;
+      setupStatus = state.setup || null;
+      updateSetupBanner();
       render(state.workflow, state.browserConnected);
     } catch (e) {
       render({ stage: 'idle', selection: null, error: 'Studio backend unavailable.' }, false);
     }
   }
+  async function showIssueDetail(issueId) {
+    var response = await fetch('/issues/' + encodeURIComponent(issueId));
+    var data = await response.json();
+    var detail = document.getElementById('issue-detail');
+    if (!response.ok || !detail) throw new Error('Issue detail unavailable.');
+    var issue = data.issue;
+    detail.hidden = false;
+    detail.innerHTML = '<h2 id="issue-detail-heading" tabindex="-1">Issue detail</h2>' +
+      '<p><strong>' + esc(issue.title) + '</strong> · ' + esc(issue.status) + '</p>' +
+      (issue.parentIssueId ? '<p class="hint">Forked from parent issue <button type="button" class="secondary" data-detail-action="open-parent" data-parent-issue-id="' + esc(issue.parentIssueId) + '">Open parent</button></p>' : '') +
+      '<label for="issue-edit-description">User intent</label>' +
+      '<textarea id="issue-edit-description">' + esc(issue.description || '') + '</textarea>' +
+      '<label for="issue-edit-expected">Expected result</label>' +
+      '<textarea id="issue-edit-expected">' + esc(issue.expectedResult || '') + '</textarea>' +
+      '<div class="actions">' +
+      '<button type="button" class="primary" data-detail-action="save">Save intent</button>' +
+      '<button type="button" class="secondary" data-detail-action="fork">Fork</button>' +
+      '<button type="button" class="secondary" data-detail-action="' + (issue.status === 'archived' ? 'reopen' : 'archive') + '">' + (issue.status === 'archived' ? 'Reopen' : 'Archive') + '</button>' +
+      '</div>';
+    var detailHeading = document.getElementById('issue-detail-heading');
+    if (detailHeading) detailHeading.focus();
+  }
+
+  document.getElementById('issue-detail').addEventListener('click', async function (event) {
+    var target = event.target;
+    var action = target && target.getAttribute ? target.getAttribute('data-detail-action') : null;
+    if (!action) return;
+    if (action === 'open-parent') {
+      selectedIssueId = target.getAttribute('data-parent-issue-id');
+      if (selectedIssueId) await showIssueDetail(selectedIssueId);
+      return;
+    }
+    if (!selectedIssueId) return;
+    try {
+      if (action === 'save') {
+        await post('/issues/' + encodeURIComponent(selectedIssueId) + '/edit', {
+          description: document.getElementById('issue-edit-description').value,
+          expectedResult: document.getElementById('issue-edit-expected').value,
+        });
+      } else if (action === 'fork') {
+        if (forkPending) return;
+        forkPending = true;
+        try {
+          await post('/issues/' + encodeURIComponent(selectedIssueId) + '/fork', { requestId: crypto.randomUUID() });
+        } finally {
+          forkPending = false;
+        }
+        announce('Child issue created.');
+      } else {
+        await post('/issues/' + encodeURIComponent(selectedIssueId) + '/' + action, {});
+        announce(action === 'archive' ? 'Issue archived.' : 'Issue reopened.');
+      }
+      await showIssueDetail(selectedIssueId);
+      await refreshIssueHistory(true);
+    } catch (error) {
+      announce('Issue action failed.');
+    }
+  });
+
+
+  document.getElementById('show-archived').addEventListener('click', function () {
+    refreshIssueHistory(true);
+    announce('Showing archived issues.');
+  });
+
+  document.getElementById('issue-history-list').addEventListener('click', async function (event) {
+    var target = event.target;
+    while (target && target !== document.body) {
+      if (target.getAttribute && target.getAttribute('data-issue-action')) break;
+      target = target.parentElement;
+    }
+    if (!target) return;
+    try {
+      selectedIssueId = target.getAttribute('data-issue-id');
+      var action = target.getAttribute('data-issue-action');
+      if (action === 'open') {
+        await showIssueDetail(selectedIssueId);
+        try {
+          await post('/issues/' + encodeURIComponent(selectedIssueId) + '/open', {});
+          await refresh();
+        } catch (error) {
+          announce('Issue loaded from durable history. Open the app to resume verification.');
+        }
+      } else if (action === 'fork') {
+        if (forkPending) return;
+        forkPending = true;
+        try {
+          await post('/issues/' + encodeURIComponent(selectedIssueId) + '/fork', { requestId: crypto.randomUUID() });
+        } finally {
+          forkPending = false;
+        }
+        announce('Child issue created.');
+      } else {
+        await post('/issues/' + encodeURIComponent(selectedIssueId) + '/' + action, {});
+        announce(action === 'archive' ? 'Issue archived.' : 'Issue reopened.');
+      }
+      await refreshIssueHistory(true);
+    } catch (error) {
+      announce('Issue action failed.');
+    }
+  });
 
   document.getElementById('app').addEventListener('click', async function (event) {
     var target = event.target;
@@ -767,6 +1025,21 @@ export function renderStudioHtml(): string {
     }
   });
 
+  document.addEventListener('keydown', async function (event) {
+    if (event.key !== 'Escape') return;
+    var stage = current && current.stage;
+    if (stage !== 'selecting') return;
+    event.preventDefault();
+    try {
+      await post('/workflow/cancel', {});
+      await refresh();
+      var reportStart = document.getElementById('report-start');
+      if (reportStart) reportStart.focus();
+      announce('Selection cancelled. Ready to report again.');
+    } catch (error) {
+      announce('Could not cancel selection. Try again.');
+    }
+  });
   var ws = null;
   function connect() {
     try {
@@ -776,6 +1049,10 @@ export function renderStudioHtml(): string {
           var msg = JSON.parse(event.data);
           if (msg.type === 'studio:state') {
             pageUrl = msg.state.pageUrl || pageUrl;
+            if (msg.state.setup) {
+              setupStatus = msg.state.setup;
+              updateSetupBanner();
+            }
             render(msg.state.workflow, msg.state.browserConnected);
           }
         } catch (e) {}
@@ -785,6 +1062,7 @@ export function renderStudioHtml(): string {
   }
   connect();
   refresh();
+  refreshIssueHistory(false);
 })();
 </script>
 </body>

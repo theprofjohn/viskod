@@ -31,9 +31,11 @@
     "access": "public"
   },
   "dependencies": {
-    "playwright": "^1.46.0"
+    "playwright": "^1.46.0",
+    "pngjs": "^7.0.0"
   },
   "devDependencies": {
+    "@viskod/setup": "workspace:*",
     "@viskod/shared": "workspace:*",
     "@viskod/event-bus": "workspace:*",
     "@viskod/browser-runtime": "workspace:*",

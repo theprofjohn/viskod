@@ -18,18 +18,61 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
-export function spawnProc(cmd: string, args: string[]): ChildProcess {
-  return spawn(cmd, args, { cwd: ROOT, stdio: 'pipe', shell: true });
+export function spawnProc(
+  cmd: string,
+  args: string[],
+  options: { cwd?: string } = {},
+): ChildProcess {
+  return spawn(cmd, args, {
+    cwd: options.cwd ?? ROOT,
+    stdio: 'pipe',
+    shell: true,
+    // Detached on POSIX makes the child a process-group leader, so killTree
+    // can terminate the whole npx → tsx → node tree. Without it, SIGTERM to
+    // the shell-spawned leader orphans the real servers (they keep their
+    // ports and collide with later test files).
+    detached: process.platform !== 'win32',
+  });
 }
 
+/**
+ * Terminates the process tree this test spawned: the whole process group on
+ * POSIX (SIGTERM, escalating to SIGKILL after a short grace), taskkill /T on
+ * Windows. Never touches processes the test did not create.
+ *
+ * Some children (e.g. an MCP serve process after a Playwright browser
+ * launch) install signal handlers that swallow SIGTERM; SIGKILL escalation
+ * guarantees the tree dies and no port/process leaks into later files.
+ */
 export function killTree(proc: ChildProcess | null): void {
-  if (!proc || proc.killed || proc.exitCode !== null) return;
+  if (!proc || proc.killed || proc.exitCode !== null || proc.signalCode !== null) return;
+  const pid = proc.pid;
+  if (pid === undefined) return;
   try {
     if (process.platform === 'win32') {
-      spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
-    } else {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+      return;
+    }
+    try {
+      process.kill(-pid, 'SIGTERM');
+    } catch {
       proc.kill('SIGTERM');
     }
+    // SIGKILL escalation after the SIGTERM grace period. The timer is kept
+    // referenced so it fires even if the test file finishes first (vitest
+    // workers stay alive between files); a process that died from SIGTERM
+    // makes this a harmless no-op.
+    setTimeout(() => {
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        try {
+          proc.kill('SIGKILL');
+        } catch {
+          /* already gone */
+        }
+      }
+    }, 700);
   } catch {
     /* already gone */
   }

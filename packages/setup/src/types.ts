@@ -11,6 +11,16 @@ export type WizardStep =
   | 'finish'
   | 'ready';
 
+/**
+ * v2 setup state machine. `complete` requires every full gate to pass;
+ * `limited` is only ever entered through explicit user consent; `incomplete`
+ * records a failed attempt (still persisted).
+ */
+export type SetupStateKind = 'complete' | 'limited' | 'incomplete';
+
+/** Per-capability verification outcome, recorded in `capabilityStatus`. */
+export type CapabilityStatus = 'verified' | 'unavailable' | 'failed' | 'skipped';
+
 export interface SetupRemediation {
   actionId: string;
   label: string;
@@ -91,8 +101,27 @@ export interface WizardState {
 }
 
 export interface FirstRunSetupState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   setupId: string;
+  /**
+   * v2 verdict: 'complete' (all gates pass), 'limited' (explicit consent
+   * only), or 'incomplete' (failed attempt, still persisted).
+   */
+  state: SetupStateKind;
+  /** True iff the user explicitly consented to a partial setup. */
+  limitedMode: boolean;
+  /** Capability names (never paths) explaining why setup is limited. */
+  limitedReasons: string[];
+  /** Viskod version that produced this state (default '0.0.0-dev'). */
+  setupVersion: string;
+  /** When the gates were last verified (complete/limited only). */
+  verifiedAt?: string;
+  /** Explicit configured project root (internal local config path). */
+  projectRoot?: string;
+  /** Source-resolution readiness derived from the configured root. */
+  sourceResolution: 'ready' | 'unavailable' | 'invalid';
+  /** Per-capability outcome; keys are capability ids. */
+  capabilityStatus: Record<string, CapabilityStatus>;
   project: {
     rootDisplayName: string;
     rootFingerprint: string;
@@ -109,6 +138,7 @@ export interface FirstRunSetupState {
   capabilities: SetupCapabilities;
   smoke?: SetupSmokeResult;
   agentConfig?: AgentConfigInfo;
+  /** Legacy compat: true iff state !== 'incomplete'. */
   completed: boolean;
   completedAt?: string;
   updatedAt: string;
@@ -147,6 +177,15 @@ export interface LiveMcpVerification {
   toolsFound: McpToolVerification[];
   requiredToolsPresent: boolean;
   missingRequiredTools: string[];
+  /** Runtime mode of the verified serve command. */
+  mode: 'installed' | 'dev';
+  /** Monotonic timings recorded by the runtime verification. */
+  timing?: {
+    spawnMs: number;
+    initializeMs: number;
+    toolsListMs: number;
+    totalMs: number;
+  };
 }
 
 export interface AppUrlValidation {

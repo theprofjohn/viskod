@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {}
+  },
+  "references": [],
+  "include": [
+    "src/index.ts",
+    "src/ui.ts",
+    "src/workflow.ts",
+    "src/studio.test.ts",
+    "src/ui.test.ts"
+  ]
+}

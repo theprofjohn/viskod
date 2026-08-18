@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { dirname, join, resolve } from 'node:path';
 import type { EventBus } from '@viskod/event-bus';
@@ -25,6 +26,20 @@ import type {
 } from './types';
 
 export type { ScannerHealth } from './types';
+
+/** Map scanner-specific declarations to the supported public workspace model. */
+export function mapWorkspaceType(detected: string): WorkspaceType | null {
+  switch (detected) {
+    case 'single':
+    case 'pnpm-workspace':
+    case 'npm-workspace':
+    case 'yarn-workspace':
+    case 'unknown':
+      return detected;
+    default:
+      return null;
+  }
+}
 export type {
   ScanResult,
   ProjectMetadata,
@@ -154,7 +169,7 @@ export class ProjectScanner {
   }
 
   health(): ScannerHealth {
-    const status: ScannerHealth['status'] = this.lastScanTimestamp === null ? 'healthy' : 'healthy';
+    const status: ScannerHealth['status'] = 'healthy';
     return {
       status,
       lastScanTimestamp: this.lastScanTimestamp,
@@ -164,24 +179,131 @@ export class ProjectScanner {
       cacheSize: this.cacheSize,
     };
   }
-
-  /**
-   * Discover workspace packages from declared metadata within the explicit
-   * repository root. Supports package.json workspaces and pnpm-workspace.yaml.
-   * Never walks above the root; globs are expanded only inside the root.
-   */
   async discoverWorkspace(rootPath: string): Promise<Result<WorkspaceDiscovery>> {
     try {
-      const result = this.discoverWorkspaceSync(rootPath);
-      return ok(result);
-    } catch (error) {
-      return err(
-        this.scannerError(
-          'PS_WORKSPACE_DISCOVERY_FAILED',
-          `Workspace discovery failed: ${String(error)}`,
-        ),
+      const unsupported = ['turbo.json', 'nx.json', 'lerna.json', 'rush.json'].find((file) =>
+        existsSync(join(rootPath, file)),
       );
+      if (unsupported)
+        return err(
+          this.scannerError(
+            'PS_WORKSPACE_UNSUPPORTED',
+            `Workspace format '${unsupported}' is unsupported; workspace metadata is unavailable.`,
+          ),
+        );
+      const workspaceType = this.detectWorkspaceType(rootPath);
+      if (workspaceType === 'single')
+        return ok({ isWorkspace: false, workspaceType, packages: [], globs: [], diagnostics: [] });
+      const globs =
+        workspaceType === 'pnpm-workspace'
+          ? await this.parsePnpmWorkspaceYamlAsync(rootPath)
+          : await this.parsePackageJsonWorkspacesAsync(rootPath);
+      const packageDirs = new Set<string>();
+      for (const glob of globs)
+        for (const relativeRoot of await this.expandWorkspaceGlobAsync(rootPath, glob))
+          packageDirs.add(relativeRoot);
+      const packages: WorkspacePackage[] = [];
+      for (const relativeRoot of [...packageDirs].sort()) {
+        const packageJsonPath = `${relativeRoot}/package.json`;
+        try {
+          const pkg = JSON.parse(
+            await readFile(join(rootPath, packageJsonPath), 'utf-8'),
+          ) as Record<string, unknown>;
+          const sourceRoots: string[] = [];
+          for (const candidate of ['src', 'lib', 'app']) {
+            const relative = `${relativeRoot}/${candidate}`;
+            try {
+              if ((await stat(join(rootPath, relative))).isDirectory()) sourceRoots.push(relative);
+            } catch {
+              /* deleted during scan */
+            }
+          }
+          packages.push({
+            name: String(pkg.name ?? relativeRoot),
+            relativeRoot,
+            packageJsonPath,
+            sourceRoots,
+            workspaceDependencies: this.extractWorkspaceDependencies(rootPath, pkg),
+          });
+        } catch {
+          /* deleted or invalid package during scan */
+        }
+      }
+      return ok({ isWorkspace: true, workspaceType, packages, globs, diagnostics: [] });
+    } catch (error) {
+      try {
+        return ok(this.discoverWorkspaceSync(rootPath));
+      } catch {
+        return err(
+          this.scannerError(
+            'PS_WORKSPACE_DISCOVERY_FAILED',
+            `Workspace discovery failed: ${String(error)}`,
+          ),
+        );
+      }
     }
+  }
+
+  private async parsePnpmWorkspaceYamlAsync(rootPath: string): Promise<string[]> {
+    try {
+      const content = await readFile(join(rootPath, 'pnpm-workspace.yaml'), 'utf-8');
+      return content.split('\n').flatMap((line) => {
+        const match = line.trim().match(/^[-]\s+['"]?([^'"]+)['"]?$/);
+        return match?.[1] ? [match[1]] : [];
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  private async parsePackageJsonWorkspacesAsync(rootPath: string): Promise<string[]> {
+    try {
+      const pkg = JSON.parse(await readFile(join(rootPath, 'package.json'), 'utf-8')) as Record<
+        string,
+        unknown
+      >;
+      const workspaces = pkg.workspaces;
+      if (Array.isArray(workspaces))
+        return workspaces.filter((value): value is string => typeof value === 'string');
+      if (
+        workspaces &&
+        typeof workspaces === 'object' &&
+        Array.isArray((workspaces as { packages?: unknown }).packages)
+      )
+        return (workspaces as { packages: unknown[] }).packages.filter(
+          (value): value is string => typeof value === 'string',
+        );
+    } catch {
+      /* invalid config */
+    }
+    return [];
+  }
+
+  private async expandWorkspaceGlobAsync(rootPath: string, pattern: string): Promise<string[]> {
+    const parts = pattern.split('/').filter(Boolean);
+    const results: string[] = [];
+    const walk = async (dir: string, index: number): Promise<void> => {
+      if (results.length >= 500 || index >= parts.length) return;
+      let entries: Dirent[];
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      const part = parts[index] ?? '';
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'node_modules')
+          continue;
+        if (!part.includes('*') && entry.name !== part) continue;
+        if (part.includes('*') && !this.globMatches(entry.name, part)) continue;
+        const child = join(dir, entry.name);
+        if (index === parts.length - 1)
+          results.push(path.relative(rootPath, child).replace(/\\/g, '/'));
+        else await walk(child, index + 1);
+      }
+    };
+    await walk(rootPath, 0);
+    return results;
   }
 
   // ---- Private helpers ----
@@ -244,10 +366,20 @@ export class ProjectScanner {
 
   private detectWorkspaceType(rootPath: string): WorkspaceType {
     if (existsSync(join(rootPath, 'pnpm-workspace.yaml'))) return 'pnpm-workspace';
-    if (existsSync(join(rootPath, 'turbo.json'))) return 'turbo';
-    if (existsSync(join(rootPath, 'nx.json'))) return 'nx';
-    if (existsSync(join(rootPath, 'lerna.json'))) return 'lerna';
-    if (existsSync(join(rootPath, 'rush.json'))) return 'rush';
+    if (existsSync(join(rootPath, 'package.json'))) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(rootPath, 'package.json'), 'utf-8')) as Record<
+          string,
+          unknown
+        >;
+        const workspaces = pkg.workspaces;
+        if (Array.isArray(workspaces) || (workspaces && typeof workspaces === 'object')) {
+          return existsSync(join(rootPath, 'yarn.lock')) ? 'yarn-workspace' : 'npm-workspace';
+        }
+      } catch {
+        // Invalid package metadata is reported by the scan boundary.
+      }
+    }
     return 'single';
   }
 
@@ -1098,9 +1230,7 @@ export class ProjectScanner {
         return workspaces.filter((w): w is string => typeof w === 'string');
       }
       if (workspaces && typeof workspaces === 'object' && Array.isArray(workspaces.packages)) {
-        return (workspaces.packages as unknown[]).filter(
-          (w): w is string => typeof w === 'string',
-        );
+        return (workspaces.packages as unknown[]).filter((w): w is string => typeof w === 'string');
       }
     } catch {
       // ignore parse errors
@@ -1135,8 +1265,7 @@ export class ProjectScanner {
     const isLast = partIndex === globParts.length - 1;
 
     // Check we haven't escaped the root
-    const relCurrent = join(rootPath, '.' === '.' ? '' : '.', path.relative(rootPath, currentDir))
-      .replace(/\\/g, '/');
+    const relCurrent = join(rootPath, path.relative(rootPath, currentDir)).replace(/\\/g, '/');
     if (relCurrent.startsWith('..')) return;
 
     if (part === '**') {
@@ -1231,7 +1360,7 @@ export class ProjectScanner {
 
   private globMatches(name: string, pattern: string): boolean {
     // Convert simple glob pattern to regex
-    const regexStr = '^' + pattern.replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]') + '$';
+    const regexStr = `^${pattern.replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]')}$`;
     return new RegExp(regexStr).test(name);
   }
 
@@ -1259,10 +1388,7 @@ export class ProjectScanner {
     return roots;
   }
 
-  private extractWorkspaceDependencies(
-    _rootPath: string,
-    pkg: Record<string, unknown>,
-  ): string[] {
+  private extractWorkspaceDependencies(_rootPath: string, pkg: Record<string, unknown>): string[] {
     const deps = (pkg.dependencies ?? {}) as Record<string, string>;
     const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>;
     const peerDeps = (pkg.peerDependencies ?? {}) as Record<string, string>;

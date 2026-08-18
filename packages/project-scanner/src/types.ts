@@ -1,12 +1,15 @@
 export type PackageManager = 'pnpm' | 'npm' | 'yarn' | 'bun';
+
+/** Workspace types supported by the public metadata contract. */
 export type WorkspaceType =
   | 'single'
   | 'pnpm-workspace'
-  | 'turbo'
-  | 'nx'
-  | 'lerna'
-  | 'rush'
+  | 'npm-workspace'
+  | 'yarn-workspace'
   | 'unknown';
+
+/** Workspace declarations detected by the scanner before boundary mapping. */
+export type DetectedWorkspaceType = WorkspaceType | 'turbo' | 'nx' | 'lerna' | 'rush';
 export type Framework =
   | 'react'
   | 'nextjs'
@@ -125,6 +128,37 @@ export interface ScanResult {
   diagnostics: ScannerDiagnostic[];
   scanDurationMs: number;
   timestamp: string;
+}
+
+/**
+ * A workspace package discovered from declared metadata (pnpm-workspace.yaml
+ * or package.json workspaces). All paths are repository-relative at external
+ * boundaries; absolute paths are used only for internal filesystem operations.
+ */
+export interface WorkspacePackage {
+  /** Package name from its package.json (e.g. "@acme/ui"). */
+  name: string;
+  /** Repository-relative path to the package directory. */
+  relativeRoot: string;
+  /** Repository-relative path to the package's package.json. */
+  packageJsonPath: string;
+  /** Repository-relative source root directories within this package. */
+  sourceRoots: string[];
+  /** Names of workspace dependencies this package declares. */
+  workspaceDependencies: string[];
+}
+
+export interface WorkspaceDiscovery {
+  /** Whether this is a workspace/monorepo or a single package. */
+  isWorkspace: boolean;
+  /** The declared workspace type. */
+  workspaceType: WorkspaceType;
+  /** All discovered workspace packages (empty for single-package repos). */
+  packages: WorkspacePackage[];
+  /** Repository-relative glob patterns from workspace metadata. */
+  globs: string[];
+  /** Diagnostics from workspace discovery. */
+  diagnostics: ScannerDiagnostic[];
 }
 
 export interface ScannerHealth {

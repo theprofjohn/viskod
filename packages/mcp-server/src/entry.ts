@@ -72,17 +72,8 @@ export function buildViskodServer(options?: BuildViskodServerOptions) {
     currentScan = { ok: true, scan: result.value };
 
     // Discover workspace metadata
-    const workspaceResult =
-      await projectScanner.discoverWorkspace(configuredProjectRoot);
-    const workspace = workspaceResult.ok
-      ? {
-          isWorkspace: workspaceResult.value.isWorkspace,
-          workspaceType:
-            workspaceResult.value.workspaceType as import('@viskod/shared').WorkspaceMetadata['workspaceType'],
-          packages: workspaceResult.value.packages,
-          globs: workspaceResult.value.globs,
-        }
-      : undefined;
+    const workspaceResult = await projectScanner.discoverWorkspace(configuredProjectRoot);
+    const workspace = workspaceResult.ok ? workspaceResult.value : undefined;
 
     vce.setProjectContext({
       rootPath: result.value.metadata.rootPath,

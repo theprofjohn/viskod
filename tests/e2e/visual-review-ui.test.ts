@@ -1,4 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { type Browser, type Page, chromium } from 'playwright';
@@ -78,6 +79,17 @@ async function waitForStage(stage: string, timeoutMs = 60000): Promise<Record<st
     await sleep(500);
   }
   throw new Error(`timeout waiting for stage '${stage}'`);
+}
+
+async function waitForDomText(selector: string, text: string, timeoutMs = 10000): Promise<string> {
+  const start = Date.now();
+  let html = '';
+  while (Date.now() - start < timeoutMs) {
+    html = await page.locator(selector).innerHTML();
+    if (html.includes(text)) return html;
+    await sleep(250);
+  }
+  return html;
 }
 
 async function clickAction(action: string): Promise<void> {
@@ -220,7 +232,14 @@ describe('Phase 31 Studio UI — changed review journey', () => {
     await page.fill('#decision-note', 'Red background verified in the rendered card');
     await clickAction('decision-accepted');
     await waitForStage('decided');
-    const decidedHtml = await page.locator('.screen').innerHTML();
+    // The HTTP state poll can win the race against the WebSocket render
+    // broadcast; await the DOM condition instead of reading it immediately
+    // (condition-based, never a fixed sleep).
+    const decidedHtml = await waitForDomText(
+      '.screen',
+      'Red background verified in the rendered card',
+      10000,
+    );
     expect(decidedHtml).toContain('Red background verified in the rendered card');
 
     // Reload the Studio page: the decision note survives (persisted).
@@ -259,6 +278,53 @@ describe('Phase 31 Studio UI — changed review journey', () => {
     expect(traversal.status).toBe(404);
     const malformed = await fetch(`${STUDIO_URL}/review/artifact/art_zz`);
     expect(malformed.status).toBe(404);
+  }, 240000);
+});
+
+describe('Phase 34A Studio UI — restart resume through decision', () => {
+  it('reuses the original BEFORE baseline through rendered restart, verification, and decision', async () => {
+    await resetFixture();
+    await enableVisualReviewPolicy();
+    const { issueId } = await runReportToHandoff(
+      'The card needs a durable restart workflow',
+      'The card remains visible after the agent change',
+    );
+    const baselineDir = join(ROOT, '.viskod', 'reviews', 'baselines', issueId);
+    const beforePath = join(baselineDir, 'before.png');
+    const beforeHash = createHash('sha256').update(fs.readFileSync(beforePath)).digest('hex');
+
+    killTree(studioProc);
+    studioProc = null;
+    await waitForHttp(`${FIXTURE_URL}/`, 20000, 'fixture after Studio stop');
+    studioProc = spawnProc(process.platform === 'win32' ? 'npx.cmd' : 'npx', [
+      'tsx',
+      'apps/studio/src/index.ts',
+    ]);
+    await waitForHttp(`${STUDIO_URL}/health`, 120000, 'fresh Studio');
+
+    await openFixtureInStudio();
+    await page.waitForSelector(`[data-issue-id="${issueId}"][data-issue-action="open"]`, {
+      timeout: 30000,
+    });
+    await page.locator(`[data-issue-id="${issueId}"][data-issue-action="open"]`).press('Enter');
+    await waitForStage('handoff_ready');
+    expect(createHash('sha256').update(fs.readFileSync(beforePath)).digest('hex')).toBe(beforeHash);
+
+    await setState({ background: '#ff0000' });
+    await clickAction('verify-start');
+    await waitForStage('verifying');
+    await clickAction('verify-recapture');
+    const reviewState = await waitForStage('review_ready');
+    const reviewId = reviewState.reviewId as string;
+    expect(reviewId).toBeTruthy();
+    expect(createHash('sha256').update(fs.readFileSync(beforePath)).digest('hex')).toBe(beforeHash);
+
+    await page.locator('#decision-note').pressSequentially('Restart resume verified');
+    await page.locator('[data-action="decision-accepted"]').press('Enter');
+    await waitForStage('decided');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const persisted = await (await fetch(`${STUDIO_URL}/review/${reviewId}`)).json();
+    expect(persisted.review.decision?.note).toBe('Restart resume verified');
   }, 240000);
 });
 

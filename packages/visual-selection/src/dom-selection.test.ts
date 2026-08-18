@@ -145,8 +145,8 @@ describe('DOM Selection Fixtures', () => {
         ancestorDepth: 2,
       }),
     ];
-    const scoredInput = scoreCandidate(elements[0]!, 150, 25);
-    const scoredLabel = scoreCandidate(elements[1]!, 50, 25);
+    const scoredInput = scoreCandidate(elements[0] as NonNullable<(typeof elements)[0]>, 150, 25);
+    const scoredLabel = scoreCandidate(elements[1] as NonNullable<(typeof elements)[1]>, 50, 25);
     expect(scoredInput.score).toBeGreaterThan(scoredLabel.score);
   });
 
@@ -187,7 +187,7 @@ describe('DOM Selection Fixtures', () => {
     });
     const s1 = scoreCandidate(shallow, 50, 25);
     const s2 = scoreCandidate(deep, 50, 25);
-    expect(s1.signals.appropriateDepth!).toBeGreaterThan(s2.signals.appropriateDepth!);
+    expect(s1.signals.appropriateDepth ?? 0).toBeGreaterThan(s2.signals.appropriateDepth ?? 0);
   });
 
   // Fixture: flex and grid layouts (elements at different positions)

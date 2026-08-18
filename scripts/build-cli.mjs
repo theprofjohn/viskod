@@ -28,7 +28,7 @@ await build({
   platform: 'node',
   format: 'esm',
   target: 'node22',
-  external: ['playwright'],
+  external: ['playwright', 'pngjs'],
   define: {
     // packages/cli/package.json is the publish authority; the bundled
     // executable must report exactly the version that will be published.

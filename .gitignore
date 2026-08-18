@@ -1,6 +1,4 @@
 # IDE / local tooling
-.gortex/
-.gortex-batch-*
 .gemini/
 .hermes/
 .claude/
@@ -16,8 +14,6 @@ opencode.json
 node_modules/
 
 # Config files
-.gortex.yaml
-.gortex.lock
 
 # Generated files
 *.tsbuildinfo
@@ -93,3 +89,6 @@ Thumbs.db
 
 # Windows NTFS alternate-data-stream markers (from copying off NTFS drives)
 *.Zone.Identifier
+
+# Worktrees
+.worktrees/

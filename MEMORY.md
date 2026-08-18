@@ -1995,3 +1995,58 @@ removed so vitest resolves real `.ts` source (they shadowed `.ts` in
 module resolution).
 Future Review: issue-history desk / workflow resume (Phase 32+); retention
 UX for review artifacts.
+
+# Decision: Gortex no longer required during development (2026-08-17)
+
+## Context
+
+Decision 004 (2026-07-28) made Gortex MCP the required primary repository
+intelligence tool during development. Developer environment migrated from
+Windows to Linux Mint; Gortex adds little value there and is not installed.
+
+## Decision
+
+Gortex is optional. Development proceeds with the built-in repo tools
+(grep/glob, ast-grep, LSP, subagent scouts) without Gortex MCP. Viskod
+runtime never depends on Gortex (unchanged). Cleanup: the Gortex line in
+AGENTS.md, the `.gortex*` gitignore entries, and leftover
+`.gortex-batch-*` artifacts were removed (2026-08-17).
+
+## Consequences
+
+Positive: no Gortex setup/maintenance on Linux Mint; zero runtime impact.
+Negative: Decision 004's repository-wide intelligence workflow no longer
+applies; cross-package exploration relies on LSP/ast-grep/scouts.
+
+---
+
+# Compose Preferences
+
+## Execution Style: Subagent
+
+All compose plan executions use subagent mode (fresh subagent per task).
+User preference set 2026-08-17.
+Future Review: none; re-evaluate only if repo-wide code intelligence
+becomes a bottleneck again.
+
+---
+
+# Phase 33A runtime/scale closure decisions
+
+## Decision 006 (2026-08-18): bounded-concurrency scan primitives
+
+`packages/source-hint-engine` gained `mapWithConcurrency` (bounded worker
+pool, never unbounded `Promise.all`), `ScanCancelledError` + AbortSignal
+threading, engine-scoped `FsActivity` read/parse counters, and a
+manifest-validated fingerprint cache (`SourceFingerprintService`). The hint
+and import-graph caches are keyed by the source fingerprint so one resolution
+consumes one coherent repository generation; `invalidateCache` bumps the
+generation so in-flight scans never commit stale results. Warm queries do
+zero content reads/parses (stat-only manifest validation).
+
+## Decision 007 (2026-08-18): e2e compiled artifacts shadow sources
+
+Stale compiled `*.js`/`*.d.ts`/`*.map` output inside `tests/e2e/` shadowed the
+`.ts` sources in vitest resolution (`.js` resolves before `.ts`), silently
+reverting `harness.ts` changes. Deleted the artifacts; do not commit compiled
+output under `tests/e2e/` (keep `tests/e2e` source-only).

@@ -23,6 +23,7 @@
     "@viskod/overlay-system": "workspace:*",
     "@viskod/project-scanner": "workspace:*",
     "@viskod/selection-engine": "workspace:*",
+    "@viskod/setup": "workspace:*",
     "@viskod/shared": "workspace:*",
     "@viskod/source-hint-engine": "workspace:*",
     "@viskod/visual-issue": "workspace:*",

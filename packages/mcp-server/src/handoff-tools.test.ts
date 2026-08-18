@@ -376,7 +376,12 @@ describe('MCP list_agent_handoffs', () => {
     expect(list.ok).toBe(true);
     if (list.ok) {
       expect(list.value.length).toBe(2);
-      expect(list.value[0]!.createdAt >= list.value[1]!.createdAt).toBe(true);
+      const first = list.value[0];
+      const second = list.value[1];
+      expect(first && second).toBeTruthy();
+      if (first && second) {
+        expect(first.createdAt >= second.createdAt).toBe(true);
+      }
     }
   });
 });

@@ -118,19 +118,21 @@ export class SelectionOverlayController {
 
         const pageInfo = await this.buildPageInfo();
         if (generation !== this.generation || !this.active) return;
+        const firstTarget = targets[0];
+        if (!firstTarget) break;
         if (targets.length === 1 && data.multi !== true) {
           this.service.createSingleSelection(
             this.pageId,
-            targets[0]!,
+            firstTarget,
             pageInfo,
-            targets[0]!.geometry.viewportRect,
+            firstTarget.geometry.viewportRect,
           );
         } else {
           this.service.createMultiSelection(
             this.pageId,
             targets,
             pageInfo,
-            targets[0]!.geometry.viewportRect,
+            firstTarget.geometry.viewportRect,
           );
         }
         break;
@@ -151,12 +153,15 @@ export class SelectionOverlayController {
 
         const pageInfo = await this.buildPageInfo();
         if (generation !== this.generation || !this.active) return;
-        this.service.createMultiSelection(
-          this.pageId,
-          targets,
-          pageInfo,
-          targets[0]!.geometry.viewportRect,
-        );
+        const firstTarget = targets[0];
+        if (firstTarget) {
+          this.service.createMultiSelection(
+            this.pageId,
+            targets,
+            pageInfo,
+            firstTarget.geometry.viewportRect,
+          );
+        }
         break;
       }
 

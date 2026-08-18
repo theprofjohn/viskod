@@ -819,12 +819,14 @@ export class VisualContextEngine {
           } else {
             // Phase 30: missing evidence / unknown root / budget exhaustion
             // are UNAVAILABLE (truthful), never fabricated or failed.
+            // Phase 33A: cancellation is also typed unavailable, never failed.
             const code = hintResult.error.code;
             if (
               code === 'SH_INSUFFICIENT_EVIDENCE' ||
               code === 'SH_NO_PROJECT_METADATA' ||
               code === 'SH_NO_ROOT_PATH' ||
-              code === 'SH_BUDGET_EXCEEDED'
+              code === 'SH_BUDGET_EXCEEDED' ||
+              code === 'SH_SCAN_CANCELLED'
             ) {
               evidence.sourceHints = unavailableStatus(
                 'sourceHints',

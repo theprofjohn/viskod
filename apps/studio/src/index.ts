@@ -35,9 +35,19 @@ import type { BrowserIntegration } from '@viskod/visual-selection';
 import { chromium } from 'playwright';
 import { WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
+import {
+  MAX_STUDIO_JSON_BODY_BYTES,
+  isAllowedStudioOrigin,
+  rejectOversizedBody,
+} from './request-security';
 import { renderStudioHtml } from './ui';
 import type { StudioSetupStatus } from './ui';
 import { StudioWorkflow } from './workflow';
+export {
+  MAX_STUDIO_JSON_BODY_BYTES,
+  MAX_STUDIO_TEXT_BODY_BYTES,
+  isAllowedStudioOrigin,
+} from './request-security';
 import type { StudioWorkflowState } from './workflow';
 
 export interface ChatMessage {
@@ -89,7 +99,6 @@ export const DEFAULT_SETTINGS: ViskodSettings = {
 /** Studio is a local developer tool: always loopback, never all interfaces. */
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3001;
-
 export interface StudioOptions {
   /** Loopback bind host. Defaults to 127.0.0.1. */
   host?: string;
@@ -97,33 +106,9 @@ export interface StudioOptions {
   port?: number;
 }
 
-/**
- * Local control boundary for the Studio HTTP and WebSocket servers.
- *
- * Studio binds loopback only, so LAN hosts cannot reach it. This check also
- * stops arbitrary web origins (including DNS-rebinding hosts) from driving
- * Studio: browser requests always carry an Origin header, and only loopback
- * origins or the Chrome extension (`chrome-extension://`) are accepted.
- * Non-browser local clients (CLI, tests, curl) send no Origin and are
- * treated as local processes that already have machine access.
- */
-export function isAllowedStudioOrigin(origin: string | undefined): boolean {
-  if (!origin) return true;
-  try {
-    const parsed = new URL(origin);
-    if (parsed.protocol === 'chrome-extension:') return true;
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-    const host = parsed.hostname;
-    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
-  } catch {
-    return false;
-  }
-}
-
-// Workflow request validation at the HTTP boundary.
 const WorkflowIssueSchema = z.object({
-  problem: z.string().min(1).max(2000),
-  expected: z.string().min(1).max(2000),
+  problem: z.string().trim().min(1),
+  expected: z.string().trim().min(1),
   severity: z.enum(['low', 'medium', 'high', 'critical']).optional(),
 });
 const WorkflowHandoffSchema = z.object({
@@ -131,7 +116,7 @@ const WorkflowHandoffSchema = z.object({
 });
 const WorkflowVerifyStartSchema = z.object({
   issueId: z.string().min(1),
-  handoffId: z.string().optional(),
+  handoffId: z.string().min(1).optional(),
 });
 const WorkflowVerifyRecaptureSchema = z.object({
   reviewId: z.string().min(1),
@@ -140,6 +125,11 @@ const WorkflowDecisionSchema = z.object({
   reviewId: z.string().min(1),
   decision: z.enum(['accepted', 'rejected', 'needs_follow_up']),
   note: z.string().max(2000).optional(),
+});
+const IssueEditSchema = z.object({
+  title: z.string().trim().min(1).max(80).optional(),
+  description: z.string().max(4000).optional(),
+  expectedResult: z.string().max(4000).optional(),
 });
 
 interface StudioState {
@@ -166,6 +156,12 @@ interface StudioState {
    * Phase 30 project status: source resolution is available only when the
    * project root was EXPLICITLY configured and scanned. Never guessed.
    * User-facing: project name/framework, never the absolute root path.
+   *
+   * Phase 33A status additions (minimal safe surface):
+   * - `workspace`: single-package vs workspace + workspace package count
+   * - `scan`: source scan ready / refreshing / unavailable
+   * - `budgetExceeded`: true when the last source resolution hit its budget
+   * No absolute paths and no repository explorer are ever exposed.
    */
   project: {
     status: 'ready' | 'invalid' | 'unknown';
@@ -173,6 +169,9 @@ interface StudioState {
     framework?: string;
     routeCount?: number;
     reason?: string;
+    workspace?: { isWorkspace: boolean; packageCount: number } | null;
+    scan?: 'ready' | 'refreshing' | 'unavailable';
+    budgetExceeded?: boolean;
   };
   /**
    * Phase 32: truthful first-run/setup status. Loaded from the persisted
@@ -238,6 +237,10 @@ export class Studio {
   private browserHandle: BrowserHandle | null = null;
   private pageId: string | null = null;
   private sessionId = crypto.randomUUID();
+  private pendingResumeIssueId?: string;
+  private navigationInFlight: Promise<Result<void>> | null = null;
+  private captureInFlight: Promise<Result<ContextPacket>> | null = null;
+  private recaptureInFlight: Promise<RecaptureResult | null> | null = null;
 
   constructor(
     vce: VisualContextEngine,
@@ -305,6 +308,9 @@ export class Studio {
     });
 
     this.eventBus.subscribe('VI_EVENT:ISSUE_CREATED', () => {
+      this.broadcastStudioState();
+    });
+    this.eventBus.subscribe('VI_EVENT:ISSUE_UPDATED', () => {
       this.broadcastStudioState();
     });
 
@@ -378,12 +384,14 @@ export class Studio {
     }
 
     this.server = this.createServer();
-    this.wss = new WebSocketServer({ server: this.server });
+    this.wss = new WebSocketServer({
+      server: this.server,
+      maxPayload: MAX_STUDIO_JSON_BODY_BYTES,
+    });
     this.wss.on('connection', (ws, req) => this.handleWsConnection(ws, req));
     // The WebSocketServer re-emits HTTP server errors (including EADDRINUSE)
     // on itself; a permanent handler keeps them from becoming unhandled
     // 'error' crashes. The start-time rejection comes from the listeners
-    // attached in the readiness promise below.
     this.wss.on('error', (error) => {
       console.error(`Viskod Studio WebSocket error: ${error.message}`);
     });
@@ -528,13 +536,13 @@ export class Studio {
       }
 
       // CORS only for allowed origins (loopback pages and the extension);
-      // never a permissive `*`.
       if (origin) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Vary', 'Origin');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
       }
+      if (rejectOversizedBody(req, res)) return;
 
       if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -542,132 +550,421 @@ export class Studio {
         return;
       }
 
-      const url = req.url ?? '/';
-
-      if (url === '/' && req.method === 'GET') {
-        // Human-facing Studio UI
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.end(renderStudioHtml());
-      } else if (url === '/state') {
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ ...this.state, workflow: this.getWorkflowState() }));
-      } else if (url === '/navigate' && req.method === 'POST') {
-        void this.handleNavigate(req, res);
-      } else if (url === '/workflow/report/start' && req.method === 'POST') {
-        void this.handleWorkflowReportStart(res);
-      } else if (url === '/workflow/state' && req.method === 'GET') {
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(this.getWorkflowState()));
-      } else if (url === '/workflow/selection/accept' && req.method === 'POST') {
-        void this.handleWorkflowSelectionAccept(res);
-      } else if (url === '/workflow/issue' && req.method === 'POST') {
-        void this.handleWorkflowIssue(req, res);
-      } else if (url === '/workflow/prepare' && req.method === 'POST') {
-        void this.handleWorkflowPrepare(req, res);
-      } else if (url === '/workflow/reselect' && req.method === 'POST') {
-        void this.handleWorkflowReselect(res);
-      } else if (url === '/workflow/cancel' && req.method === 'POST') {
-        void this.handleWorkflowCancel(res);
-      } else if (url === '/workflow/handoff' && req.method === 'POST') {
-        void this.handleWorkflowHandoff(req, res);
-      } else if (url === '/workflow/verify/start' && req.method === 'POST') {
-        void this.handleWorkflowVerifyStart(req, res);
-      } else if (url === '/workflow/verify/recapture' && req.method === 'POST') {
-        void this.handleWorkflowVerifyRecapture(req, res);
-      } else if (url === '/workflow/decision' && req.method === 'POST') {
-        void this.handleWorkflowDecision(req, res);
-      } else if (url === '/settings/visual-review-policy' && req.method === 'POST') {
-        void this.handleVisualReviewPolicy(req, res);
-      } else if (url.startsWith('/review/artifact/') && req.method === 'GET') {
-        void this.handleReviewArtifact(req, res);
-      } else if (url.startsWith('/review/') && req.method === 'GET') {
-        void this.handleReviewGet(req, res);
-      } else if (url === '/select/start') {
-        void this.startSelection().then((r) => res.end(JSON.stringify(r)));
-      } else if (url === '/select/confirm' && req.method === 'POST') {
-        void this.confirmSelection(req, res);
-      } else if (url === '/select/element' && req.method === 'POST') {
-        void this.selectElement(req, res);
-      } else if (url === '/select/clear') {
-        void this.clearSelection().then((r) => res.end(JSON.stringify(r)));
-      } else if (url === '/capture') {
-        void this.handleCapture(res);
-      } else if (url === '/packet/latest') {
-        res.end(JSON.stringify(this.state.currentPacket));
-      } else if (url === '/project/status') {
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(this.state.project));
-      } else if (url === '/source/status') {
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(this.getSourceStatus()));
-      } else if (url === '/errors') {
-        res.end(JSON.stringify(this.state.errors));
-      } else if (url === '/health') {
-        const vceHealth = this.vce.health();
-        const seHealth = this.selectionEngine?.health();
-        res.end(
-          JSON.stringify({
-            studio: { status: 'running', panel: this.state.activePanel },
-            vce: vceHealth,
-            selectionEngine: seHealth ?? null,
-            browserConnected: this.browserConnected,
-            project: this.state.project,
-          }),
-        );
-      } else if (url === '/chat/messages') {
-        const undelivered = this.state.chatMessages.filter((m) => !m.delivered);
-        for (const m of undelivered) {
-          m.delivered = true;
-        }
-        res.end(JSON.stringify({ messages: undelivered }));
-      } else if (url === '/chat/respond' && req.method === 'POST') {
-        void this.handleChatRespond(req, res);
-      } else if (url === '/chat/notify' && req.method === 'POST') {
-        void this.handleChatNotify(req, res);
-      } else if (url === '/settings' && req.method === 'GET') {
-        res.end(JSON.stringify(this.state.settings));
-      } else if (url === '/settings' && req.method === 'POST') {
-        void this.handleSettingsUpdate(req, res);
-      } else if (url === '/overlay/script') {
-        // serve overlay script to extension for re-injection after reload
-        const script = getOverlayScript();
-        res.setHeader('Content-Type', 'application/javascript');
-        res.end(script);
-      } else if (url === '/overlay/reload' && req.method === 'POST') {
-        // reload page via Playwright and re-inject overlay
-        void this.handleOverlayReload(res);
-      } else if (url === '/setup/status') {
-        // Phase 32 light health: cheap enough for polling. Re-loads the
-        // persisted setup state on demand; never runs full setup validation
-        // and never launches a browser.
-        this.refreshSetupStatus(resolveStudioProjectRoot());
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(this.setupStatusPayload()));
-      } else if (url.startsWith('/setup/mcp-config')) {
-        // return MCP config JSON for the user's IDE onboarding
-        const query = req.url?.split('?')[1] ?? '';
-        const ide =
-          query
-            .split('&')
-            .find((p) => p.startsWith('ide='))
-            ?.split('=')[1] ?? 'opencode';
-        const config = this.buildMcpConfig(ide);
-        res.end(JSON.stringify(config, null, 2));
-      } else {
-        res.statusCode = 404;
-        res.end(JSON.stringify({ error: 'Not found' }));
-      }
+      this.routeHttpRequest(req, res);
     });
+  }
+
+  private routeHttpRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const url = req.url ?? '/';
+    const pathname = new URL(url, 'http://127.0.0.1').pathname;
+
+    if (url === '/' && req.method === 'GET') {
+      // Human-facing Studio UI
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end(renderStudioHtml());
+    } else if (url === '/state') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ...this.state, workflow: this.getWorkflowState() }));
+    } else if (pathname === '/issues' && req.method === 'GET') {
+      void this.handleIssueHistory(req, res);
+    } else if (pathname.startsWith('/issues/') && req.method === 'GET') {
+      void this.handleIssueDetail(pathname, res);
+    } else if (
+      pathname.startsWith('/issues/') &&
+      pathname.endsWith('/edit') &&
+      req.method === 'POST'
+    ) {
+      void this.handleIssueEdit(pathname, req, res);
+    } else if (
+      pathname.startsWith('/issues/') &&
+      pathname.endsWith('/archive') &&
+      req.method === 'POST'
+    ) {
+      void this.handleIssueLifecycle(pathname, 'archive', res);
+    } else if (
+      pathname.startsWith('/issues/') &&
+      pathname.endsWith('/reopen') &&
+      req.method === 'POST'
+    ) {
+      void this.handleIssueLifecycle(pathname, 'reopen', res);
+    } else if (
+      pathname.startsWith('/issues/') &&
+      pathname.endsWith('/fork') &&
+      req.method === 'POST'
+    ) {
+      void this.handleIssueFork(pathname, req, res);
+    } else if (
+      pathname.startsWith('/issues/') &&
+      pathname.endsWith('/open') &&
+      req.method === 'POST'
+    ) {
+      void this.handleIssueOpen(pathname, res);
+    } else if (url === '/navigate' && req.method === 'POST') {
+      void this.handleNavigate(req, res);
+    } else if (url === '/workflow/report/start' && req.method === 'POST') {
+      void this.handleWorkflowReportStart(res);
+    } else if (url === '/workflow/state' && req.method === 'GET') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(this.getWorkflowState()));
+    } else if (url === '/workflow/selection/accept' && req.method === 'POST') {
+      void this.handleWorkflowSelectionAccept(res);
+    } else if (url === '/workflow/issue' && req.method === 'POST') {
+      void this.handleWorkflowIssue(req, res);
+    } else if (url === '/workflow/prepare' && req.method === 'POST') {
+      void this.handleWorkflowPrepare(req, res);
+    } else if (url === '/workflow/reselect' && req.method === 'POST') {
+      void this.handleWorkflowReselect(res);
+    } else if (url === '/workflow/cancel' && req.method === 'POST') {
+      void this.handleWorkflowCancel(res);
+    } else if (url === '/workflow/handoff' && req.method === 'POST') {
+      void this.handleWorkflowHandoff(req, res);
+    } else if (url === '/workflow/verify/start' && req.method === 'POST') {
+      void this.handleWorkflowVerifyStart(req, res);
+    } else if (url === '/workflow/verify/recapture' && req.method === 'POST') {
+      void this.handleWorkflowVerifyRecapture(req, res);
+    } else if (url === '/workflow/decision' && req.method === 'POST') {
+      void this.handleWorkflowDecision(req, res);
+    } else if (url === '/settings/visual-review-policy' && req.method === 'POST') {
+      void this.handleVisualReviewPolicy(req, res);
+    } else if (url.startsWith('/review/artifact/') && req.method === 'GET') {
+      void this.handleReviewArtifact(req, res);
+    } else if (url.startsWith('/review/') && req.method === 'GET') {
+      void this.handleReviewGet(req, res);
+    } else if (url === '/select/start') {
+      void this.startSelection().then((r) => res.end(JSON.stringify(r)));
+    } else if (url === '/select/confirm' && req.method === 'POST') {
+      void this.confirmSelection(req, res);
+    } else if (url === '/select/element' && req.method === 'POST') {
+      void this.selectElement(req, res);
+    } else if (url === '/select/clear') {
+      void this.clearSelection().then((r) => res.end(JSON.stringify(r)));
+    } else if (url === '/capture') {
+      void this.handleCapture(res);
+    } else if (url === '/packet/latest') {
+      res.end(JSON.stringify(this.state.currentPacket));
+    } else if (url === '/project/status') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(this.state.project));
+    } else if (url === '/source/status') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(this.getSourceStatus()));
+    } else if (url === '/errors') {
+      res.end(JSON.stringify(this.state.errors));
+    } else if (url === '/health') {
+      const vceHealth = this.vce.health();
+      const seHealth = this.selectionEngine?.health();
+      res.end(
+        JSON.stringify({
+          studio: { status: 'running', panel: this.state.activePanel },
+          vce: vceHealth,
+          selectionEngine: seHealth ?? null,
+          browserConnected: this.browserConnected,
+          project: this.state.project,
+        }),
+      );
+    } else if (url === '/chat/messages') {
+      const undelivered = this.state.chatMessages.filter((m) => !m.delivered);
+      for (const m of undelivered) {
+        m.delivered = true;
+      }
+      res.end(JSON.stringify({ messages: undelivered }));
+    } else if (url === '/chat/respond' && req.method === 'POST') {
+      void this.handleChatRespond(req, res);
+    } else if (url === '/chat/notify' && req.method === 'POST') {
+      void this.handleChatNotify(req, res);
+    } else if (url === '/settings' && req.method === 'GET') {
+      res.end(JSON.stringify(this.state.settings));
+    } else if (url === '/settings' && req.method === 'POST') {
+      void this.handleSettingsUpdate(req, res);
+    } else if (url === '/overlay/script') {
+      // serve overlay script to extension for re-injection after reload
+      const script = getOverlayScript();
+      res.setHeader('Content-Type', 'application/javascript');
+      res.end(script);
+    } else if (url === '/overlay/reload' && req.method === 'POST') {
+      // reload page via Playwright and re-inject overlay
+      void this.handleOverlayReload(res);
+    } else if (url === '/setup/status') {
+      // Phase 32 light health: cheap enough for polling. Re-loads the
+      // persisted setup state on demand; never runs full setup validation
+      // and never launches a browser.
+      this.refreshSetupStatus(resolveStudioProjectRoot());
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(this.setupStatusPayload()));
+    } else if (url.startsWith('/setup/mcp-config')) {
+      // return MCP config JSON for the user's IDE onboarding
+      const query = req.url?.split('?')[1] ?? '';
+      const ide =
+        query
+          .split('&')
+          .find((p) => p.startsWith('ide='))
+          ?.split('=')[1] ?? 'opencode';
+      const config = this.buildMcpConfig(ide);
+      res.end(JSON.stringify(config, null, 2));
+    } else {
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: 'Not found' }));
+    }
+  }
+
+  private issueIdFromRoute(route: string, suffix = ''): string | null {
+    const value = route.slice('/issues/'.length, suffix ? -suffix.length : undefined);
+    return /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : null;
+  }
+
+  private async handleIssueHistory(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    const query = new URL(req.url ?? '/issues', 'http://127.0.0.1').searchParams;
+    const includeArchived = query.get('archived') === 'true';
+    const rawLimit = Number.parseInt(query.get('limit') ?? '50', 10);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 100)) : 50;
+    const [issuesResult, handoffsResult, reviewsResult] = await Promise.all([
+      this.issueService.listIssues(includeArchived, limit),
+      this.handoffService.listHandoffs(),
+      this.reviewService.listReviews(),
+    ]);
+    if (!issuesResult.ok || !handoffsResult.ok || !reviewsResult.ok) {
+      res.statusCode = 503;
+      res.end(JSON.stringify({ ok: false, error: 'Issue history is temporarily unavailable.' }));
+      return;
+    }
+    const handoffByIssue = new Map(handoffsResult.value.map((item) => [item.issueId, item]));
+    const reviewByIssue = new Map(
+      reviewsResult.value
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .map((item) => [item.issueId, item]),
+    );
+    const issues = issuesResult.value.map((issue) => ({
+      issueId: issue.issueId,
+      parentIssueId: issue.parentIssueId,
+      rootIssueId: issue.rootIssueId ?? issue.issueId,
+      title: issue.title,
+      description: issue.description,
+      status: issue.status,
+      severity: issue.severity,
+      createdAt: issue.createdAt,
+      updatedAt: issue.updatedAt,
+      handoff: handoffByIssue.get(issue.issueId)
+        ? { status: handoffByIssue.get(issue.issueId)?.status }
+        : null,
+      review: reviewByIssue.get(issue.issueId)
+        ? {
+            status: reviewByIssue.get(issue.issueId)?.status,
+            comparisonStatus: reviewByIssue.get(issue.issueId)?.comparisonStatus,
+          }
+        : null,
+    }));
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok: true, issues, limit }));
+  }
+
+  private async handleIssueDetail(route: string, res: http.ServerResponse): Promise<void> {
+    const issueId = this.issueIdFromRoute(route);
+    if (!issueId) {
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: 'Issue not found' }));
+      return;
+    }
+    const issueResult = await this.issueService.getIssue(issueId);
+    if (!issueResult.ok) {
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: 'Issue not found' }));
+      return;
+    }
+    const [handoffs, reviews, baseline] = await Promise.all([
+      this.handoffService.listHandoffs(),
+      this.reviewService.listReviews(),
+      this.artifactStore.loadBaseline(issueId),
+    ]);
+    const issue = issueResult.value;
+    const detail = {
+      issue: {
+        issueId: issue.issueId,
+        parentIssueId: issue.parentIssueId,
+        rootIssueId: issue.rootIssueId ?? issue.issueId,
+        title: issue.title,
+        description: issue.description,
+        status: issue.status,
+        severity: issue.severity,
+        createdAt: issue.createdAt,
+        expectedResult: issue.expectedResult,
+        updatedAt: issue.updatedAt,
+        archivedAt: issue.archivedAt,
+        targetSummary: issue.targetSummary,
+        page: { title: issue.page.title, route: issue.page.route },
+        evidence: issue.evidence,
+        lifecycle: issue.lifecycle.slice(-20),
+      },
+      handoffs: handoffs.ok
+        ? handoffs.value.filter((item) => item.issueId === issueId).slice(0, 10)
+        : [],
+      reviews: reviews.ok
+        ? reviews.value.filter((item) => item.issueId === issueId).slice(0, 10)
+        : [],
+      baselineAvailable: baseline.ok && baseline.value !== null,
+    };
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok: true, ...detail }));
+  }
+
+  private async handleIssueEdit(
+    route: string,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    const issueId = this.issueIdFromRoute(route, '/edit');
+    if (!issueId) return this.sendBadRequest(res, 'Invalid issue ID');
+    const body = await this.readBody(req);
+    let parsed: z.infer<typeof IssueEditSchema>;
+    try {
+      const candidate = IssueEditSchema.safeParse(JSON.parse(body));
+      if (!candidate.success) return this.sendBadRequest(res, 'Invalid editable issue fields');
+      parsed = candidate.data;
+    } catch {
+      return this.sendBadRequest(res, 'Invalid request body');
+    }
+    const result = await this.issueService.updateIssue(issueId, parsed);
+    if (!result.ok) {
+      res.statusCode = 409;
+      res.end(JSON.stringify({ ok: false, error: result.error.message }));
+      return;
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok: true, issueId: result.value.issueId }));
+  }
+
+  private async handleIssueLifecycle(
+    route: string,
+    action: 'archive' | 'reopen',
+    res: http.ServerResponse,
+  ): Promise<void> {
+    const issueId = this.issueIdFromRoute(route, `/${action}`);
+    if (!issueId) return this.sendBadRequest(res, 'Invalid issue ID');
+    const result =
+      action === 'archive'
+        ? await this.issueService.archiveIssue(issueId)
+        : await this.issueService.reopenIssue(issueId);
+    if (!result.ok) {
+      res.statusCode = 409;
+      res.end(JSON.stringify({ ok: false, error: result.error.message }));
+      return;
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok: true, issueId }));
+  }
+
+  private async handleIssueFork(
+    route: string,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    const issueId = this.issueIdFromRoute(route, '/fork');
+    if (!issueId || !this.issueService.forkIssue) {
+      this.sendBadRequest(res, 'Invalid issue ID');
+      return;
+    }
+    const body = await this.readBody(req);
+    let title: string | undefined;
+    let requestId: string | undefined;
+    try {
+      const parsed = body ? (JSON.parse(body) as { title?: unknown; requestId?: unknown }) : {};
+      if (parsed.title !== undefined && typeof parsed.title !== 'string') {
+        this.sendBadRequest(res, 'Invalid fork title');
+        return;
+      }
+      if (parsed.requestId !== undefined && typeof parsed.requestId !== 'string') {
+        this.sendBadRequest(res, 'Invalid fork request ID');
+        return;
+      }
+      title = parsed.title;
+      requestId = parsed.requestId;
+    } catch {
+      this.sendBadRequest(res, 'Invalid request body');
+      return;
+    }
+    const result = await this.issueService.forkIssue(issueId, title, requestId);
+    if (!result.ok) {
+      res.statusCode = 409;
+      res.end(JSON.stringify({ ok: false, error: result.error.message }));
+      return;
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.end(
+      JSON.stringify({
+        ok: true,
+        issueId: result.value.issueId,
+        parentIssueId: result.value.parentIssueId,
+        rootIssueId: result.value.rootIssueId,
+      }),
+    );
+  }
+
+  private async handleIssueOpen(route: string, res: http.ServerResponse): Promise<void> {
+    const issueId = this.issueIdFromRoute(route, '/open');
+    if (!issueId) {
+      this.sendBadRequest(res, 'Invalid issue ID');
+      return;
+    }
+    if (!this.workflow) {
+      const issue = await this.issueService.getIssue(issueId);
+      if (!issue.ok) {
+        res.statusCode = 404;
+        res.end(JSON.stringify({ ok: false, error: 'Issue not found' }));
+        return;
+      }
+      this.pendingResumeIssueId = issueId;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: true, issueId, resumePending: true }));
+      return;
+    }
+    const [handoffs, reviews] = await Promise.all([
+      this.handoffService.listHandoffs(),
+      this.reviewService.listReviews(),
+    ]);
+    const handoffId = handoffs.ok
+      ? handoffs.value.find((item) => item.issueId === issueId)?.handoffId
+      : undefined;
+    const reviewId = reviews.ok
+      ? reviews.value
+          .filter((item) => item.issueId === issueId)
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.reviewId
+      : undefined;
+    const result = await this.workflow.resumeIssue(issueId, handoffId, reviewId);
+    await this.respondWorkflow(res, Promise.resolve(result));
+  }
+  private async resumePendingIssue(issueId: string): Promise<void> {
+    if (!this.workflow) return;
+    const [handoffs, reviews] = await Promise.all([
+      this.handoffService.listHandoffs(),
+      this.reviewService.listReviews(),
+    ]);
+    const handoffId = handoffs.ok
+      ? handoffs.value.find((item) => item.issueId === issueId)?.handoffId
+      : undefined;
+    const reviewId = reviews.ok
+      ? reviews.value
+          .filter((item) => item.issueId === issueId)
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.reviewId
+      : undefined;
+    await this.workflow.resumeIssue(issueId, handoffId, reviewId);
+    this.broadcastStudioState();
   }
 
   private async handleNavigate(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await this.readBody(req);
     try {
       const { url } = JSON.parse(body);
-      const result = await this.vce.navigate(url);
-      if (result.ok) {
-        this.setupPageWorkflow(url);
+      let navigation = this.navigationInFlight;
+      if (!navigation) {
+        navigation = this.vce.navigate(url).finally(() => {
+          this.navigationInFlight = null;
+        });
+        this.navigationInFlight = navigation;
       }
+      const result = await navigation;
+      if (result.ok) this.setupPageWorkflow(url);
       res.setHeader('Content-Type', 'application/json');
       res.end(
         JSON.stringify(
@@ -714,14 +1011,36 @@ export class Studio {
       visualReviewPolicy: this.state.settings.visualReviewArtifacts,
       visualReviewPolicyAsked: this.visualReviewPolicyAsked,
     });
+    if (this.pendingResumeIssueId) {
+      const issueId = this.pendingResumeIssueId;
+      this.pendingResumeIssueId = undefined;
+      void this.resumePendingIssue(issueId);
+    }
     this.vce.setOverlayEventsDelegated(true);
     this.broadcastStudioState();
   }
 
+  /**
+   * Phase 33A: `budgetExceeded` mirrors the current packet's source-hint
+   * diagnostic. Truthful and minimal — derived, never guessed.
+   */
+  private syncProjectBudgetFlag(): void {
+    const diagnostic = this.state.currentPacket?.evidence?.sourceHints?.diagnostic;
+    this.state.project.budgetExceeded =
+      diagnostic?.code === 'SH_BUDGET_EXCEEDED' || diagnostic?.code === 'SH_SCAN_CANCELLED';
+  }
   private async handleCapture(res: http.ServerResponse): Promise<void> {
-    const result = await this.vce.generatePacket();
+    let capture = this.captureInFlight;
+    if (!capture) {
+      capture = this.vce.generatePacket().finally(() => {
+        this.captureInFlight = null;
+      });
+      this.captureInFlight = capture;
+    }
+    const result = await capture;
     if (result.ok) {
       this.state.currentPacket = result.value;
+      this.syncProjectBudgetFlag();
       this.state.activePanel = 'context-explorer';
       res.end(JSON.stringify({ ok: true, packetId: result.value.packetId }));
     } else {
@@ -777,6 +1096,7 @@ export class Studio {
       const result = await this.vce.processSelection(selection);
       if (result.ok) {
         this.state.currentPacket = result.value;
+        this.syncProjectBudgetFlag();
         this.state.activePanel = 'context-explorer';
         res.end(JSON.stringify({ ok: true, packetId: result.value.packetId }));
       } else {
@@ -803,6 +1123,7 @@ export class Studio {
       const result = await this.vce.processSelection(selection);
       if (result.ok) {
         this.state.currentPacket = result.value;
+        this.syncProjectBudgetFlag();
         this.state.activePanel = 'context-explorer';
         res.end(JSON.stringify({ ok: true, packetId: result.value.packetId }));
       } else {
@@ -1262,12 +1583,19 @@ export class Studio {
   }
 
   /**
-   * Review recapture adapter: resolves the target from the persisted
-   * selection snapshot (ReviewServiceImpl passes the resolved selector),
-   * captures through VCE, and maps the packet into RecaptureResult. Returns
-   * null when the target cannot be resolved so RECAPTURE_FAILED is exercised.
+   * Review recapture adapter with a single active operation per Studio.
+   * Duplicate requests are rejected rather than queued without a bound.
    */
   private async recaptureViaVce(options: RecaptureOptions): Promise<RecaptureResult | null> {
+    if (this.recaptureInFlight) return null;
+    const operation = this.performRecaptureViaVce(options);
+    this.recaptureInFlight = operation.finally(() => {
+      this.recaptureInFlight = null;
+    });
+    return operation;
+  }
+
+  private async performRecaptureViaVce(options: RecaptureOptions): Promise<RecaptureResult | null> {
     if (!this.browserHandle) return null;
 
     if (options.reload || options.cacheBust) {
@@ -1721,10 +2049,24 @@ export class Studio {
   private readBody(req: http.IncomingMessage): Promise<string> {
     return new Promise((resolve) => {
       let body = '';
+      let tooLarge = false;
+      let settled = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        resolve(tooLarge ? '{"__viskodBodyTooLarge":true}' : body);
+      };
       req.on('data', (chunk: Buffer) => {
+        if (tooLarge) return;
         body += chunk.toString();
+        if (Buffer.byteLength(body, 'utf8') > MAX_STUDIO_JSON_BODY_BYTES) {
+          tooLarge = true;
+          body = '';
+        }
       });
-      req.on('end', () => resolve(body));
+      req.on('end', finish);
+      req.on('aborted', finish);
+      req.on('error', finish);
     });
   }
 }
@@ -1789,16 +2131,25 @@ async function establishProjectContext(): Promise<void> {
   if (!rootPath) {
     studio.setProjectStatus({
       status: 'unknown',
+      scan: 'unavailable',
       reason:
         'No project root configured. Start Studio with --project-root <path> (or VISKOD_PROJECT_ROOT) to enable source resolution.',
     });
     studio.refreshSetupStatus(null);
     return;
   }
+  // Phase 33A: the source scan is refreshing while establishProjectContext
+  // runs — observable through /state, never guessed.
+  studio.setProjectStatus({
+    status: 'unknown',
+    scan: 'refreshing',
+    reason: 'Scanning the configured project root…',
+  });
   const scanResult = await projectScanner.scan(rootPath);
   if (!scanResult.ok) {
     studio.setProjectStatus({
       status: 'invalid',
+      scan: 'unavailable',
       reason: `The configured project root could not be scanned: ${sanitizeErrorDetail(scanResult.error.message)}`,
     });
     studio.refreshSetupStatus(rootPath);
@@ -1811,8 +2162,7 @@ async function establishProjectContext(): Promise<void> {
   const workspace = workspaceResult.ok
     ? {
         isWorkspace: workspaceResult.value.isWorkspace,
-        workspaceType:
-          workspaceResult.value.workspaceType as import('@viskod/shared').WorkspaceMetadata['workspaceType'],
+        workspaceType: workspaceResult.value.workspaceType,
         packages: workspaceResult.value.packages,
         globs: workspaceResult.value.globs,
       }
@@ -1832,11 +2182,19 @@ async function establishProjectContext(): Promise<void> {
 
   sourceHintEngine.invalidateCache(rootPath);
 
+  // Phase 33A minimal safe status: single-package vs workspace + package
+  // count + scan readiness. Never absolute paths, never a repository
+  // explorer.
   studio.setProjectStatus({
     status: 'ready',
+    scan: 'ready',
     name: scan.metadata.name,
     framework: scan.framework.primary ?? undefined,
     routeCount: scan.routes.totalRoutes,
+    workspace:
+      workspaceResult.ok && workspaceResult.value.isWorkspace
+        ? { isWorkspace: true, packageCount: workspaceResult.value.packages.length }
+        : { isWorkspace: false, packageCount: 0 },
   });
   studio.refreshSetupStatus(rootPath);
 }

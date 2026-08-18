@@ -7,6 +7,7 @@ import {
   makeArchiveEvent,
   makeCreatedEvent,
   makeDeleteEvent,
+  makeForkEvent,
   makeReopenEvent,
   makeSeverityChangeEvent,
   makeStatusChangeEvent,
@@ -22,7 +23,6 @@ import type {
   VisualIssueSeverity,
   VisualIssueStatus,
 } from './types';
-
 export interface IssueService {
   createIssue(
     selection: VisualSelection,
@@ -32,20 +32,23 @@ export interface IssueService {
     description?: string,
     severity?: VisualIssueSeverity,
     evidence?: IssueEvidenceSummary,
+    expectedResult?: string,
   ): Promise<Result<VisualIssue>>;
 
   getIssue(issueId: string): Promise<Result<VisualIssue>>;
   updateIssue(issueId: string, updates: IssueUpdate): Promise<Result<VisualIssue>>;
-  listIssues(): Promise<Result<VisualIssue[]>>;
+  listIssues(includeArchived?: boolean, limit?: number): Promise<Result<VisualIssue[]>>;
   archiveIssue(issueId: string): Promise<Result<VisualIssue>>;
   reopenIssue(issueId: string): Promise<Result<VisualIssue>>;
   deleteIssue(issueId: string): Promise<Result<VisualIssue>>;
+  /** Explicit user action; requestId makes retries of one accepted action safe. */
+  forkIssue?(issueId: string, title?: string, requestId?: string): Promise<Result<VisualIssue>>;
   health(): Promise<IssueServiceHealth>;
 }
-
 export interface IssueUpdate {
   title?: string;
   description?: string;
+  expectedResult?: string;
   status?: VisualIssueStatus;
   severity?: VisualIssueSeverity;
   tags?: string[];
@@ -60,6 +63,7 @@ export interface IssueServiceHealth {
 export class IssueServiceImpl implements IssueService {
   private persistence: IssuePersistence;
   private eventBus: EventBus;
+  private forkRequests = new Map<string, Promise<Result<VisualIssue>>>();
 
   constructor(eventBus: EventBus, persistence?: IssuePersistence) {
     this.eventBus = eventBus;
@@ -74,6 +78,7 @@ export class IssueServiceImpl implements IssueService {
     description?: string,
     severity?: VisualIssueSeverity,
     evidence?: IssueEvidenceSummary,
+    expectedResult?: string,
   ): Promise<Result<VisualIssue>> {
     const validation = this.validateCreateSelection(selection);
     if (!validation.ok) return err(validation.error);
@@ -86,6 +91,7 @@ export class IssueServiceImpl implements IssueService {
       description,
       severity,
       evidence,
+      expectedResult,
     );
 
     return this.persistCreatedIssue(issue, selection.summary.targetCount);
@@ -114,6 +120,7 @@ export class IssueServiceImpl implements IssueService {
     description?: string,
     severity?: VisualIssueSeverity,
     evidence?: IssueEvidenceSummary,
+    expectedResult?: string,
   ): VisualIssue {
     const now = new Date().toISOString();
     const issueId = crypto.randomUUID();
@@ -140,6 +147,7 @@ export class IssueServiceImpl implements IssueService {
     return {
       schemaVersion: 1 as const,
       issueId,
+      rootIssueId: issueId,
       sessionId,
       pageId,
       createdAt: now,
@@ -148,6 +156,7 @@ export class IssueServiceImpl implements IssueService {
       severity: severity ?? 'medium',
       title: effectiveTitle,
       description,
+      expectedResult,
       source: {
         createdFrom: 'visual-selection',
         selectionId: selection.selectionId,
@@ -233,6 +242,11 @@ export class IssueServiceImpl implements IssueService {
       issue.severity = updates.severity;
       changed = true;
     }
+    if (updates.expectedResult !== undefined && updates.expectedResult !== issue.expectedResult) {
+      events.push(createLifecycleEvent('updated', 'Expected result updated', 'local-user'));
+      issue.expectedResult = updates.expectedResult;
+      changed = true;
+    }
     if (updates.status !== undefined && updates.status !== issue.status) {
       if (!isValidTransition(issue.status, updates.status)) {
         return err(
@@ -258,7 +272,12 @@ export class IssueServiceImpl implements IssueService {
       return ok(issue);
     }
 
-    issue.updatedAt = new Date().toISOString();
+    const updatedAt = new Date();
+    const previousUpdatedAt = Date.parse(issue.updatedAt);
+    if (Number.isFinite(previousUpdatedAt) && updatedAt.getTime() <= previousUpdatedAt) {
+      updatedAt.setTime(previousUpdatedAt + 1);
+    }
+    issue.updatedAt = updatedAt.toISOString();
     issue.lifecycle = events;
 
     const redacted = redactIssue(issue);
@@ -274,16 +293,61 @@ export class IssueServiceImpl implements IssueService {
       correlationId: issueId,
       payload: { issueId, status: issue.status, severity: issue.severity },
     });
-
     return ok(redacted.issue);
   }
 
-  async listIssues(): Promise<Result<VisualIssue[]>> {
-    const result = await this.persistence.listIssues(false, false);
+  async listIssues(includeArchived = false, limit = 100): Promise<Result<VisualIssue[]>> {
+    const result = await this.persistence.listIssues(includeArchived, false);
     if (!result.ok) return result;
 
-    const redacted = result.value.map((issue) => redactIssue(issue).issue);
+    const redacted = result.value
+      .map((issue) => redactIssue(issue).issue)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.issueId.localeCompare(b.issueId))
+      .slice(0, Math.max(1, Math.min(limit, 500)));
     return ok(redacted);
+  }
+
+  async forkIssue(
+    issueId: string,
+    title?: string,
+    requestId?: string,
+  ): Promise<Result<VisualIssue>> {
+    if (!requestId) return this.doForkIssue(issueId, title);
+    const existing = this.forkRequests.get(requestId);
+    if (existing) return existing;
+    const operation = this.doForkIssue(issueId, title).finally(() => {
+      this.forkRequests.delete(requestId);
+    });
+    this.forkRequests.set(requestId, operation);
+    return operation;
+  }
+
+  private async doForkIssue(issueId: string, title?: string): Promise<Result<VisualIssue>> {
+    const parentResult = await this.persistence.loadIssue(issueId);
+    if (!parentResult.ok) return parentResult;
+    const parent = parentResult.value;
+    if (parent.deletedAt) return err(this.ieError('ISSUE_NOT_FOUND', 'Issue has been deleted'));
+
+    const now = new Date().toISOString();
+    const childId = crypto.randomUUID();
+    const rootIssueId = parent.rootIssueId ?? parent.issueId;
+    const child: VisualIssue = {
+      ...parent,
+      issueId: childId,
+      parentIssueId: parent.issueId,
+      rootIssueId,
+      forkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: undefined,
+      deletedAt: undefined,
+      status: 'open',
+      title: title?.trim() || `Follow-up: ${parent.title}`.slice(0, 80),
+      lifecycle: [makeCreatedEvent(), makeForkEvent(parent.issueId, childId)],
+    };
+    const saved = await this.persistence.saveIssue(redactIssue(child).issue);
+    if (!saved.ok) return saved;
+    return ok(redactIssue(child).issue);
   }
 
   async archiveIssue(issueId: string): Promise<Result<VisualIssue>> {
@@ -328,10 +392,17 @@ export class IssueServiceImpl implements IssueService {
       updatedAt: new Date().toISOString(),
       lifecycle: [...result.value.lifecycle, makeDeleteEvent()],
     });
-
     const saveResult = await this.persistence.saveIssue(redacted.issue);
     if (!saveResult.ok) return saveResult;
-
+    this.eventBus.publish({
+      eventId: crypto.randomUUID(),
+      eventType: 'VI_EVENT:ISSUE_UPDATED',
+      timestamp: redacted.issue.updatedAt,
+      version: '1.0.0',
+      source: 'visual-issue',
+      correlationId: issueId,
+      payload: { issueId, status: redacted.issue.status },
+    });
     return ok(redacted.issue);
   }
 

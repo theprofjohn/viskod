@@ -3,11 +3,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Result } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR, err, ok } from '@viskod/shared';
-import type { FirstRunSetupState } from './types';
+import type { FirstRunSetupState, SetupStateKind } from './types';
 
 const SETUP_DIR = 'setup';
 const STATUS_FILE = 'status.json';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+
+const SETUP_STATE_KINDS: SetupStateKind[] = ['complete', 'limited', 'incomplete'];
 
 function setupError(code: string, message: string) {
   return {
@@ -32,6 +34,25 @@ function ensureSetupDir(projectRoot: string): void {
   }
 }
 
+/**
+ * Minimal v2 shape validation. Guards the persisted file against corruption
+ * without re-implementing the full state contract here.
+ */
+function isV2SetupState(parsed: unknown): parsed is FirstRunSetupState {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const candidate = parsed as Record<string, unknown>;
+  return (
+    typeof candidate.setupId === 'string' &&
+    typeof candidate.state === 'string' &&
+    SETUP_STATE_KINDS.includes(candidate.state as SetupStateKind) &&
+    typeof candidate.completed === 'boolean' &&
+    typeof candidate.project === 'object' &&
+    candidate.project !== null &&
+    typeof candidate.capabilityStatus === 'object' &&
+    candidate.capabilityStatus !== null
+  );
+}
+
 export function loadSetupState(projectRoot: string): Result<FirstRunSetupState | null> {
   const filePath = getSetupFilePath(projectRoot);
 
@@ -41,18 +62,25 @@ export function loadSetupState(projectRoot: string): Result<FirstRunSetupState |
 
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
 
-    // Basic schema validation
-    if (parsed.schemaVersion !== SCHEMA_VERSION) {
-      return ok(null); // Incompatible version, treat as not setup
+    // Schema validation. A v1 file (schemaVersion 1) is deliberately treated
+    // as "not set up": the v1 state predates the complete/limited/incomplete
+    // model and must go through re-verification to produce trustworthy v2
+    // fields (state, capabilityStatus, verifiedAt).
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      (parsed as Record<string, unknown>).schemaVersion !== SCHEMA_VERSION
+    ) {
+      return ok(null);
     }
 
-    if (typeof parsed.setupId !== 'string') {
+    if (!isV2SetupState(parsed)) {
       return err(setupError('SETUP_STATE_CORRUPT', 'Setup state file is corrupted.'));
     }
 
-    return ok(parsed as FirstRunSetupState);
+    return ok(parsed);
   } catch (e) {
     return err(
       setupError(
@@ -90,6 +118,12 @@ export function createInitialSetupState(
   return {
     schemaVersion: SCHEMA_VERSION,
     setupId: crypto.randomUUID(),
+    state: 'incomplete',
+    limitedMode: false,
+    limitedReasons: [],
+    setupVersion: '0.0.0-dev',
+    sourceResolution: fs.existsSync(projectRoot) ? 'ready' : 'unavailable',
+    capabilityStatus: {},
     project: {
       rootDisplayName: path.basename(projectRoot),
       rootFingerprint: fingerprint,

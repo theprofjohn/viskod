@@ -142,6 +142,29 @@ pnpm exec tsx apps/studio/src/index.ts
 
 ---
 
+# First Run
+
+After installing, run the first-run setup to verify your environment and
+configure your coding agent:
+
+```bash
+viskod setup --project-root <your-app-dir>
+```
+
+This checks Node.js, Chromium, and the target app URL, then generates a
+non-destructive MCP configuration for Claude Desktop, Cursor, or OpenCode.
+
+Run `viskod doctor` at any time for read-only diagnostics against your
+current state:
+
+```bash
+viskod doctor --project-root <your-app-dir>
+```
+
+For a detailed walkthrough see [docs/setup.md](docs/setup.md).
+
+---
+
 # Studio Quickstart
 
 The recommended Viskod workflow runs through **Studio**:
@@ -219,13 +242,32 @@ Add to `~/.config/opencode/opencode.json` or a project-level
 Ready-made files for all three clients live in
 [examples/mcp-configs/](examples/mcp-configs/).
 
+## Available Commands
+
+```text
+viskod setup --project-root <dir>   # first-run verification
+viskod doctor --project-root <dir>  # read-only diagnostics
+viskod serve --url <APP_URL>        # start MCP server
+viskod start                        # start daemon
+viskod stop                         # stop daemon
+viskod status                       # daemon status
+viskod health                       # connectivity check
+viskod install <client>             # install agent config
+viskod scan                         # project scan
+viskod capture <selector>           # capture a context packet
+viskod export                       # export capture data
+```
+
 ## What the agent can do
 
-`tools/list` exposes `viskod_navigate`, `viskod_select_element`,
-`viskod_capture_context`, `create_agent_handoff`, `create_visual_review`,
-`recapture_visual_review`, and `get_visual_review`. A capture returns a
-structured context packet: DOM snapshot, computed styles, screenshot
-metadata, hierarchy, evidence sources, and a confidence rating.
+The MCP server registers **31 tools**. Key tools include
+`viskod_capture_context`, `viskod_select_element`,
+`create_agent_handoff`, `create_visual_review`,
+`get_visual_review`, `recapture_visual_review`,
+`resolve_usage_site_hints`, `get_setup_state`, `run_setup_checks`,
+and `complete_setup`. A capture returns a structured context packet: DOM
+snapshot, computed styles, screenshot metadata, hierarchy, evidence
+sources, and a confidence rating.
 
 Example agent prompt:
 [examples/agent-workflows/prompts/fix-visual-issue.md](examples/agent-workflows/prompts/fix-visual-issue.md)
@@ -258,13 +300,17 @@ Viskod is an **alpha** release. Expect rough edges and change:
   viewport is not captured.
 * **Network evidence comes from the page context only** — worker or
   extension network activity is not captured.
-* In the MCP path, **selection is CSS-selector-dependent**; dynamic class
-  names or shadow DOM can complicate selection. (Studio's point-and-click
-  flow hides selectors from you.)
+* **Selection has explicit browser boundaries** — regular DOM targets use the
+  normal resolution path. Application Shadow DOM and iframe contents are not
+  traversed by the current document-root selector/overlay path; closed Shadow
+  DOM and cross-origin iframes remain host/frame boundaries.
 * **Source hints are best-effort** — every hint carries a confidence rating
   and reasoning; treat them as leads, not facts.
 * Capture requires the browser session that `viskod serve` starts; it cannot
   capture from a detached or external browser.
+* Target navigation is local-first: HTTP(S) loopback targets are accepted, URL
+  credentials and non-HTTP(S) schemes are rejected, and remote hosts require an
+  explicit trusted-host allowlist. Redirects are checked against the same policy.
 * The MCP server is launched by your MCP client over stdin/stdout; it is not
   a standalone network service.
 

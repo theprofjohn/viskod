@@ -67,6 +67,23 @@ const state: SharedState = {
   projectRootPath: '',
 };
 
+function requireIssueService(): IssueServiceImpl {
+  if (!state.issueService) throw new Error('state.issueService not initialized');
+  return state.issueService;
+}
+function requireSourceHintEngine(): SourceHintEngine {
+  if (!state.sourceHintEngine) throw new Error('state.sourceHintEngine not initialized');
+  return state.sourceHintEngine;
+}
+function requireHandoffService(): HandoffServiceImpl {
+  if (!state.handoffService) throw new Error('state.handoffService not initialized');
+  return state.handoffService;
+}
+function requireReviewService(): ReviewServiceImpl {
+  if (!state.reviewService) throw new Error('state.reviewService not initialized');
+  return state.reviewService;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -383,7 +400,7 @@ async function resolveHintsForIssue(issueId: string): Promise<{
   }>;
   warnings: string[];
 }> {
-  const issueResult = await state.issueService!.getIssue(issueId);
+  const issueResult = await requireIssueService().getIssue(issueId);
   if (!issueResult.ok) return { status: 'missing', hints: [], warnings: ['Issue not found'] };
 
   const issue = issueResult.value;
@@ -423,7 +440,7 @@ async function resolveHintsForIssue(issueId: string): Promise<{
     captureId: crypto.randomUUID(),
   };
 
-  const result = await state.sourceHintEngine!.resolveUsageSiteHints(hintInput, 5);
+  const result = await requireSourceHintEngine().resolveUsageSiteHints(hintInput, 5);
   if (!result.ok) return { status: 'missing', hints: [], warnings: [result.error.message] };
 
   return {
@@ -485,7 +502,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -566,7 +583,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -632,7 +649,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -701,7 +718,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -767,7 +784,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -833,7 +850,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -903,7 +920,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -971,7 +988,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1038,7 +1055,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1105,7 +1122,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1171,7 +1188,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1185,7 +1202,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     // Resolve hints manually to pass to handoff
     const hints = await resolveHintsForIssue(issueResult.value.issueId);
 
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       {
         issueId: issueResult.value.issueId,
         userInstruction: 'Fix this UI issue',
@@ -1206,7 +1223,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
 
-      const get = await state.handoffService!.getHandoff(handoffResult.value.handoffId);
+      const get = await requireHandoffService().getHandoff(handoffResult.value.handoffId);
       expect(get.ok).toBe(true);
       if (get.ok) {
         const brief = get.value.brief;
@@ -1261,7 +1278,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1272,7 +1289,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
     state.issueIds.push(issueResult.value.issueId);
 
-    const createResult = await state.reviewService!.createReview(
+    const createResult = await requireReviewService().createReview(
       { issueId: issueResult.value.issueId },
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1281,7 +1298,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     if (createResult.ok) {
       state.reviewIds.push(createResult.value.reviewId);
 
-      const get = await state.reviewService!.getReview(createResult.value.reviewId);
+      const get = await requireReviewService().getReview(createResult.value.reviewId);
       expect(get.ok).toBe(true);
       if (get.ok) {
         // Verify the review preserves evidence summary
@@ -1329,7 +1346,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       captureId: crypto.randomUUID(),
     };
 
-    const result = await state.sourceHintEngine!.resolveUsageSiteHints(hintInput, 5);
+    const result = await requireSourceHintEngine().resolveUsageSiteHints(hintInput, 5);
     expect(result.ok).toBe(true);
     if (result.ok) {
       console.log(
@@ -1471,7 +1488,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
       const ev = await clickAt(p, target.x, target.y);
       if (ev) {
         const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-        const issueResult = await state.issueService!.createIssue(
+        const issueResult = await requireIssueService().createIssue(
           selection,
           'dogfood-p25-session',
           'dogfood-p25-page',
@@ -1480,7 +1497,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
           state.issueIds.push(issueResult.value.issueId);
 
           // Handoff
-          const handoffResult = await state.handoffService!.createHandoff(
+          const handoffResult = await requireHandoffService().createHandoff(
             { issueId: issueResult.value.issueId },
             'dogfood-p25-session',
             'dogfood-p25-page',
@@ -1488,7 +1505,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
           if (handoffResult.ok) state.handoffIds.push(handoffResult.value.handoffId);
 
           // Review
-          const reviewResult = await state.reviewService!.createReview(
+          const reviewResult = await requireReviewService().createReview(
             { issueId: issueResult.value.issueId },
             'dogfood-p25-session',
             'dogfood-p25-page',
@@ -1538,7 +1555,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1561,11 +1578,15 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     const defHints = hints.hints.filter((h) => h.kind === 'definition-site');
 
     if (usageHints.length > 0 && defHints.length > 0) {
-      const firstUsageIdx = hints.hints.indexOf(usageHints[0]!);
-      const firstDefIdx = hints.hints.indexOf(defHints[0]!);
-      const usageBeatsDef = firstUsageIdx < firstDefIdx;
-      console.log(`  DF25-19: usage-site ranks above definition-site: ${usageBeatsDef}`);
-      expect(usageBeatsDef).toBe(true);
+      const firstUsage = usageHints[0];
+      const firstDef = defHints[0];
+      if (firstUsage && firstDef) {
+        const firstUsageIdx = hints.hints.indexOf(firstUsage);
+        const firstDefIdx = hints.hints.indexOf(firstDef);
+        const usageBeatsDef = firstUsageIdx < firstDefIdx;
+        console.log(`  DF25-19: usage-site ranks above definition-site: ${usageBeatsDef}`);
+        expect(usageBeatsDef).toBe(true);
+      }
     }
 
     await p.close();
@@ -1606,7 +1627,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1627,11 +1648,15 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     const defHints = hints.hints.filter((h) => h.kind === 'definition-site');
 
     if (usageHints.length > 0 && defHints.length > 0) {
-      const firstUsageIdx = hints.hints.indexOf(usageHints[0]!);
-      const firstDefIdx = hints.hints.indexOf(defHints[0]!);
-      const usageBeatsDef = firstUsageIdx < firstDefIdx;
-      console.log(`  DF25-20: usage-site ranks above definition-site: ${usageBeatsDef}`);
-      expect(usageBeatsDef).toBe(true);
+      const firstUsage = usageHints[0];
+      const firstDef = defHints[0];
+      if (firstUsage && firstDef) {
+        const firstUsageIdx = hints.hints.indexOf(firstUsage);
+        const firstDefIdx = hints.hints.indexOf(firstDef);
+        const usageBeatsDef = firstUsageIdx < firstDefIdx;
+        console.log(`  DF25-20: usage-site ranks above definition-site: ${usageBeatsDef}`);
+        expect(usageBeatsDef).toBe(true);
+      }
     }
 
     await p.close();
@@ -1666,7 +1691,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
 
     // Create issue
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1684,7 +1709,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     expect(hints.hints.length).toBeGreaterThan(0);
 
     // Create handoff with hints
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       {
         issueId: issueResult.value.issueId,
         sourceHints: hints.hints.map((h) => ({
@@ -1703,7 +1728,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
 
-      const get = await state.handoffService!.getHandoff(handoffResult.value.handoffId);
+      const get = await requireHandoffService().getHandoff(handoffResult.value.handoffId);
       expect(get.ok).toBe(true);
       if (get.ok) {
         expect(get.value.brief.sourceHints).toBeDefined();
@@ -1747,7 +1772,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
 
     // Issue creation should work even if source hints fail
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1760,7 +1785,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     state.issueIds.push(issueResult.value.issueId);
 
     // Handoff creation should work without source hints
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       { issueId: issueResult.value.issueId },
       'dogfood-p25-session',
       'dogfood-p25-page',
@@ -1769,7 +1794,7 @@ describe('Phase 25 Dogfood — Usage-Site Source Hints', () => {
     if (handoffResult.ok) state.handoffIds.push(handoffResult.value.handoffId);
 
     // Review creation should work
-    const reviewResult = await state.reviewService!.createReview(
+    const reviewResult = await requireReviewService().createReview(
       { issueId: issueResult.value.issueId },
       'dogfood-p25-session',
       'dogfood-p25-page',

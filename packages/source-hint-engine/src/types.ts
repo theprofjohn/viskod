@@ -250,5 +250,9 @@ export interface HintEngineHealth {
   hintsGenerated: number;
   hintsFailed: number;
   cacheSize: number;
+  /** Phase 33A: import graph cache occupancy (bounded by IMPORT_GRAPH_CACHE_MAX). */
+  importGraphCacheSize: number;
+  /** Phase 33A: current scan generation (bumped by invalidateCache). */
+  generation: number;
   averageProcessingTimeMs: number;
 }

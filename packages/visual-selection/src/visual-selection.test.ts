@@ -194,7 +194,9 @@ describe('Target Scoring', () => {
   it('scores appropriate depth higher than extreme depth', () => {
     const shallow = scoreCandidate(makeCandidate({ ancestorDepth: 2 }), 50, 20);
     const deep = scoreCandidate(makeCandidate({ ancestorDepth: 10 }), 50, 20);
-    expect(shallow.signals.appropriateDepth!).toBeGreaterThan(deep.signals.appropriateDepth!);
+    expect(shallow.signals.appropriateDepth ?? 0).toBeGreaterThan(
+      deep.signals.appropriateDepth ?? 0,
+    );
   });
 
   it('filters technical elements', () => {

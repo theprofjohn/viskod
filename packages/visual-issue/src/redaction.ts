@@ -72,7 +72,12 @@ export function redactIssue(issue: VisualIssue): {
   for (const r of redactedTitle.redactions) allRules.add(r);
 
   const redactedDescription = issue.description ? applyTextRedaction(issue.description) : null;
-  if (redactedDescription) for (const r of redactedDescription.redactions) allRules.add(r);
+  const redactedExpectedResult = issue.expectedResult
+    ? applyTextRedaction(issue.expectedResult)
+    : null;
+  if (redactedExpectedResult) {
+    for (const r of redactedExpectedResult.redactions) allRules.add(r);
+  }
 
   const redactedPreview = issue.targetSummary.textPreview
     ? applyTextRedaction(issue.targetSummary.textPreview)
@@ -101,6 +106,7 @@ export function redactIssue(issue: VisualIssue): {
     ...issue,
     title: redactedTitle.text,
     description: redactedDescription?.text ?? issue.description,
+    expectedResult: redactedExpectedResult?.text ?? issue.expectedResult,
     source: {
       ...issue.source,
       selectionSnapshot: redactedSnapshot,

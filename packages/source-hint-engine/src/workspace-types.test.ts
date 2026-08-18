@@ -1,10 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { HintInput, ProjectContext } from './types';
 
 describe('workspace field in types', () => {
   it('ProjectContext accepts workspace field', () => {
     const ctx: ProjectContext = {
-      metadata: { projectId: 'x', name: 'x', rootPath: '/r', packageManager: 'pnpm', language: 'ts' },
+      metadata: {
+        projectId: 'x',
+        name: 'x',
+        rootPath: '/r',
+        packageManager: 'pnpm',
+        language: 'ts',
+      },
       workspace: {
         isWorkspace: true,
         workspaceType: 'pnpm-workspace',
@@ -28,7 +34,13 @@ describe('workspace field in types', () => {
       domContext: { tagName: 'div' },
       route: { url: 'http://localhost', pathname: '/' },
       project: {
-        metadata: { projectId: 'x', name: 'x', rootPath: '/r', packageManager: 'pnpm', language: 'ts' },
+        metadata: {
+          projectId: 'x',
+          name: 'x',
+          rootPath: '/r',
+          packageManager: 'pnpm',
+          language: 'ts',
+        },
         workspace: {
           isWorkspace: false,
           workspaceType: 'single',
@@ -42,7 +54,13 @@ describe('workspace field in types', () => {
 
   it('ProjectContext works without workspace field', () => {
     const ctx: ProjectContext = {
-      metadata: { projectId: 'x', name: 'x', rootPath: '/r', packageManager: 'pnpm', language: 'ts' },
+      metadata: {
+        projectId: 'x',
+        name: 'x',
+        rootPath: '/r',
+        packageManager: 'pnpm',
+        language: 'ts',
+      },
     };
     expect(ctx.workspace).toBeUndefined();
   });

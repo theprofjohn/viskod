@@ -755,7 +755,12 @@ describe('Persistence', () => {
     expect(list.ok).toBe(true);
     if (list.ok) {
       expect(list.value.length).toBe(2);
-      expect(list.value[0]!.createdAt >= list.value[1]!.createdAt).toBe(true);
+      const first = list.value[0];
+      const second = list.value[1];
+      expect(first && second).toBeTruthy();
+      if (first && second) {
+        expect(first.createdAt >= second.createdAt).toBe(true);
+      }
     }
   });
 });
@@ -1078,13 +1083,16 @@ describe('MCP/Tool Schema', () => {
     expect(listResult.ok).toBe(true);
     if (listResult.ok) {
       expect(listResult.value.length).toBeGreaterThan(0);
-      const item = listResult.value[0]!;
-      expect(item.handoffId).toBeTruthy();
-      expect(item.issueId).toBeTruthy();
-      expect(item.title).toBeTruthy();
-      expect(item.status).toBeTruthy();
-      expect(item.createdAt).toBeTruthy();
-      expect(item.updatedAt).toBeTruthy();
+      const item = listResult.value[0];
+      expect(item).toBeDefined();
+      if (item) {
+        expect(item.handoffId).toBeTruthy();
+        expect(item.issueId).toBeTruthy();
+        expect(item.title).toBeTruthy();
+        expect(item.status).toBeTruthy();
+        expect(item.createdAt).toBeTruthy();
+        expect(item.updatedAt).toBeTruthy();
+      }
     }
   });
 });

@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
-import { resolveWorkspaceImport, buildWorkspaceDependencyClosure } from './import-graph';
 import type { WorkspacePackageMetadata } from '@viskod/shared';
+import { describe, expect, it } from 'vitest';
+import { buildWorkspaceDependencyClosure, resolveWorkspaceImport } from './import-graph';
 
 const FIXTURE_ROOT = path.resolve(__dirname, '../../../tests/fixtures/monorepo');
 

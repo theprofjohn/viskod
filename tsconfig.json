@@ -43,11 +43,12 @@
     { "path": "./packages/audit" },
     { "path": "./packages/workspace" },
     { "path": "./packages/runtime-session" },
+    { "path": "./packages/setup" },
     { "path": "./packages/visual-selection" },
     { "path": "./packages/visual-issue" },
     { "path": "./packages/agent-handoff" },
     { "path": "./packages/visual-review" },
     { "path": "./apps/studio" }
   ],
-  "exclude": ["examples/dogfood-app"]
+  "exclude": ["examples/dogfood-app", "tests/fixtures/monorepo"]
 }

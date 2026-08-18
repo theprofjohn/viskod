@@ -3,25 +3,58 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Result } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR, err, ok } from '@viskod/shared';
+import { checkAgentConfigReadiness as resolveAgentConfigReadiness } from './agent-config';
 import { runBrowserSmoke, runCaptureSmoke } from './browser-smoke';
-import { checkAgentConfigReadiness, runSetupChecks, verifyMcpToolsLive } from './checks';
+import { runSetupChecks, verifyMcpToolsLive } from './checks';
 import { detectProject } from './detector';
 import { createInitialSetupState, loadSetupState, saveSetupState } from './persistence';
 import { redactSetupState } from './redaction';
+import type { AgentConfigInfo } from './types';
 import type {
+  CapabilityStatus,
   FirstRunSetupState,
   LiveMcpVerification,
   ProjectDetectionResult,
   SetupCapabilities,
   SetupCheckResult,
   SetupSmokeResult,
+  SetupStateKind,
   WizardState,
   WizardStep,
   WorkspaceInitResult,
 } from './types';
 import { initializeWorkspace } from './workspace';
 export { verifyMcpToolsRuntime } from './mcp-runtime';
-export { validateAppUrl, checkAgentConfigReadiness } from './checks';
+export { validateAppUrl } from './checks';
+export {
+  detectRuntimeMode,
+  findViskodCheckoutRoot,
+  getMcpServeCommand,
+  type McpServeCommand,
+  type RuntimeMode,
+} from './command-factory';
+export {
+  checkAgentConfigReadiness,
+  installAgentConfig,
+  readAgentConfig,
+  resolveAgentConfigPath,
+  type AgentKind,
+  type InstallAgentConfigInput,
+} from './agent-config';
+export { runDoctor, type DoctorReport } from './doctor';
+export type {
+  AgentConfigInfo,
+  CapabilityStatus,
+  FirstRunSetupState,
+  LiveMcpVerification,
+  McpToolVerification,
+  ProjectDetectionResult,
+  SetupCapabilities,
+  SetupCheckResult,
+  SetupCheckSeverity,
+  SetupSmokeResult,
+  SetupStateKind,
+} from './types';
 
 function setupError(code: string, message: string) {
   return {
@@ -35,29 +68,101 @@ function setupError(code: string, message: string) {
   };
 }
 
-function deriveCapabilities(checks: SetupCheckResult[]): SetupCapabilities {
-  const statusMap = new Map<string, SetupCheckResult['status']>();
-  for (const c of checks) {
-    statusMap.set(c.checkId, c.status);
-  }
+const CAPABILITY_IDS: Array<keyof SetupCapabilities> = [
+  'captureContext',
+  'recaptureContext',
+  'exportContext',
+  'visualSelection',
+  'visualIssue',
+  'agentHandoff',
+  'visualReview',
+  'usageSiteSourceHints',
+  'mcpServer',
+  'browserRuntime',
+  'appReachable',
+  'agentConfigReady',
+];
 
-  const isAvailable = (id: string) =>
-    statusMap.get(id) === 'pass' || statusMap.get(id) === 'warning';
+/**
+ * v2 capability model: every capability gets an explicit status. 'skipped'
+ * is reserved for explicit user choice (consented limited mode with no smoke
+ * attempt). captureContext/recaptureContext/exportContext derive from the
+ * capture smoke packetId, NOT from the mcp-tools check.
+ */
+function deriveCapabilityStatuses(input: {
+  checks: SetupCheckResult[];
+  smoke?: SetupSmokeResult;
+  agentConfig: AgentConfigInfo;
+  limitedMode: boolean;
+}): Record<string, CapabilityStatus> {
+  const statusOf = (checkId: string): CapabilityStatus => {
+    const check = input.checks.find((c) => c.checkId === checkId);
+    if (!check) return 'unavailable';
+    if (check.status === 'pass' || check.status === 'warning') return 'verified';
+    if (check.status === 'skipped') return 'skipped';
+    return 'failed';
+  };
+
+  const bestStatus = (...ids: string[]): CapabilityStatus => {
+    const statuses = ids.map(statusOf);
+    if (statuses.includes('verified')) return 'verified';
+    if (statuses.includes('failed')) return 'failed';
+    if (statuses.includes('skipped')) return 'skipped';
+    return 'unavailable';
+  };
+
+  const captureContext: CapabilityStatus = (() => {
+    if (input.limitedMode && !input.smoke) return 'skipped';
+    if (input.smoke?.packetId) return 'verified';
+    if (input.smoke) return 'failed';
+    return 'unavailable';
+  })();
 
   return {
-    captureContext: isAvailable('mcp-tools'),
-    recaptureContext: isAvailable('mcp-tools'),
-    exportContext: isAvailable('mcp-tools'),
-    visualSelection: isAvailable('visual-selection'),
-    visualIssue: isAvailable('visual-issue'),
-    agentHandoff: isAvailable('agent-handoff'),
-    visualReview: isAvailable('visual-review'),
-    usageSiteSourceHints: isAvailable('usage-site-hints') || isAvailable('source-hints'),
-    mcpServer: isAvailable('mcp-tools'),
-    browserRuntime: isAvailable('browser-runtime'),
-    appReachable: isAvailable('app-reachability'),
-    agentConfigReady: false, // Set later during completeSetup
+    captureContext,
+    recaptureContext: captureContext,
+    exportContext: captureContext,
+    visualSelection: statusOf('visual-selection'),
+    visualIssue: statusOf('visual-issue'),
+    agentHandoff: statusOf('agent-handoff'),
+    visualReview: statusOf('visual-review'),
+    usageSiteSourceHints: bestStatus('usage-site-hints', 'source-hints'),
+    mcpServer: statusOf('mcp-tools-runtime'),
+    browserRuntime: statusOf('browser-runtime'),
+    appReachable: statusOf('app-reachability'),
+    agentConfigReady: input.agentConfig.detected
+      ? input.agentConfig.verified
+        ? 'verified'
+        : 'failed'
+      : 'unavailable',
   };
+}
+
+function capabilityMap(statuses: Record<string, CapabilityStatus>): SetupCapabilities {
+  const result = {} as SetupCapabilities;
+  for (const id of CAPABILITY_IDS) {
+    result[id] = statuses[id] === 'verified';
+  }
+  return result;
+}
+
+function deriveLimitedReasons(gates: {
+  mcpRuntimePassed: boolean;
+  browserVerified: boolean;
+  captureSmokePassed: boolean;
+}): string[] {
+  const reasons: string[] = [];
+  if (!gates.mcpRuntimePassed) reasons.push('mcpServer');
+  if (!gates.browserVerified) reasons.push('browserRuntime');
+  if (!gates.captureSmokePassed) reasons.push('captureContext');
+  return reasons;
+}
+
+function deriveSourceResolution(
+  projectRoot: string | undefined,
+): 'ready' | 'unavailable' | 'invalid' {
+  if (projectRoot === undefined || projectRoot.length === 0) return 'unavailable';
+  return fs.existsSync(projectRoot) ? 'ready' : 'invalid';
 }
 
 // --- Public API ---
@@ -91,6 +196,22 @@ export function verifyMcpTools(): LiveMcpVerification {
   return verifyMcpToolsLive();
 }
 
+/**
+ * v2 setup completion semantics:
+ *
+ * - full:      !hasCriticalFailure && mcpRuntimePassed && browserVerified &&
+ *              captureSmokePassed  -> state 'complete', limitedMode false,
+ *              verifiedAt = now.
+ * - explicit:  input.limitedMode === true && !hasCriticalFailure -> state
+ *              'limited', limitedMode true, limitedReasons recorded (caller-
+ *              provided or derived from failed gates). NEVER implicit.
+ * - otherwise: state 'incomplete', completed false, completedAt undefined —
+ *              STILL PERSISTED so the failed attempt and per-capability
+ *              failures are recorded.
+ *
+ * A later successful verification naturally overwrites the state (including
+ * clearing limited mode) — recovery is a re-run.
+ */
 export function completeSetup(input: {
   projectRoot: string;
   project: ProjectDetectionResult;
@@ -98,7 +219,9 @@ export function completeSetup(input: {
   smoke?: SetupSmokeResult;
   warnings?: string[];
   limitedMode?: boolean;
+  limitedReasons?: string[];
   appUrl?: string;
+  setupVersion?: string;
 }): Result<FirstRunSetupState> {
   const existing = loadSetupState(input.projectRoot);
   const baseState =
@@ -106,15 +229,11 @@ export function completeSetup(input: {
       ? existing.value
       : createInitialSetupState(input.projectRoot, input.project.rootFingerprint);
 
-  const capabilities = deriveCapabilities(input.checks);
-
   // Required gates for full setup completion:
-  // 1. No critical failures (node, package manager, workspace)
+  // 1. No critical failures (node, package manager, workspace, ...)
   // 2. MCP runtime tools/list must pass
   // 3. Browser runtime must pass
   // 4. Capture smoke must produce a packetId
-  //
-  // Limited mode bypasses gates 2-4 for environments where full setup can't complete.
   const hasCriticalFailure = input.checks.some(
     (c) =>
       c.severity === 'required' &&
@@ -123,26 +242,63 @@ export function completeSetup(input: {
       c.checkId !== 'browser-runtime',
   );
 
-  const mcpRuntimeCheck = input.checks.find((c) => c.checkId === 'mcp-tools-runtime');
-  const mcpRuntimePassed = mcpRuntimeCheck?.status === 'pass';
-
-  const browserCheck = input.checks.find((c) => c.checkId === 'browser-runtime');
-  const browserVerified = browserCheck?.status === 'pass';
-
+  const mcpRuntimePassed =
+    input.checks.find((c) => c.checkId === 'mcp-tools-runtime')?.status === 'pass';
+  const browserVerified =
+    input.checks.find((c) => c.checkId === 'browser-runtime')?.status === 'pass';
   const captureSmokePassed = !!input.smoke?.packetId;
 
   const isFullCompletion =
     !hasCriticalFailure && mcpRuntimePassed && browserVerified && captureSmokePassed;
-  const isLimitedCompletion =
-    !hasCriticalFailure && (input.limitedMode || !mcpRuntimePassed || !captureSmokePassed);
+  const isExplicitLimited = input.limitedMode === true && !hasCriticalFailure;
 
-  const completed = isFullCompletion || isLimitedCompletion;
-  // Check agent config readiness
-  const agentConfig = checkAgentConfigReadiness(input.projectRoot);
+  const failedGates = { mcpRuntimePassed, browserVerified, captureSmokePassed };
+
+  let state: SetupStateKind;
+  let limitedMode: boolean;
+  let limitedReasons: string[];
+  let verifiedAt: string | undefined;
 
   const now = new Date().toISOString();
-  const state: FirstRunSetupState = {
+
+  if (isFullCompletion) {
+    state = 'complete';
+    limitedMode = false;
+    limitedReasons = [];
+    verifiedAt = now;
+  } else if (isExplicitLimited) {
+    state = 'limited';
+    limitedMode = true;
+    limitedReasons = input.limitedReasons ?? deriveLimitedReasons(failedGates);
+    verifiedAt = now;
+  } else {
+    state = 'incomplete';
+    limitedMode = false;
+    limitedReasons = input.limitedReasons ?? deriveLimitedReasons(failedGates);
+    verifiedAt = undefined;
+  }
+
+  const completed = state !== 'incomplete';
+
+  // Check agent config readiness (home/cwd based detection)
+  const agentConfig = resolveAgentConfigReadiness({ cwd: input.projectRoot });
+  const capabilityStatus = deriveCapabilityStatuses({
+    checks: input.checks,
+    smoke: input.smoke,
+    agentConfig,
+    limitedMode: input.limitedMode === true,
+  });
+
+  const nextState: FirstRunSetupState = {
     ...baseState,
+    state,
+    limitedMode,
+    limitedReasons,
+    setupVersion: input.setupVersion ?? baseState.setupVersion,
+    verifiedAt,
+    projectRoot: input.projectRoot,
+    sourceResolution: deriveSourceResolution(input.projectRoot),
+    capabilityStatus,
     project: {
       rootDisplayName: input.project.rootDisplayName,
       rootFingerprint: input.project.rootFingerprint,
@@ -156,10 +312,7 @@ export function completeSetup(input: {
       directories: baseState.workspace.directories,
     },
     checks: input.checks,
-    capabilities: {
-      ...capabilities,
-      agentConfigReady: agentConfig.verified,
-    },
+    capabilities: capabilityMap(capabilityStatus),
     smoke: input.smoke,
     agentConfig,
     completed,
@@ -167,10 +320,10 @@ export function completeSetup(input: {
     updatedAt: now,
   };
 
-  const saveResult = saveSetupState(input.projectRoot, state);
+  const saveResult = saveSetupState(input.projectRoot, nextState);
   if (!saveResult.ok) return err(saveResult.error);
 
-  return ok(redactSetupState(state));
+  return ok(redactSetupState(nextState));
 }
 
 export async function repairSetup(input: {
@@ -266,7 +419,7 @@ export function createWizardState(): WizardState {
 
 export async function advanceWizard(
   state: WizardState,
-  input?: { projectRoot?: string; appUrl?: string },
+  input?: { projectRoot?: string; appUrl?: string; limitedMode?: boolean },
 ): Promise<Result<WizardState>> {
   switch (state.step) {
     case 'welcome':
@@ -288,7 +441,7 @@ export async function advanceWizard(
       return advanceFromSmoke(state);
 
     case 'finish':
-      return advanceFromFinish(state);
+      return advanceFromFinish(state, input);
 
     case 'ready':
       return ok(state);
@@ -415,30 +568,56 @@ async function advanceFromChecks(state: WizardState): Promise<Result<WizardState
 }
 
 function advanceFromSmoke(state: WizardState): Result<WizardState> {
-  // If capture smoke didn't produce a packetId, we're in limited mode
-  const hasPacket = state.smoke?.packetId;
+  // No implicit limited mode: advancing to finish never auto-selects it.
+  // The explicit-consent decision belongs to advanceFromFinish.
   return ok({
     ...state,
     step: 'finish',
-    warnings: hasPacket
-      ? state.warnings
-      : [...state.warnings, 'Capture smoke did not produce a packetId — limited mode'],
   });
 }
 
-function advanceFromFinish(state: WizardState): Result<WizardState> {
+function advanceFromFinish(
+  state: WizardState,
+  input?: { limitedMode?: boolean },
+): Result<WizardState> {
   if (!state.project || !state.checks) {
     return err(setupError('SETUP_INCOMPLETE', 'Cannot finish setup without project and checks.'));
   }
 
-  const hasCaptureSmoke = state.smoke?.packetId;
+  const hasCriticalFailure = state.checks.some(
+    (c) =>
+      c.severity === 'required' &&
+      c.status === 'fail' &&
+      c.checkId !== 'mcp-tools-runtime' &&
+      c.checkId !== 'browser-runtime',
+  );
+  const mcpRuntimePassed =
+    state.checks.find((c) => c.checkId === 'mcp-tools-runtime')?.status === 'pass';
+  const browserVerified =
+    state.checks.find((c) => c.checkId === 'browser-runtime')?.status === 'pass';
+  const captureSmokePassed = !!state.smoke?.packetId;
+
+  const isFullCompletion =
+    !hasCriticalFailure && mcpRuntimePassed && browserVerified && captureSmokePassed;
+
+  // Explicit consent is REQUIRED for anything short of a full completion.
+  // advanceWizard(state, { limitedMode: true }) is the only consent path.
+  if (!isFullCompletion && input?.limitedMode !== true) {
+    return err(
+      setupError(
+        'SETUP_LIMITED_CONSENT_REQUIRED',
+        'Full setup could not be verified. To continue, explicitly accept limited mode (capture, browser, and MCP runtime guarantees will be disabled).',
+      ),
+    );
+  }
+
   const result = completeSetup({
     projectRoot: state.project.rootPath,
     project: state.project,
     checks: state.checks,
     smoke: state.smoke,
     warnings: state.warnings,
-    limitedMode: !hasCaptureSmoke,
+    limitedMode: input?.limitedMode ?? false,
     appUrl: state.appUrl,
   });
 
@@ -478,5 +657,5 @@ export function getWizardStepDescription(step: WizardStep): string {
 
 export function isSetupComplete(projectRoot: string): boolean {
   const result = loadSetupState(projectRoot);
-  return result.ok && result.value !== null && result.value.completed;
+  return result.ok && result.value !== null && result.value.state !== 'incomplete';
 }

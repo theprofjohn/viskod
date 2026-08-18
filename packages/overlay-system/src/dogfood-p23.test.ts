@@ -40,6 +40,15 @@ const state: SharedState = {
   handoffService: null,
 };
 
+function requireIssueService(): IssueServiceImpl {
+  if (!state.issueService) throw new Error('state.issueService not initialized');
+  return state.issueService;
+}
+function requireHandoffService(): HandoffServiceImpl {
+  if (!state.handoffService) throw new Error('state.handoffService not initialized');
+  return state.handoffService;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
@@ -289,7 +298,7 @@ async function createIssueFromOverlay(p: Page): Promise<string | null> {
   if (!ev) return null;
 
   const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-  const result = await state.issueService!.createIssue(
+  const result = await requireIssueService().createIssue(
     selection,
     'dogfood-session',
     'dogfood-page',
@@ -315,7 +324,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
       return;
     }
 
-    const result = await state.handoffService!.createHandoff(
+    const result = await requireHandoffService().createHandoff(
       { issueId },
       'dogfood-session',
       'dogfood-page',
@@ -363,7 +372,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-session',
       'dogfood-page',
@@ -375,7 +384,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       { issueId: issueResult.value.issueId },
       'dogfood-session',
       'dogfood-page',
@@ -426,7 +435,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-session',
       'dogfood-page',
@@ -438,7 +447,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       { issueId: issueResult.value.issueId },
       'dogfood-session',
       'dogfood-page',
@@ -446,7 +455,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     expect(handoffResult.ok).toBe(true);
     if (handoffResult.ok) {
       state.handoffIds.push(handoffResult.value.handoffId);
-      const full = await state.handoffService!.getHandoff(handoffResult.value.handoffId);
+      const full = await requireHandoffService().getHandoff(handoffResult.value.handoffId);
       expect(full.ok).toBe(true);
       if (full.ok) {
         const json = JSON.stringify(full.value);
@@ -496,7 +505,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-session',
       'dogfood-page',
@@ -508,7 +517,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       { issueId: issueResult.value.issueId },
       'dogfood-session',
       'dogfood-page',
@@ -559,7 +568,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-session',
       'dogfood-page',
@@ -571,7 +580,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       { issueId: issueResult.value.issueId },
       'dogfood-session',
       'dogfood-page',
@@ -622,7 +631,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-session',
       'dogfood-page',
@@ -634,7 +643,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       { issueId: issueResult.value.issueId },
       'dogfood-session',
       'dogfood-page',
@@ -688,7 +697,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     const selection = makeVisualSelection(ev, p.url(), 'shadcn-admin');
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-session',
       'dogfood-page',
@@ -700,7 +709,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       { issueId: issueResult.value.issueId },
       'dogfood-session',
       'dogfood-page',
@@ -727,7 +736,9 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
         ),
       );
       if (cards.length === 0) return null;
-      const r = cards[0]!.getBoundingClientRect();
+      const first = cards[0];
+      if (!first) return null;
+      const r = first.getBoundingClientRect();
       return { x1: r.x + 5, y1: r.y + 5, x2: r.x + r.width - 5, y2: r.y + r.height - 5 };
     });
 
@@ -814,7 +825,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
       resolution: { status: 'resolved', confidence: 0.7, resolvedAt: new Date().toISOString() },
     };
 
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       selection,
       'dogfood-session',
       'dogfood-page',
@@ -826,7 +837,7 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
     }
 
     state.issueIds.push(issueResult.value.issueId);
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       { issueId: issueResult.value.issueId },
       'dogfood-session',
       'dogfood-page',
@@ -844,12 +855,16 @@ describe('Phase 23 Dogfood — Create Issues and Send to Agent', () => {
 
 describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
   it('DF23-09: list handoffs in deterministic order', async () => {
-    const list = await state.handoffService!.listHandoffs();
+    const list = await requireHandoffService().listHandoffs();
     expect(list.ok).toBe(true);
     if (list.ok) {
       expect(list.value.length).toBeGreaterThanOrEqual(state.handoffIds.length);
       for (let i = 1; i < list.value.length; i++) {
-        expect(list.value[i - 1]!.createdAt >= list.value[i]!.createdAt).toBe(true);
+        const prev = list.value[i - 1];
+        const curr = list.value[i];
+        if (prev && curr) {
+          expect(prev.createdAt >= curr.createdAt).toBe(true);
+        }
       }
       console.log(`  DF23-09: listed ${list.value.length} handoffs`);
     }
@@ -872,9 +887,9 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
   });
 
   it('DF23-11: agent fetch via get_agent_handoff returns safe brief', async () => {
-    if (state.handoffIds.length === 0) return;
-    const handoffId = state.handoffIds[0]!;
-    const result = await state.handoffService!.getHandoff(handoffId);
+    const handoffId = state.handoffIds[0];
+    if (!handoffId) return;
+    const result = await requireHandoffService().getHandoff(handoffId);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.brief).toBeTruthy();
@@ -892,9 +907,9 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
   });
 
   it('DF23-12: agent fetch marks opened', async () => {
-    if (state.handoffIds.length < 2) return;
-    const handoffId = state.handoffIds[1]!;
-    const result = await state.handoffService!.getHandoff(handoffId);
+    const handoffId = state.handoffIds[1];
+    if (!handoffId) return;
+    const result = await requireHandoffService().getHandoff(handoffId);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('opened');
@@ -903,17 +918,17 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
   });
 
   it('DF23-13: update status to in_progress and completed', async () => {
-    if (state.handoffIds.length < 3) return;
-    const handoffId = state.handoffIds[2]!;
-    await state.handoffService!.getHandoff(handoffId);
+    const handoffId = state.handoffIds[2];
+    if (!handoffId) return;
+    await requireHandoffService().getHandoff(handoffId);
 
-    const update1 = await state.handoffService!.updateHandoffStatus(handoffId, 'in_progress');
+    const update1 = await requireHandoffService().updateHandoffStatus(handoffId, 'in_progress');
     expect(update1.ok).toBe(true);
     if (update1.ok) {
       expect(update1.value.status).toBe('in_progress');
     }
 
-    const update2 = await state.handoffService!.updateHandoffStatus(handoffId, 'completed');
+    const update2 = await requireHandoffService().updateHandoffStatus(handoffId, 'completed');
     expect(update2.ok).toBe(true);
     if (update2.ok) {
       expect(update2.value.status).toBe('completed');
@@ -923,9 +938,9 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
   });
 
   it('DF23-14: cancel handoff', async () => {
-    if (state.handoffIds.length < 4) return;
-    const handoffId = state.handoffIds[3]!;
-    const result = await state.handoffService!.cancelHandoff(handoffId);
+    const handoffId = state.handoffIds[3];
+    if (!handoffId) return;
+    const result = await requireHandoffService().cancelHandoff(handoffId);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe('cancelled');
@@ -933,7 +948,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
       console.log('  DF23-14: handoff cancelled');
     }
 
-    const fetchResult = await state.handoffService!.getHandoff(handoffId);
+    const fetchResult = await requireHandoffService().getHandoff(handoffId);
     expect(fetchResult.ok).toBe(false);
   });
 
@@ -965,7 +980,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
       resolution: { status: 'ambiguous', confidence: 0.5, resolvedAt: new Date().toISOString() },
     };
 
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       ambiguousSelection,
       'dogfood-session',
       'dogfood-page',
@@ -973,7 +988,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
     expect(issueResult.ok).toBe(true);
     if (!issueResult.ok) return;
 
-    const handoffResult = await state.handoffService!.createHandoff(
+    const handoffResult = await requireHandoffService().createHandoff(
       { issueId: issueResult.value.issueId },
       'dogfood-session',
       'dogfood-page',
@@ -1014,7 +1029,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
       resolution: { status: 'stale', confidence: 0.2, resolvedAt: new Date().toISOString() },
     };
 
-    const issueResult = await state.issueService!.createIssue(
+    const issueResult = await requireIssueService().createIssue(
       staleSelection,
       'dogfood-session',
       'dogfood-page',
@@ -1064,7 +1079,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
         resolution: { status: 'resolved', confidence: 0.9, resolvedAt: new Date().toISOString() },
       };
 
-      const issueResult = await state.issueService!.createIssue(
+      const issueResult = await requireIssueService().createIssue(
         selection,
         'dogfood-session',
         'dogfood-page',
@@ -1073,7 +1088,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
       expect(issueResult.ok).toBe(true);
       if (!issueResult.ok) continue;
 
-      const handoffResult = await state.handoffService!.createHandoff(
+      const handoffResult = await requireHandoffService().createHandoff(
         { issueId: issueResult.value.issueId },
         'dogfood-session',
         'dogfood-page',
@@ -1087,7 +1102,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
       expect(onDisk).not.toContain(secret);
 
       // Check tool output
-      const getResult = await state.handoffService!.getHandoff(handoffResult.value.handoffId);
+      const getResult = await requireHandoffService().getHandoff(handoffResult.value.handoffId);
       expect(getResult.ok).toBe(true);
       if (getResult.ok) {
         const memJson = JSON.stringify(getResult.value);
@@ -1100,9 +1115,9 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
   });
 
   it('DF23-18: no packet paths in UI or tool output', async () => {
-    if (state.handoffIds.length === 0) return;
-    const handoffId = state.handoffIds[0]!;
-    const result = await state.handoffService!.getHandoff(handoffId);
+    const handoffId = state.handoffIds[0];
+    if (!handoffId) return;
+    const result = await requireHandoffService().getHandoff(handoffId);
     expect(result.ok).toBe(true);
     if (result.ok) {
       const json = JSON.stringify(result.value);
@@ -1129,7 +1144,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
         },
       ],
     });
-    const result = await state.issueService!.createIssue(
+    const result = await requireIssueService().createIssue(
       selection,
       'dogfood-session',
       'dogfood-page',
@@ -1185,7 +1200,7 @@ describe('Phase 23 Dogfood — Handoff Lifecycle', () => {
         },
       ],
     });
-    const result = await state.issueService!.createIssue(
+    const result = await requireIssueService().createIssue(
       selection,
       'dogfood-session',
       'dogfood-page',
