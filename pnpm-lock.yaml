@@ -163,6 +163,9 @@ importers:
       playwright:
         specifier: ^1.46.0
         version: 1.62.0
+      pngjs:
+        specifier: ^7.0.0
+        version: 7.0.0
     devDependencies:
       '@viskod/browser-runtime':
         specifier: workspace:*
