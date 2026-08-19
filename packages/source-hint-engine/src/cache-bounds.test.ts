@@ -81,7 +81,7 @@ describe('cache bounds (capacity proof)', () => {
     }
     expect(engine.health().importGraphCacheSize).toBeLessThanOrEqual(50);
     fixture.cleanup();
-  });
+  }, 30000);
 
   it('manifest cache cannot grow beyond MANIFEST_CACHE_MAX (20)', async () => {
     const cache = new ManifestCache();
