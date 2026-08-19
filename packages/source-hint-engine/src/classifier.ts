@@ -139,8 +139,9 @@ export function classifyHint(input: ClassifyInput): {
     return { kind: 'unknown', route };
   }
 
-  // Route/page files
-  if (isRouteFile(filePath)) {
+  // Rendered route/page files only. API handlers can contain matching text,
+  // but they are not rendered-page ownership.
+  if (isRouteFile(filePath) && !isApiRouteFile(filePath)) {
     const symbol = extractSymbolFromContent(input);
     return { kind: 'route-owner', symbol, route };
   }
@@ -185,6 +186,11 @@ function isGeneratedPath(filePath: string): boolean {
 
 function isRouteFile(filePath: string): boolean {
   return ROUTE_DIR_PATTERNS.some((p) => p.test(filePath));
+}
+
+function isApiRouteFile(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+  return /(^|\/)api(\/|$)/.test(normalized) || /(^|\/)route\.(ts|tsx|js|jsx)$/.test(normalized);
 }
 
 function isDefinitionSite(filePath: string, basename: string): boolean {

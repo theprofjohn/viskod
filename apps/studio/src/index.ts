@@ -11,6 +11,12 @@ import { EventBus } from '@viskod/event-bus';
 import { getOverlayScript } from '@viskod/overlay-system';
 import { getMcpServeCommand, getSetupState } from '@viskod/setup';
 import {
+  FeedbackPersistence,
+  collectFeedback,
+  createDiagnosticSummary,
+  generateFeedbackMarkdownReport,
+} from '@viskod/shared';
+import {
   ErrorCategory,
   ErrorSeverity,
   type Result,
@@ -126,6 +132,38 @@ const WorkflowDecisionSchema = z.object({
   decision: z.enum(['accepted', 'rejected', 'needs_follow_up']),
   note: z.string().max(2000).optional(),
 });
+const FeedbackRequestSchema = z.object({
+  requestId: z.string().uuid().optional(),
+  category: z.enum([
+    'workflow',
+    'target-selection',
+    'source-resolution',
+    'agent-handoff',
+    'verification',
+    'setup-runtime',
+    'accessibility',
+    'documentation',
+    'feature-request',
+    'other',
+  ]),
+  usefulness: z.enum(['yes', 'partly', 'no']).optional(),
+  reasons: z
+    .array(
+      z.enum([
+        'wrong-target',
+        'source-hint-not-useful',
+        'missing-context',
+        'agent-misunderstood-handoff',
+        'verification-not-useful',
+        'workflow-confusing',
+        'other',
+      ]),
+    )
+    .max(7)
+    .optional(),
+  note: z.string().max(4000).default(''),
+  diagnosticsIncluded: z.boolean().default(false),
+});
 const IssueEditSchema = z.object({
   title: z.string().trim().min(1).max(80).optional(),
   description: z.string().max(4000).optional(),
@@ -233,8 +271,10 @@ export class Studio {
   private userFacingHandoff: UserFacingHandoff;
   private userFacingReview: UserFacingReview;
   private controller: SelectionOverlayController | null = null;
+  private controllerTeardown: Promise<void> | null = null;
   private workflow: StudioWorkflow | null = null;
   private browserHandle: BrowserHandle | null = null;
+  private feedbackPersistence: FeedbackPersistence;
   private pageId: string | null = null;
   private sessionId = crypto.randomUUID();
   private pendingResumeIssueId?: string;
@@ -275,6 +315,7 @@ export class Studio {
     );
     this.userFacingHandoff = new UserFacingHandoff(this.handoffService);
     this.userFacingReview = new UserFacingReview(this.reviewService);
+    this.feedbackPersistence = new FeedbackPersistence(resolveStudioProjectRoot() ?? process.cwd());
 
     this.state = {
       activePanel: 'browser-session',
@@ -557,8 +598,13 @@ export class Studio {
   private routeHttpRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
     const url = req.url ?? '/';
     const pathname = new URL(url, 'http://127.0.0.1').pathname;
-
-    if (url === '/' && req.method === 'GET') {
+    if (url === '/feedback' && req.method === 'POST') {
+      void this.handleFeedback(req, res);
+    } else if (url === '/feedback/preview' && req.method === 'POST') {
+      void this.handleFeedbackPreview(req, res);
+    } else if (url === '/feedback' && req.method === 'GET') {
+      void this.handleFeedbackHistory(res);
+    } else if (url === '/' && req.method === 'GET') {
       // Human-facing Studio UI
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.end(renderStudioHtml());
@@ -705,6 +751,117 @@ export class Studio {
       res.statusCode = 404;
       res.end(JSON.stringify({ error: 'Not found' }));
     }
+  }
+  private feedbackDiagnostics() {
+    const workflow = this.getWorkflowState();
+    const source = workflow.source;
+    const setup = this.state.setup;
+    return createDiagnosticSummary({
+      viskodVersion: '0.0.0-dev',
+      platform: process.platform,
+      architecture: process.arch,
+      nodeVersion: process.version,
+      setupState:
+        setup.status === 'complete'
+          ? 'complete'
+          : setup.status === 'limited'
+            ? 'limited'
+            : setup.status === 'incomplete'
+              ? 'failed'
+              : 'unknown',
+      mcpRuntime: 'unknown' as const,
+      browserRuntime: this.browserConnected ? ('verified' as const) : ('unavailable' as const),
+      projectMode: this.state.project.workspace?.isWorkspace
+        ? ('workspace' as const)
+        : this.state.project.status === 'ready'
+          ? ('single-package' as const)
+          : ('unavailable' as const),
+      workspacePackageCount: this.state.project.workspace?.packageCount ?? 0,
+      workflowStage: workflow.stage,
+      sourceResolutionStatus: source?.resolution ?? 'unavailable',
+      topSourceQualification: source?.candidates[0]?.qualification ?? 'unavailable',
+      visualReviewStatus: workflow.review?.decision ? ('resolved' as const) : ('unknown' as const),
+      errorCodes: this.state.errors
+        .slice(-20)
+        .map((error) => error.subsystem)
+        .filter(Boolean),
+      studioHealth: 'running' as const,
+    });
+  }
+
+  private async handleFeedback(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const parsed = FeedbackRequestSchema.parse(JSON.parse(await this.readBody(req)));
+      const artifact = collectFeedback({
+        ...parsed,
+        requestId: parsed.requestId ?? crypto.randomUUID(),
+        diagnosticsIncluded: parsed.diagnosticsIncluded,
+        ...(parsed.diagnosticsIncluded ? { diagnostics: this.feedbackDiagnostics() } : {}),
+        ...(this.workflow?.getState().issueId ? { issueId: this.workflow.getState().issueId } : {}),
+        ...(this.workflow?.getState().handoffId
+          ? { handoffId: this.workflow.getState().handoffId }
+          : {}),
+        ...(this.workflow?.getState().reviewId
+          ? { reviewId: this.workflow.getState().reviewId }
+          : {}),
+      });
+      const saved = await this.feedbackPersistence.save(artifact);
+      res.setHeader('Content-Type', 'application/json');
+      res.end(
+        JSON.stringify({
+          ok: true,
+          artifact: saved,
+          markdown: generateFeedbackMarkdownReport(saved),
+        }),
+      );
+    } catch (error) {
+      res.statusCode = 400;
+      res.end(
+        JSON.stringify({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Invalid feedback',
+        }),
+      );
+    }
+  }
+
+  private async handleFeedbackPreview(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    try {
+      const parsed = FeedbackRequestSchema.parse(JSON.parse(await this.readBody(req)));
+      const artifact = collectFeedback({
+        ...parsed,
+        requestId: parsed.requestId ?? crypto.randomUUID(),
+        ...(parsed.diagnosticsIncluded ? { diagnostics: this.feedbackDiagnostics() } : {}),
+      });
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: true, markdown: generateFeedbackMarkdownReport(artifact) }));
+    } catch (error) {
+      res.statusCode = 400;
+      res.end(
+        JSON.stringify({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Invalid feedback',
+        }),
+      );
+    }
+  }
+  private async handleFeedbackHistory(res: http.ServerResponse): Promise<void> {
+    const records = await this.feedbackPersistence.list();
+    res.setHeader('Content-Type', 'application/json');
+    res.end(
+      JSON.stringify({
+        ok: true,
+        feedback: records.slice(0, 50).map((item) => ({
+          feedbackId: item.feedbackId,
+          createdAt: item.createdAt,
+          category: item.category,
+          usefulness: item.usefulness,
+        })),
+      }),
+    );
   }
 
   private issueIdFromRoute(route: string, suffix = ''): string | null {
@@ -981,8 +1138,15 @@ export class Studio {
 
   /** Create a fresh opaque pageId + overlay controller + workflow per navigation. */
   private setupPageWorkflow(url: string): void {
-    if (this.controller) {
-      void this.controller.exitSelectionMode().catch(() => undefined);
+    if (this.controller?.isActive() || this.controller?.isTeardownPending()) {
+      const teardown = this.controller.exitSelectionMode().then(
+        () => undefined,
+        () => undefined,
+      );
+      this.controllerTeardown = teardown;
+      void teardown.finally(() => {
+        if (this.controllerTeardown === teardown) this.controllerTeardown = null;
+      });
     }
     this.workflow?.reset();
     this.pageId = crypto.randomUUID();
@@ -1151,6 +1315,7 @@ export class Studio {
   private async handleWorkflowReportStart(res: http.ServerResponse): Promise<void> {
     const workflow = this.requireWorkflow(res);
     if (!workflow) return;
+    if (this.controllerTeardown) await this.controllerTeardown;
     await this.respondWorkflow(res, workflow.beginReport());
   }
 

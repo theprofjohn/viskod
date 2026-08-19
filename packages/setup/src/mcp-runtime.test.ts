@@ -132,13 +132,27 @@ async function waitForGone(pid: number, timeoutMs: number): Promise<void> {
   }
   throw new Error(`process ${pid} still alive after ${timeoutMs}ms`);
 }
-
 function readEvidence(file: string): string {
   try {
     return fs.readFileSync(file, 'utf-8');
   } catch {
     return '';
   }
+}
+
+async function waitForEvidence(file: string, timeoutMs = 3000): Promise<Record<string, unknown>> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>;
+      return parsed;
+    } catch {
+      // External fixture writes race with process teardown; polling is required
+      // External process synchronization cannot use fake timers.
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  throw new Error(`evidence file was not valid JSON: ${file}`);
 }
 
 let tmpDir: string;
@@ -179,7 +193,11 @@ describe('verifyMcpToolsRuntime — deterministic timeout cleanup', () => {
     expect(result.error.message).toMatch(/timed out after 300ms/);
 
     // The fixture started (a real process was spawned and fed initialize).
-    const ev = JSON.parse(readEvidence(evidence)) as { started: boolean; pid: number };
+    const evRaw = await waitForEvidence(evidence);
+    if (evRaw.started !== true || typeof evRaw.pid !== 'number') {
+      throw new Error('invalid startup evidence');
+    }
+    const ev = { started: evRaw.started, pid: evRaw.pid };
     expect(ev.started).toBe(true);
     expect(typeof ev.pid).toBe('number');
 
@@ -196,9 +214,7 @@ describe('verifyMcpToolsRuntime — deterministic timeout cleanup', () => {
     await waitForGone(ev.pid, 3000);
 
     // No descendant remains: the grandchild (same process group) is gone.
-    const withGrandchild = JSON.parse(readEvidence(evidence)) as {
-      grandchildPid?: number;
-    };
+    const withGrandchild = await waitForEvidence(evidence);
     if (typeof withGrandchild.grandchildPid === 'number') {
       await waitForGone(withGrandchild.grandchildPid, 3000);
     }
@@ -214,7 +230,9 @@ describe('verifyMcpToolsRuntime — deterministic timeout cleanup', () => {
       timeoutMs: 300,
     });
     expect(first.ok).toBe(false);
-    const hangPid = (JSON.parse(readEvidence(hangEvidence)) as { pid: number }).pid;
+    const hangEvidenceData = await waitForEvidence(hangEvidence);
+    if (typeof hangEvidenceData.pid !== 'number') throw new Error('invalid hang evidence');
+    const hangPid = hangEvidenceData.pid;
 
     // Fresh retry against a responder fixture: must succeed with all tools.
     const respondEvidence = path.join(tmpDir, 'respond-evidence.json');

@@ -21,6 +21,20 @@ describe('renderStudioHtml', () => {
     expect(html).toContain('Needs follow-up');
     expect(html).toContain('Evidence details');
   });
+  it('contains accessible general feedback controls and explicit privacy wording', () => {
+    const html = renderStudioHtml();
+    expect(html).toContain('General feedback');
+    expect(html).toContain('feedback-category');
+    expect(html).toContain('feedback-text');
+    expect(html).toContain('feedback-diagnostics');
+    expect(html).toContain('feedback-preview');
+    expect(html).toContain('feedback-copy');
+    expect(html).toContain('Open GitHub Issues');
+    expect(html).toContain('may be public');
+    expect(html).toContain('aria-live');
+    expect(html).toContain('Diagnostics are opt-in');
+    expect(html).toContain('Not included: source code');
+  });
 
   it('never renders selectors, packet JSON, or secret-bearing fields', () => {
     const html = renderStudioHtml();

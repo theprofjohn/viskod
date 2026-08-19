@@ -11,9 +11,11 @@ import { ProjectScanner } from '@viskod/project-scanner';
 import { DaemonClient, DaemonServer, RuntimeSession } from '@viskod/runtime-session';
 import { SelectionEngine } from '@viskod/selection-engine';
 import {
+  buildDoctorDiagnosticProjection,
   completeSetup,
   detectAndConfigureProject,
   getMcpServeCommand,
+  hasDoctorRequiredFailure,
   initializeProjectWorkspace,
   installAgentConfig,
   runAllChecks,
@@ -58,6 +60,11 @@ const args = process.argv.slice(2);
 const command = args[0] ?? 'help';
 
 async function main(): Promise<void> {
+  if (args[1] === '--help' || args[1] === '-h') {
+    printCommandHelp(command);
+    return;
+  }
+
   switch (command) {
     case 'start':
       await cmdStart(args.slice(1));
@@ -715,19 +722,25 @@ async function cmdSetup(subArgs: string[]): Promise<void> {
     }
   }
 }
-
-// --- viskod doctor ---
-
 async function cmdDoctor(subArgs: string[]): Promise<void> {
   const projectRoot =
     getFlagValue(subArgs, '--project-root') ??
     (existsSync(join(process.cwd(), 'package.json')) ? process.cwd() : undefined);
   const appUrl = getFlagValue(subArgs, '--app-url');
-
-  console.log('Viskod doctor — checking environment...\n');
+  const json = hasFlag(subArgs, '--json');
+  const reportMode = hasFlag(subArgs, '--report');
 
   const report = await runDoctor({ projectRoot, appUrl });
+  const projection = buildDoctorDiagnosticProjection(report);
 
+  if (json || reportMode) {
+    // Both machine-readable report modes intentionally emit the same
+    // path-free allowlisted projection.
+    console.log(JSON.stringify(projection, null, 2));
+    process.exit(hasDoctorRequiredFailure(report) ? 1 : 0);
+  }
+
+  console.log('Viskod doctor — checking environment...\n');
   const line = (label: string, ok: boolean, detail: string) => {
     console.log(`  ${ok ? '✓' : '✗'} ${label}: ${detail}`);
   };
@@ -773,10 +786,28 @@ async function cmdDoctor(subArgs: string[]): Promise<void> {
       : 'not detected',
   );
 
-  const hasProblems =
-    !report.node.ok || !report.chromium.verified || !report.mcp.ok || report.setupState.stale;
-  console.log(`\n${hasProblems ? 'Issues found.' : 'All checks passed.'}`);
-  process.exit(hasProblems ? 1 : 0);
+  const requiredFailure = hasDoctorRequiredFailure(report);
+  console.log(
+    `\n${
+      requiredFailure
+        ? 'Required checks failed.'
+        : projection.recommendedAttention > 0
+          ? 'Required checks passed; recommendations need attention.'
+          : 'All checks passed.'
+    }`,
+  );
+  process.exit(requiredFailure ? 1 : 0);
+}
+
+function printCommandHelp(commandName: string): void {
+  const help: Record<string, string> = {
+    setup:
+      'Usage: viskod setup --project-root <path> [--app-url <url>] [--install <opencode|cursor|claude>] [--limited] [--skip-smoke]',
+    doctor: 'Usage: viskod doctor [--project-root <path>] [--app-url <url>] [--json|--report]',
+    install: 'Usage: viskod install [opencode|cursor|claude] [--project-root <path>] [--source]',
+    serve: 'Usage: viskod serve [--url <url>] [--project-root <path>]',
+  };
+  console.log(help[commandName] ?? 'Run viskod --help for available commands.');
 }
 
 function printHelp(): void {
@@ -787,8 +818,7 @@ Usage:
   viskod capture <sel>   Capture context (reuses session if available)
   viskod serve [--url] [--project-root <dir>]   Start MCP server (with optional browser + explicit project root)
   viskod install [ide]   Install Viskod MCP config into your IDE (opencode|cursor|claude)
-  viskod setup [--project-root] [--install <agent>] [--limited]
-  viskod doctor [--project-root]
+  viskod doctor [--project-root] [--json|--report]
   viskod status          Show session status
   viskod stop            Stop the runtime session
   viskod export <path>   Export Context Packet to agent brief (--format markdown|json, --out <file>)

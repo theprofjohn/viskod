@@ -75,6 +75,43 @@ describe('ProjectScanner', () => {
     }
   });
 
+  it('discovers Next App Router routes under src and strips route groups', async () => {
+    const tmpDir = join(tmpdir(), `viskod-next-src-app-test-${Date.now()}`);
+    mkdirSync(join(tmpDir, 'src', 'app', '(marketing)'), { recursive: true });
+    writeFileSync(
+      join(tmpDir, 'package.json'),
+      JSON.stringify({ name: 'next-src-app', dependencies: { next: '^15.0.0' } }),
+    );
+    writeFileSync(
+      join(tmpDir, 'src', 'app', '(marketing)', 'page.tsx'),
+      'export default function Page() {}',
+    );
+    writeFileSync(
+      join(tmpDir, 'src', 'app', '(marketing)', 'layout.tsx'),
+      'export default function Layout() {}',
+    );
+
+    const result = await new ProjectScanner(new EventBus()).scan(tmpDir);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.routes.routes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: '/',
+            file: '/(marketing)/page.tsx',
+            type: 'page',
+          }),
+          expect.objectContaining({
+            path: '/',
+            file: '/(marketing)/layout.tsx',
+            type: 'layout',
+          }),
+        ]),
+      );
+    }
+  });
+
   it('health returns before any scan', () => {
     const bus = new EventBus();
     const scanner = new ProjectScanner(bus);

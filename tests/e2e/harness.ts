@@ -45,36 +45,46 @@ export function spawnProc(
  * guarantees the tree dies and no port/process leaks into later files.
  */
 export function killTree(proc: ChildProcess | null): void {
-  if (!proc || proc.killed || proc.exitCode !== null || proc.signalCode !== null) return;
+  if (!proc) return;
   const pid = proc.pid;
   if (pid === undefined) return;
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    return;
+  }
+
   try {
-    if (process.platform === 'win32') {
-      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    process.kill(-pid, 'SIGTERM');
+  } catch {
+    try {
+      proc.kill('SIGTERM');
+    } catch {
       return;
     }
+  }
+
+  // Do not return while an owned child can still hold the fixed E2E port.
+  // This synchronous bounded wait prevents the next file from probing the
+  // previous file's Studio during the SIGTERM grace window.
+  const deadline = Date.now() + 2_000;
+  const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+  while (Date.now() < deadline) {
     try {
-      process.kill(-pid, 'SIGTERM');
+      process.kill(-pid, 0);
+      Atomics.wait(waitBuffer, 0, 0, 25);
     } catch {
-      proc.kill('SIGTERM');
+      return;
     }
-    // SIGKILL escalation after the SIGTERM grace period. The timer is kept
-    // referenced so it fires even if the test file finishes first (vitest
-    // workers stay alive between files); a process that died from SIGTERM
-    // makes this a harmless no-op.
-    setTimeout(() => {
-      try {
-        process.kill(-pid, 'SIGKILL');
-      } catch {
-        try {
-          proc.kill('SIGKILL');
-        } catch {
-          /* already gone */
-        }
-      }
-    }, 700);
+  }
+
+  try {
+    process.kill(-pid, 'SIGKILL');
   } catch {
-    /* already gone */
+    try {
+      proc.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
   }
 }
 

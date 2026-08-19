@@ -5,6 +5,9 @@ import type { Result } from '@viskod/shared';
 import { ErrorCategory, ErrorSeverity, VISKOD_STORAGE_DIR, err, ok } from '@viskod/shared';
 import type { FirstRunSetupState, SetupStateKind } from './types';
 
+declare const __VISKOD_VERSION__: string | undefined;
+const SETUP_VERSION = typeof __VISKOD_VERSION__ !== 'undefined' ? __VISKOD_VERSION__ : '0.0.0-dev';
+
 const SETUP_DIR = 'setup';
 const STATUS_FILE = 'status.json';
 const SCHEMA_VERSION = 2;
@@ -121,7 +124,7 @@ export function createInitialSetupState(
     state: 'incomplete',
     limitedMode: false,
     limitedReasons: [],
-    setupVersion: '0.0.0-dev',
+    setupVersion: SETUP_VERSION,
     sourceResolution: fs.existsSync(projectRoot) ? 'ready' : 'unavailable',
     capabilityStatus: {},
     project: {

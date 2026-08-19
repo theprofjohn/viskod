@@ -526,7 +526,10 @@ describe('App URL Validation', () => {
 
 describe('Agent Config Readiness', () => {
   it('detects no config when none exists', () => {
-    const result = checkAgentConfigReadiness(tmpDir);
+    const result = checkAgentConfigReadiness({
+      cwd: tmpDir,
+      home: path.join(tmpDir, 'isolated-home'),
+    });
     expect(result.detected).toBe(false);
     expect(result.verified).toBe(false);
   });

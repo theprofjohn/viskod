@@ -41,7 +41,16 @@ export {
   type AgentKind,
   type InstallAgentConfigInput,
 } from './agent-config';
-export { runDoctor, type DoctorReport } from './doctor';
+export {
+  runDoctor,
+  getDoctorChecks,
+  hasDoctorRequiredFailure,
+  buildDoctorDiagnosticProjection,
+  type DoctorReport,
+  type DoctorCheck,
+  type DoctorCheckSeverity,
+  type DoctorDiagnosticProjection,
+} from './doctor';
 export type {
   AgentConfigInfo,
   CapabilityStatus,

@@ -1,56 +1,59 @@
 # Quickstart: From UI Issue to Verified Fix
 
-The recommended Viskod workflow runs through **Studio**: report a UI defect by
-pointing at it, prepare an agent handoff, then verify the rendered fix.
+The `0.2.4-alpha` artifact is the **Viskod CLI/MCP RC**. Studio is not
+included in the CLI package and is not separately installable yet. The
+installed-only path covers setup, MCP, handoff retrieval, and agent
+integration; the visual Studio workflow requires a Viskod source checkout.
 
 ## Prerequisites
 
 - Node.js 22+
-- pnpm 9+
-- Git
-- Playwright Chromium (`pnpm exec playwright install chromium`)
+- A normal external project with a running app
+- Playwright Chromium (installed by the CLI package)
 
-## 1. Install Dependencies
+For the Studio workflow only, also use a Viskod source checkout with pnpm 9+
+and Git.
 
-### Option A: Installed CLI (recommended)
+## 1. Install the CLI/MCP RC
 
 ```bash
 npm i -g @viskod/cli
+viskod setup --project-root <your-app-dir> --install opencode
+viskod doctor --project-root <your-app-dir>
 ```
 
-### Option B: From Source
+The installed CLI can start the MCP server without a Viskod checkout:
+
+```bash
+viskod serve --url http://localhost:3000 --project-root <your-app-dir>
+```
+
+## 2. Start Studio (source-checkout limitation)
+
+Studio is currently a repository application. Clone Viskod, then run:
 
 ```bash
 cd <REPO_PATH>
 pnpm install
 pnpm exec playwright install chromium
+pnpm exec tsx apps/studio/src/index.ts --project-root <your-app-dir>
 ```
 
-The fixture server uses Node's built-in `http` module. No additional install
-is needed to run it.
+Studio serves its UI on `http://localhost:3001`. This source checkout is
+required only for the Studio UI in this RC; it is not needed by the installed
+CLI/MCP command.
 
-## 2. Open a Local App
+## 3. Open a Local App
 
-Start your local app (or the included fixture):
+Start your normal local app and leave it running. The fixture command below
+is available only from a Viskod checkout:
 
 ```bash
 node examples/phase12-source-hint-app/server.cjs
 ```
 
-Leave this running in a terminal. It serves the test page at
-`http://localhost:3000`.
+It serves the test page at `http://localhost:3000`.
 
-## 3. Start Studio
-
-In a second terminal:
-
-```bash
-cd <REPO_PATH>
-pnpm exec tsx apps/studio/src/index.ts
-```
-
-Studio starts a browser, serves its UI on `http://localhost:3001`, and waits
-for you to open an app.
 
 ## 4. Report a UI Issue
 

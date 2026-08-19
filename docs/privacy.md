@@ -359,3 +359,19 @@ These guarantees should remain stable across future platform versions.
 The Privacy subsystem exists to ensure Viskod respects the information entrusted to it.
 
 Its responsibility is to minimise collection, maximise transparency and preserve user control, enabling the Visual Context Platform to remain trustworthy by design while handling only the information necessary to fulfil its purpose.
+
+## Local beta feedback
+
+Studio feedback is a separate product-feedback artifact, not a VisualIssue or
+VisualReview decision. It is stored locally under `.viskod/feedback/` by
+default; Viskod does not submit feedback, upload diagnostics, or collect
+telemetry.
+
+Sanitized diagnostics are opt-in. They contain only runtime versions,
+platform/architecture, setup/MCP/browser statuses, workspace mode/count,
+workflow/source/review statuses, bounded error codes, and Studio health.
+They explicitly exclude source code, DOM text, screenshots, packets, absolute
+paths, executable paths, credentials, environment variables, browser storage,
+and agent conversations. Users can preview, copy, or save the report before
+sharing it. Any public GitHub issue action, when configured, requires an
+explicit user action and does not attach local files automatically.

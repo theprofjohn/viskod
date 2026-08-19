@@ -1,3 +1,6 @@
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { BrowserRuntime, PROFILES } from '@viskod/browser-runtime';
 import { EventBus } from '@viskod/event-bus';
 import { SelectionEngine, type SelectionTarget } from '@viskod/selection-engine';
@@ -67,6 +70,31 @@ describe('VisualContextEngine', () => {
 
     // No crash or error — data accepted
     expect(true).toBe(true);
+  });
+
+  it('normalizes scanner route files to project-relative paths', () => {
+    const root = join(tmpdir(), `viskod-context-route-${Date.now()}`);
+    mkdirSync(join(root, 'src', 'app', '(marketing)'), { recursive: true });
+    writeFileSync(
+      join(root, 'src', 'app', '(marketing)', 'page.tsx'),
+      'export default function Page() { return null; }',
+    );
+    const bus = new EventBus();
+    const vce = new VisualContextEngine({ browserRuntime: new BrowserRuntime(bus), eventBus: bus });
+
+    vce.setProjectContext({
+      rootPath: root,
+      projectId: 'route-project',
+      name: 'route-project',
+      directories: [],
+      primaryFramework: 'nextjs',
+      detectedFrameworks: ['nextjs'],
+      frameworkConfidence: 1,
+      routeMap: { routes: [{ path: '/', file: '/(marketing)/page.tsx', type: 'page' }] },
+    });
+
+    expect(vce.getProjectContext()?.routeMap?.routes[0]?.file).toBe('src/app/(marketing)/page.tsx');
+    rmSync(root, { recursive: true, force: true });
   });
 
   it('reports health with zero state', () => {

@@ -188,20 +188,19 @@ function computeScore(
   let score = hint.confidence;
   let confidence = hint.confidence;
 
-  // Kind penalty — never a bonus that inflates confidence.
+  // Ranking penalties change ordering only. The captured confidence remains
+  // the Phase 30 evidence score and must not be altered by candidate type.
   const kindFactor = KIND_PENALTY[kind] ?? 0.9;
   if (kindFactor < 1) {
     penalties.push(`${kind} (penalty ${kindFactor})`);
     score *= kindFactor;
-    confidence *= kindFactor;
   }
 
-  // Existence is already part of the evidence model; non-existing files are
-  // never generated anymore, but keep the guard for legacy callers.
+  // Existence is already represented by the evidence model; non-existing
+  // legacy candidates rank lower without changing calibrated confidence.
   if (!hint.exists) {
     penalties.push('file does not exist on disk');
     score *= 0.5;
-    confidence *= 0.5;
   }
 
   // Route match bonus only when the candidate IS the matched route file.
@@ -223,7 +222,6 @@ function computeScore(
   if (hasGeneratedDir) {
     penalties.push('generated/build output');
     score *= 0.2;
-    confidence *= 0.2;
   }
 
   score = Math.min(Math.max(score, 0), 1);

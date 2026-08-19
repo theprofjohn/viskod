@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type {
   BrowserHandle,
   BrowserRuntime,
@@ -228,28 +230,53 @@ interface RouteMapRoute {
  * Priority: exact path → dynamic route with the same segment count →
  * root route. Returns undefined when nothing matches (route unknown).
  */
-function matchRouteFromMap(
+function routeRank(route: RouteMapRoute): number {
+  return route.type === 'page' ? 0 : route.type === 'layout' ? 1 : 2;
+}
+
+function normalizeRoutePath(pathname: string): string {
+  return pathname.replace(/\/+$/, '') || '/';
+}
+
+/**
+ * Return the bounded rendered-route candidates for a pathname. API handlers
+ * are deliberately excluded: matching text in a route handler is not page
+ * ownership. Exact page/layout candidates retain route-group normalization
+ * from ProjectScanner and are ordered deterministically.
+ */
+function matchRoutesFromMap(
   pathname: string,
   routes: RouteMapRoute[],
-): { path: string; file: string; type: string; isDynamic: boolean } | undefined {
-  if (routes.length === 0) return undefined;
-  const normalized = pathname.replace(/\/+$/, '') || '/';
-
-  const exact = routes.find((r) => r.path === normalized);
-  if (exact) return { ...exact, isDynamic: exact.isDynamic ?? false };
+): Array<{ path: string; file: string; type: string; isDynamic: boolean }> {
+  if (routes.length === 0) return [];
+  const normalized = normalizeRoutePath(pathname);
+  const rendered = routes.filter((route) => route.type === 'page' || route.type === 'layout');
+  const exact = rendered
+    .filter((route) => route.path === normalized)
+    .sort((a, b) => routeRank(a) - routeRank(b) || a.file.localeCompare(b.file));
+  if (exact.length > 0) {
+    return exact.map((route) => ({ ...route, isDynamic: route.isDynamic ?? false }));
+  }
 
   const segments = normalized.split('/').filter(Boolean);
-  const dynamicMatches = routes
-    .filter((r) => r.isDynamic)
-    .map((r) => ({ route: r, count: r.path.split('/').filter(Boolean).length }))
-    .filter((m) => m.count === segments.length)
-    .sort((a, b) => a.route.path.localeCompare(b.route.path));
-  const dynamic = dynamicMatches[0];
-  if (dynamic) return { ...dynamic.route, isDynamic: true };
+  const dynamic = rendered
+    .filter((route) => route.isDynamic)
+    .map((route) => ({ route, count: route.path.split('/').filter(Boolean).length }))
+    .filter((entry) => entry.count === segments.length)
+    .sort(
+      (a, b) =>
+        routeRank(a.route) - routeRank(b.route) ||
+        a.route.path.localeCompare(b.route.path) ||
+        a.route.file.localeCompare(b.route.file),
+    );
+  if (dynamic.length > 0) {
+    return dynamic.map(({ route }) => ({ ...route, isDynamic: true }));
+  }
 
-  const root = routes.find((r) => r.path === '/');
-  if (root) return { ...root, isDynamic: false };
-  return undefined;
+  return rendered
+    .filter((route) => route.path === '/')
+    .sort((a, b) => routeRank(a) - routeRank(b) || a.file.localeCompare(b.file))
+    .map((route) => ({ ...route, isDynamic: false }));
 }
 
 export class VisualContextEngine {
@@ -742,7 +769,8 @@ export class VisualContextEngine {
             pathname = '/';
           }
           const routes = this.projectScan?.routeMap?.routes ?? [];
-          const matchedRoute = matchRouteFromMap(pathname, routes);
+          const matchedRoutes = matchRoutesFromMap(pathname, routes);
+          const matchedRoute = matchedRoutes[0];
 
           const domAttributes = domSnapshot.attributes ?? {};
           const hintInput = {
@@ -760,6 +788,7 @@ export class VisualContextEngine {
               url: pageUrl || this.currentUrl,
               pathname,
               ...(matchedRoute ? { matchedRoute } : {}),
+              ...(matchedRoutes.length > 0 ? { matchedRoutes } : {}),
             },
             project: {
               metadata: {
@@ -1106,7 +1135,32 @@ export class VisualContextEngine {
     };
     workspace?: WorkspaceMetadata;
   }): void {
-    this.projectScan = context;
+    const normalizeRouteFile = (file: string): string => {
+      const relative = file.replace(/^\/+/, '');
+      const candidates = [
+        relative,
+        `app/${relative}`,
+        `src/app/${relative}`,
+        `pages/${relative}`,
+        `src/pages/${relative}`,
+      ];
+      return (
+        candidates.find((candidate) => existsSync(join(context.rootPath, candidate))) ?? relative
+      );
+    };
+    this.projectScan = {
+      ...context,
+      ...(context.routeMap
+        ? {
+            routeMap: {
+              routes: context.routeMap.routes.map((route) => ({
+                ...route,
+                file: normalizeRouteFile(route.file),
+              })),
+            },
+          }
+        : {}),
+    };
   }
 
   /**

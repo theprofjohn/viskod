@@ -260,7 +260,9 @@ function screenHtml(state: StudioWorkflowState, browserConnected: boolean): stri
           </form>
           ${state.pageUrl ? `<p class="hint">Current app: ${escapeHtml(state.pageUrl)}</p>` : '<p class="hint">Start your local app, then open it here.</p>'}
           ${state.pageUrl ? '<button id="report-start" class="primary" data-action="report-start">Report UI issue</button>' : ''}
+          <button class="secondary" data-action="feedback-start" aria-label="Send general feedback">General feedback</button>
           ${disconnected ? `<p class="warning">${disconnected}</p>` : ''}
+          <div id="feedback-panel" hidden></div>
         </section>`;
 
     case 'selecting':
@@ -375,6 +377,8 @@ function screenHtml(state: StudioWorkflowState, browserConnected: boolean): stri
           ${state.review?.comparison ? `<div class="comparison-status">${escapeHtml(comparisonMessage(state))}</div>` : ''}
           ${reviewVisualPanelHtml(state)}
           ${note ? `<p class="hint">Note: ${escapeHtml(note)}</p>` : ''}
+          <button class="secondary" data-action="feedback-start" aria-label="Tell us whether this review was useful">Was this review useful?</button>
+          <div id="feedback-panel" hidden></div>
           <button class="secondary" data-action="report-start">Report another issue</button>
           ${disconnected ? `<p class="warning">${disconnected}</p>` : ''}
         </section>`;
@@ -484,7 +488,7 @@ export function renderStudioHtml(): string {
   // so the user never loses their entered text (VISKOD-AUDIT-001 retry).
   var form = { problem: '', expected: '', severity: 'medium' };
   var pending = false;
-  // Phase 32: truthful first-run/setup status strip, updated from /state and
+  var feedbackOpen = false;
   // WebSocket broadcasts. Never claims readiness the persisted state does not
   // vouch for; stale (persisted complete/limited + failing light check) is
   // shown as a runtime-check failure, never as green.
@@ -705,6 +709,8 @@ export function renderStudioHtml(): string {
         '<form id="open-app-form" data-action="open-app"><input id="app-url" type="url" placeholder="http://localhost:3000" aria-label="App URL" /><button type="submit" class="primary">Open app</button></form>' +
         (pageUrl ? '<p class="hint">Current app: ' + esc(pageUrl) + '</p>' : '<p class="hint">Start your local app, then open it here.</p>') +
         (pageUrl ? '<button id="report-start" class="primary" data-action="report-start">Report UI issue</button>' : '') +
+        '<button class="secondary" data-action="feedback-start" aria-label="Send general feedback">General feedback</button>' +
+        '<div id="feedback-panel" hidden></div>' +
         (state.error ? '<p class="warning" role="alert" tabindex="-1">' + esc(state.error) + '</p>' : '') + disconnected + '</section>';
     } else if (state.stage === 'selecting') {
       html = '<section class="screen" data-stage="selecting"><h2>Report UI issue</h2>' +
@@ -761,12 +767,15 @@ export function renderStudioHtml(): string {
         (state.review && state.review.comparison ? '<div class="comparison-status">' + esc(comparisonMessage(state)) + '</div>' : '') +
         reviewVisualPanel(state) +
         (note ? '<p class="hint">Note: ' + esc(note) + '</p>' : '') +
+        '<button class="secondary" data-action="feedback-start" aria-label="Tell us whether this review was useful">Was this review useful?</button>' +
+        '<div id="feedback-panel" hidden></div>' +
         '<button class="secondary" data-action="report-start">Report another issue</button>' + disconnected + '</section>';
     } else {
       html = '<section class="screen"><p>Loading\u2026</p></section>';
     }
 
     document.getElementById('app').innerHTML = html;
+    if (feedbackOpen) showFeedbackPanel();
     document.getElementById('stage-pill').textContent = stageLabel(state.stage);
 
     if (state.stage === 'describe') {
@@ -821,6 +830,29 @@ export function renderStudioHtml(): string {
     var data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
     return data;
+  }
+
+  function showFeedbackPanel() {
+    feedbackOpen = true;
+    var panel = document.getElementById('feedback-panel');
+    if (!panel) return;
+    panel.hidden = false;
+    panel.innerHTML = '<form id="feedback-form" aria-label="General feedback">' +
+      '<label for="feedback-category">Category</label><select id="feedback-category">' +
+      '<option value="workflow">Workflow</option><option value="target-selection">Target selection</option>' +
+      '<option value="source-resolution">Source resolution</option><option value="agent-handoff">Agent handoff</option>' +
+      '<option value="verification">Verification</option><option value="setup-runtime">Setup/runtime</option>' +
+      '<option value="accessibility">Accessibility</option><option value="documentation">Documentation</option>' +
+      '<option value="feature-request">Feature request</option><option value="other">Other</option></select>' +
+      '<label for="feedback-usefulness">Did Viskod give the agent enough context?</label><select id="feedback-usefulness"><option value="">Skip</option><option value="yes">Yes</option><option value="partly">Partly</option><option value="no">No</option></select>' +
+      '<label for="feedback-reasons">Reason (optional)</label><select id="feedback-reasons"><option value="">None</option><option value="wrong-target">Wrong target</option><option value="source-hint-not-useful">Source hint was not useful</option><option value="missing-context">Missing context</option><option value="agent-misunderstood-handoff">Agent misunderstood the handoff</option><option value="verification-not-useful">Verification was not useful</option><option value="workflow-confusing">Workflow was confusing</option><option value="other">Other</option></select>' +
+      '<label for="feedback-text">Feedback</label><textarea id="feedback-text" required maxlength="4000" placeholder="Tell us what happened"></textarea>' +
+      '<label class="feedback-diagnostics-option"><input type="checkbox" id="feedback-diagnostics"> Include sanitized diagnostics (optional)</label>' +
+      '<p class="hint">Diagnostics are opt-in. Included: runtime versions, setup/browser/MCP status, workspace type/count, workflow/source/review status, and error codes. Not included: source code, screenshots, project paths, credentials, or agent conversation.</p>' +
+      '<div class="actions"><button type="submit" class="primary">Save feedback</button><button type="button" class="secondary" data-action="feedback-preview">Preview report</button><button type="button" class="secondary" data-action="feedback-copy">Copy report</button><button type="button" class="secondary" data-action="feedback-github">Open GitHub Issues</button></div>' +
+      '<div id="feedback-result" class="hint" aria-live="polite"></div></form>';
+    var text = document.getElementById('feedback-text');
+    if (text) text.focus();
   }
 
   async function refresh() {
@@ -962,6 +994,25 @@ export function renderStudioHtml(): string {
       } else if (action === 'cancel') {
         await post('/workflow/cancel', {});
         await refresh();
+      } else if (action === 'feedback-start') {
+        showFeedbackPanel();
+      } else if (action === 'feedback-preview') {
+        var preview = await post('/feedback/preview', {
+          category: document.getElementById('feedback-category').value,
+          usefulness: document.getElementById('feedback-usefulness').value || undefined,
+          reasons: document.getElementById('feedback-reasons').value ? [document.getElementById('feedback-reasons').value] : undefined,
+          note: document.getElementById('feedback-text').value,
+          diagnosticsIncluded: document.getElementById('feedback-diagnostics').checked,
+        });
+        document.getElementById('feedback-result').textContent = preview.markdown || 'Preview generated.';
+      } else if (action === 'feedback-copy') {
+        var report = document.getElementById('feedback-result');
+        if (report && navigator.clipboard) await navigator.clipboard.writeText(report.textContent || '');
+        announce('Feedback report copied.');
+      } else if (action === 'feedback-github') {
+        if (window.confirm('GitHub Issues may be public. Open the repository issue page? Viskod will not attach local files automatically.')) {
+          window.open('https://github.com/theprofjohn/viskod/issues', '_blank', 'noopener,noreferrer');
+        }
       } else if (action === 'verify-start') {
         await post('/workflow/verify/start', { issueId: current.issueId, handoffId: current.handoffId });
         await refresh();
@@ -1000,6 +1051,22 @@ export function renderStudioHtml(): string {
         await post('/navigate', { url: url });
         pageUrl = url;
         await refresh();
+      } else if (form.id === 'feedback-form') {
+        if (pending) return;
+        pending = true;
+        var result = document.getElementById('feedback-result');
+        try {
+          var saved = await post('/feedback', {
+            category: document.getElementById('feedback-category').value,
+            usefulness: document.getElementById('feedback-usefulness').value || undefined,
+            reasons: document.getElementById('feedback-reasons').value ? [document.getElementById('feedback-reasons').value] : undefined,
+            note: document.getElementById('feedback-text').value.trim(),
+            diagnosticsIncluded: document.getElementById('feedback-diagnostics').checked,
+            reviewId: current.reviewId || undefined,
+          });
+          if (result) result.textContent = saved.markdown || 'Feedback saved locally.';
+          announce('Feedback saved locally.');
+        } finally { pending = false; }
       } else if (action === 'prepare-handoff') {
         if (pending) return;
         var problem = document.getElementById('problem').value.trim();

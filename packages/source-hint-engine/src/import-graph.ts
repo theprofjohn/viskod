@@ -155,6 +155,10 @@ function packageEntry(
   }));
 }
 
+function isLocalSpecifier(spec: string): boolean {
+  return spec.startsWith('.') || spec.startsWith('@/');
+}
+
 function parseImports(rootPath: string, sourceFile: string, content: string): ImportGraphEntry[] {
   const entries: ImportGraphEntry[] = [];
   const lines = content.split('\n');
@@ -172,7 +176,7 @@ function parseImports(rootPath: string, sourceFile: string, content: string): Im
       const spec = fromSpecifier(trimmed);
       const name = namespaceMatch[1];
       if (spec && name) {
-        if (spec.startsWith('.')) {
+        if (isLocalSpecifier(spec)) {
           entries.push(...localEntry(rootPath, sourceFile, spec, [name], false));
         } else {
           entries.push(...packageEntry(sourceFile, spec, [name], false, true));
@@ -196,7 +200,7 @@ function parseImports(rootPath: string, sourceFile: string, content: string): Im
           )
           .filter((n): n is string => Boolean(n));
         if (names.length > 0) {
-          if (spec.startsWith('.')) {
+          if (isLocalSpecifier(spec)) {
             entries.push(...localEntry(rootPath, sourceFile, spec, names, false));
           } else {
             entries.push(...packageEntry(sourceFile, spec, names, false));
@@ -212,7 +216,7 @@ function parseImports(rootPath: string, sourceFile: string, content: string): Im
       const spec = fromSpecifier(trimmed);
       const name = defaultMatch[1];
       if (spec && name) {
-        if (spec.startsWith('.')) {
+        if (isLocalSpecifier(spec)) {
           entries.push(...localEntry(rootPath, sourceFile, spec, [name], true));
         } else {
           entries.push(...packageEntry(sourceFile, spec, [name], true));
@@ -227,7 +231,7 @@ function parseImports(rootPath: string, sourceFile: string, content: string): Im
       const spec = requireMatch[1];
       const names = bindingNames(trimmed);
       if (spec && names && names.length > 0) {
-        if (spec.startsWith('.')) {
+        if (isLocalSpecifier(spec)) {
           entries.push(...localEntry(rootPath, sourceFile, spec, names, true));
         } else {
           entries.push(...packageEntry(sourceFile, spec, names, true));
@@ -251,18 +255,15 @@ export function resolveLocalImport(
   spec: string,
 ): string | null {
   const sourceDir = path.posix.dirname(sourceFile);
-  const base = path.posix.normalize(`${sourceDir}/${spec}`);
-  if (base.startsWith('..') || path.posix.isAbsolute(base)) return null;
-
-  const candidates: string[] = [base];
-  for (const ext of CODE_EXTENSIONS) {
-    candidates.push(`${base}${ext}`);
-  }
-  for (const suffix of INDEX_SUFFIXES) {
-    candidates.push(`${base}/${suffix}`);
-  }
-  for (const ext of CODE_EXTENSIONS) {
-    candidates.push(`${base}/index${ext}`);
+  const bases = spec.startsWith('@/')
+    ? [spec.slice(2), `src/${spec.slice(2)}`]
+    : [path.posix.normalize(`${sourceDir}/${spec}`)];
+  const candidates: string[] = [];
+  for (const base of bases) {
+    candidates.push(base);
+    for (const ext of CODE_EXTENSIONS) candidates.push(`${base}${ext}`);
+    for (const suffix of INDEX_SUFFIXES) candidates.push(`${base}/${suffix}`);
+    for (const ext of CODE_EXTENSIONS) candidates.push(`${base}/index${ext}`);
   }
 
   for (const candidate of candidates) {
@@ -290,7 +291,7 @@ export function resolveWorkspaceImport(
   packages: WorkspacePackageMetadata[],
 ): string | null {
   // Delegate relative imports to the local resolver
-  if (spec.startsWith('.')) return resolveLocalImport(rootPath, sourceFile, spec);
+  if (isLocalSpecifier(spec)) return resolveLocalImport(rootPath, sourceFile, spec);
 
   // Check if spec matches a workspace package
   for (const pkg of packages) {
@@ -426,13 +427,14 @@ export async function resolveLocalImportAsync(
   signal?: AbortSignal,
 ): Promise<string | null> {
   const sourceDir = path.posix.dirname(sourceFile);
-  const base = path.posix.normalize(`${sourceDir}/${spec}`);
-  if (base === '..' || base.startsWith('../') || path.posix.isAbsolute(base)) return null;
-  const candidates = [
+  const bases = spec.startsWith('@/')
+    ? [spec.slice(2), `src/${spec.slice(2)}`]
+    : [path.posix.normalize(`${sourceDir}/${spec}`)];
+  const candidates = bases.flatMap((base) => [
     base,
     ...CODE_EXTENSIONS.map((ext) => `${base}${ext}`),
     ...INDEX_SUFFIXES.map((s) => `${base}/${s}`),
-  ];
+  ]);
   for (const candidate of candidates) {
     if (signal?.aborted) throw new ScanCancelledError();
     if (candidate === '..' || candidate.startsWith('../') || path.posix.isAbsolute(candidate))

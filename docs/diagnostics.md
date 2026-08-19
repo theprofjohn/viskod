@@ -375,3 +375,19 @@ These guarantees should remain stable across future versions.
 The Diagnostics subsystem exists to make every significant system event observable, explainable and traceable.
 
 Its responsibility is to provide accurate operational insight while remaining lightweight, deterministic and completely independent from the execution of the Visual Context Platform.
+
+## Beta feedback diagnostic projection
+
+Studio and `viskod doctor --report` use the same bounded, allowlisted
+diagnostic projection for feedback/report sharing. It includes runtime
+versions, platform, setup/MCP/browser statuses, project mode/count,
+workflow/source/review statuses, bounded error codes, and Studio health.
+
+Feedback diagnostics are opt-in and exclude source code, DOM text, screenshots,
+packets, absolute paths, credentials, environment variables, browser storage,
+agent conversations, and command history. Feedback remains local unless the
+user explicitly copies, saves, or opens the configured public issue page.
+
+Doctor checks are classified as required, recommended, or informational.
+Recommended attention does not fail the required runtime contract or claim
+that all checks passed.

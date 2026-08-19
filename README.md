@@ -103,7 +103,7 @@ Viskod observes and supplies context. External coding agents implement.
 
 > **Project status:** Alpha — interfaces may change. See [Current Alpha Limitations](#current-alpha-limitations) before adopting Viskod in a critical workflow.
 
-## Published package (recommended)
+## Published package (recommended for the CLI/MCP RC)
 
 ```bash
 npm i -g @viskod/cli        # → puts `viskod` on your PATH
@@ -121,24 +121,26 @@ downloads a browser. If you already manage Chromium yourself you can opt out
 with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` — but then you must install
 Chromium separately or `viskod` will not be able to launch a browser.
 
-## From source (development)
+The `0.2.4-alpha` release is the **Viskod CLI/MCP RC**. It packages the CLI
+and MCP server only; Studio is not part of the CLI tarball and cannot be
+started by an installed `viskod` command without a Viskod source checkout.
+
+## From source (required for Studio in this RC)
+
+Studio is currently a repository application, not a separately installable
+package. To use the Studio UI, clone the Viskod repository and run:
 
 ```bash
 pnpm install
 pnpm exec playwright install chromium
+pnpm exec tsx apps/studio/src/index.ts --project-root <your-app-dir>
 ```
 
-Run a local app — the repository includes a fixture:
+Studio serves its UI on `http://localhost:3001`.
 
-```bash
-node examples/phase12-source-hint-app/server.cjs
-```
-
-Start Studio:
-
-```bash
-pnpm exec tsx apps/studio/src/index.ts
-```
+The installed CLI/MCP RC remains usable without a source checkout for setup,
+diagnostics, MCP configuration, and agent handoff retrieval. The full visual
+Studio workflow still requires the checkout limitation above.
 
 ---
 
@@ -167,17 +169,16 @@ For a detailed walkthrough see [docs/setup.md](docs/setup.md).
 
 # Studio Quickstart
 
-The recommended Viskod workflow runs through **Studio**:
+In `0.2.4-alpha`, Studio is source-checkout-only. Start it from a Viskod
+checkout with the command in the installation section, then:
 
-1. Start your local app (or the included fixture above). Leave it running.
-2. Start Studio — it serves its UI on `http://localhost:3001`.
-3. Open `http://localhost:3001`, enter your app URL, and click `Open app`.
-4. Click `Report UI issue`, hover over the problem, and click it.
-5. Describe the problem, click `Prepare agent handoff`, and copy the prompt
+1. Start your local app and leave it running.
+2. Open `http://localhost:3001`, enter your app URL, and click `Open app`.
+3. Click `Report UI issue`, hover over the problem, and click it.
+4. Describe the problem, click `Prepare agent handoff`, and copy the prompt
    for your coding agent.
-6. After the agent changes the code, click `Verify fix` — Studio reloads the
-   page (cache-busted) and recaptures the same element so you can compare
-   before/after evidence and decide.
+5. After the agent changes the code, click `Verify fix` and make the human
+   decision.
 
 Full walkthrough: [QUICKSTART_MCP.md](QUICKSTART_MCP.md)
 
@@ -189,8 +190,7 @@ The MCP server speaks JSON-RPC over stdin/stdout and is started by your MCP
 client. The target app must already be listening, or `viskod serve` exits at
 startup with a connection error:
 
-```bash
-viskod serve --url http://localhost:3000
+viskod serve --url http://localhost:3000 --project-root <your-app-dir>
 ```
 ## Choose a path
 

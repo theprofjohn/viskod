@@ -27,6 +27,7 @@ const fetchSpy = vi.fn().mockRejectedValue(new Error('mocked'));
 vi.stubGlobal('fetch', fetchSpy);
 
 let tmpDir: string;
+let cwdSpy: { mockRestore: () => void } | undefined;
 
 beforeEach(() => {
   tmpDir = path.join(
@@ -34,6 +35,9 @@ beforeEach(() => {
     `viskod-doctor-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
   fs.mkdirSync(tmpDir, { recursive: true });
+  // Keep the no-project-root case hermetic even when the caller runs from a
+  // checkout containing persisted Viskod state.
+  cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
   // Create a minimal project so detectProject succeeds naturally
   fs.writeFileSync(
     path.join(tmpDir, 'package.json'),
@@ -43,6 +47,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cwdSpy?.mockRestore();
+  cwdSpy = undefined;
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch {}

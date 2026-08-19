@@ -191,4 +191,23 @@ describe('rankHints', () => {
     const result = rankHints({ hints });
     expect(result.topHints[0]?.evidence.length).toBeGreaterThan(0);
   });
+
+  it('keeps calibrated confidence unchanged when kind penalties reorder candidates', () => {
+    const result = rankHints({
+      hints: [
+        makeHint({
+          filePath: 'src/components/Button.test.tsx',
+          confidence: 0.9,
+          matchType: 'exact',
+        }),
+        makeHint({
+          filePath: 'src/components/Button.tsx',
+          confidence: 0.8,
+          matchType: 'exact',
+        }),
+      ],
+    });
+    expect(result.topHints[0]?.kind).toBe('definition-site');
+    expect(result.topHints[1]?.ranking.confidence).toBe(0.9);
+  });
 });

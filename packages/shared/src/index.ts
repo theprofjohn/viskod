@@ -10,3 +10,4 @@ export {
   type TargetUrlPolicy,
   type TargetUrlValidation,
 } from './target-url';
+export * from './feedback';

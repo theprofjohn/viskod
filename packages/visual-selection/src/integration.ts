@@ -44,6 +44,7 @@ export class SelectionOverlayController {
   private service: VisualSelectionService;
   private overlayScript: string;
   private active = false;
+  private exitInFlight: Promise<Result<void>> | null = null;
   /** Next-poll timer; serialized loop so polls never overlap (VISKOD-AUDIT-013). */
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bumped on exit so late async poll completions cannot mutate state. */
@@ -57,6 +58,7 @@ export class SelectionOverlayController {
   }
 
   async enterSelectionMode(): Promise<Result<void>> {
+    if (this.exitInFlight) await this.exitInFlight;
     if (this.active) {
       return ok(undefined);
     }
@@ -79,14 +81,20 @@ export class SelectionOverlayController {
   }
 
   async exitSelectionMode(): Promise<Result<void>> {
+    if (this.exitInFlight) return this.exitInFlight;
     this.stopPolling();
-
-    await this.browser.hideOverlaySelectionMode();
-    const exitResult = await this.service.exitSelectionMode(this.pageId);
-
     this.active = false;
     this.generation++;
-    return exitResult;
+
+    const pending = (async (): Promise<Result<void>> => {
+      await this.browser.hideOverlaySelectionMode();
+      return this.service.exitSelectionMode(this.pageId);
+    })();
+    const tracked = pending.finally(() => {
+      if (this.exitInFlight === tracked) this.exitInFlight = null;
+    });
+    this.exitInFlight = tracked;
+    return tracked;
   }
 
   async clearSelection(): Promise<Result<void>> {
@@ -99,6 +107,10 @@ export class SelectionOverlayController {
 
   isActive(): boolean {
     return this.active;
+  }
+
+  isTeardownPending(): boolean {
+    return this.exitInFlight !== null;
   }
 
   private async handleOverlayEvent(event: OverlayEvent): Promise<void> {

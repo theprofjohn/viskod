@@ -697,10 +697,21 @@ async function collectCandidates(input: HintInput, ctx: ScanContext): Promise<Ca
     byPath.set(key, candidate);
   };
 
-  // 1. Current route owner (strong).
-  if (matchedRoute?.file && isSafeRelativePath(matchedRoute.file)) {
+  // 1. Current rendered-route owners (strong). The route map may contain a
+  // page and one or more layouts for the same pathname; retain all of them
+  // as bounded candidates so shared-layout ambiguity remains honest.
+  const routeCandidates = (
+    input.route.matchedRoutes?.length
+      ? input.route.matchedRoutes
+      : matchedRoute
+        ? [matchedRoute]
+        : []
+  ).filter((route) => route.type === 'page' || route.type === 'layout');
+
+  for (const route of routeCandidates) {
+    if (!isSafeRelativePath(route.file)) continue;
     add({
-      filePath: matchedRoute.file,
+      filePath: route.file,
       exists: true,
       matchType: 'usage-site',
       discoveryMethod: 'route-correlation',
@@ -708,29 +719,20 @@ async function collectCandidates(input: HintInput, ctx: ScanContext): Promise<Ca
       families: [
         {
           family: 'route-ownership',
-          reason: `current route ${matchedRoute.path ?? ''} maps to this file`,
+          reason: `current route ${route.path ?? ''} maps to this ${route.type}`,
         },
       ],
     });
   }
 
-  // 2. Import-closure of the current route (strong corroboration).
-  let importClosure: Set<string> | null = null;
-  if (matchedRoute?.file && isSafeRelativePath(matchedRoute.file)) {
+  // 2. Bounded import-closure of each rendered current-route owner.
+  // Traversal remains governed by the existing Phase 33 budget/signal.
+  for (const route of routeCandidates) {
+    if (!isSafeRelativePath(route.file)) continue;
     try {
-      importClosure = await buildLocalDependencyClosureAsync(
-        rootPath,
-        matchedRoute.file,
-        ctx.budget,
-      );
-    } catch (error) {
-      if (error instanceof ScanBudgetExceededError) throw error;
-      importClosure = null;
-    }
-    if (importClosure) {
-      for (const file of importClosure) {
-        if (file === matchedRoute.file) continue;
-        if (!isSafeRelativePath(file)) continue;
+      const closure = await buildLocalDependencyClosureAsync(rootPath, route.file, ctx.budget);
+      for (const file of closure) {
+        if (file === route.file || !isSafeRelativePath(file)) continue;
         add({
           filePath: file,
           exists: true,
@@ -739,11 +741,13 @@ async function collectCandidates(input: HintInput, ctx: ScanContext): Promise<Ca
           families: [
             {
               family: 'import-path',
-              reason: 'imported (directly or transitively) by the current route',
+              reason: `imported (directly or transitively) by current route ${route.path ?? ''}`,
             },
           ],
         });
       }
+    } catch (error) {
+      if (error instanceof ScanBudgetExceededError) throw error;
     }
   }
 

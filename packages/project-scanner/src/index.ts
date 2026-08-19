@@ -631,14 +631,16 @@ export class ProjectScanner {
     let dynamicRoutePattern: string | undefined;
 
     if (framework === 'nextjs') {
-      const appDir = join(rootPath, 'app');
-      if (existsSync(appDir)) {
+      const appDirs = [join(rootPath, 'app'), join(rootPath, 'src', 'app')];
+      for (const appDir of appDirs) {
+        if (!existsSync(appDir)) continue;
         layoutPattern = 'layout.tsx (per-segment)';
         dynamicRoutePattern = '[param]';
         this.walkRoutes(appDir, appDir, 'nextjs-app', routes);
       }
-      const pagesDir = join(rootPath, 'pages');
-      if (existsSync(pagesDir)) {
+      const pagesDirs = [join(rootPath, 'pages'), join(rootPath, 'src', 'pages')];
+      for (const pagesDir of pagesDirs) {
+        if (!existsSync(pagesDir)) continue;
         layoutPattern = '_app.tsx';
         dynamicRoutePattern = '[param]';
         this.walkRoutes(pagesDir, pagesDir, 'nextjs-pages', routes);
@@ -734,9 +736,11 @@ export class ProjectScanner {
     const params = this.extractParams(relativePath);
 
     if (convention === 'nextjs-app') {
+      const appRoutePath = (suffix: RegExp): string =>
+        relativePath.replace(suffix, '').replace(/\/\([^/]+\)/g, '') || '/';
       if (name === 'page.tsx' || name === 'page.ts' || name === 'page.jsx' || name === 'page.js') {
         return {
-          path: relativePath.replace(/\/page\.(tsx|ts|jsx|js)$/, '') || '/',
+          path: appRoutePath(/\/page\.(tsx|ts|jsx|js)$/),
           file: relativePath,
           type: 'page',
           isDynamic,
@@ -750,7 +754,7 @@ export class ProjectScanner {
         name === 'layout.js'
       ) {
         return {
-          path: relativePath.replace(/\/layout\.(tsx|ts|jsx|js)$/, '') || '/',
+          path: appRoutePath(/\/layout\.(tsx|ts|jsx|js)$/),
           file: relativePath,
           type: 'layout',
           isDynamic,
@@ -759,7 +763,7 @@ export class ProjectScanner {
       }
       if (name === 'route.ts' || name === 'route.tsx' || name === 'route.js') {
         return {
-          path: relativePath.replace(/\/route\.(ts|tsx|js)$/, ''),
+          path: appRoutePath(/\/route\.(ts|tsx|js)$/),
           file: relativePath,
           type: 'api',
           isDynamic,

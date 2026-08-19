@@ -210,6 +210,13 @@ export interface RouteContext {
     type: string;
     isDynamic: boolean;
   };
+  /** Bounded exact/dynamic rendered-route candidates, ordered page before layout. */
+  matchedRoutes?: Array<{
+    path: string;
+    file: string;
+    type: string;
+    isDynamic: boolean;
+  }>;
 }
 
 export interface ProjectContext {

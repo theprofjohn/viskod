@@ -1,6 +1,11 @@
 import * as fs from 'node:fs';
-
 import * as os from 'node:os';
+import {
+  type DiagnosticSummary,
+  createDiagnosticSummary,
+  sanitizeErrorDetail,
+} from '@viskod/shared';
+
 import { checkAgentConfigReadiness } from './agent-config';
 import type { McpServeCommand } from './command-factory';
 import { detectProject } from './detector';
@@ -8,9 +13,21 @@ import { verifyMcpToolsRuntime } from './mcp-runtime';
 import { loadSetupState } from './persistence';
 import type { AgentConfigInfo, FirstRunSetupState, SetupStateKind } from './types';
 
+declare const __VISKOD_VERSION__: string | undefined;
+const SETUP_VERSION = typeof __VISKOD_VERSION__ !== 'undefined' ? __VISKOD_VERSION__ : '0.0.0-dev';
+
 const STUDIO_HOST = '127.0.0.1';
 const STUDIO_PORT = 3001;
 const REQUIRED_NODE_MAJOR = 22;
+
+export type DoctorCheckSeverity = 'required' | 'recommended' | 'informational';
+
+export interface DoctorCheck {
+  id: string;
+  severity: DoctorCheckSeverity;
+  ok: boolean;
+  detail: string;
+}
 
 export interface DoctorReport {
   node: { version: string; ok: boolean };
@@ -34,6 +51,144 @@ export interface DoctorReport {
     staleReason?: string;
   };
   agentConfig: AgentConfigInfo | null;
+}
+
+/** Stable check classification used by CLI and Studio consumers. */
+export function getDoctorChecks(report: DoctorReport): DoctorCheck[] {
+  return [
+    {
+      id: 'node',
+      severity: 'required',
+      ok: report.node.ok,
+      detail: `v${report.node.version}`,
+    },
+    {
+      id: 'chromium',
+      severity: 'required',
+      ok: report.chromium.verified,
+      detail: report.chromium.hint ?? (report.chromium.verified ? 'available' : 'not found'),
+    },
+    {
+      id: 'mcp',
+      severity: 'required',
+      ok: report.mcp.ok,
+      detail:
+        report.mcp.error ??
+        (report.mcp.mode ? `${report.mcp.mode} (${report.mcp.toolsFound ?? 0} tools)` : 'failed'),
+    },
+    {
+      id: 'project',
+      severity: 'required',
+      ok: report.project.ok,
+      detail: report.project.reason ?? (report.project.ok ? 'detected' : 'not configured'),
+    },
+    {
+      id: 'source-resolution',
+      severity: 'required',
+      ok: report.sourceResolution === 'ready',
+      detail: report.sourceResolution,
+    },
+    {
+      id: 'studio',
+      severity: 'recommended',
+      ok: report.studio.reachable,
+      detail: report.studio.reachable ? 'running' : 'not reachable',
+    },
+    {
+      id: 'setup-state',
+      severity: 'recommended',
+      ok: !report.setupState.stale,
+      detail: report.setupState.exists
+        ? `${report.setupState.state ?? 'unknown'}${report.setupState.stale ? ' (stale)' : ''}`
+        : 'never run',
+    },
+    {
+      id: 'agent-config',
+      severity: 'recommended',
+      ok: report.agentConfig?.detected ?? false,
+      detail: report.agentConfig?.detected ? 'detected' : 'not detected',
+    },
+    {
+      id: 'diagnostic-safety',
+      severity: 'informational',
+      ok: true,
+      detail: 'local-only, sanitized',
+    },
+  ];
+}
+
+export function hasDoctorRequiredFailure(report: DoctorReport): boolean {
+  return getDoctorChecks(report).some((check) => check.severity === 'required' && !check.ok);
+}
+
+/** Allowlisted, path-free projection for report consumers. */
+export interface DoctorDiagnosticProjection {
+  checks: Array<{
+    id: string;
+    severity: DoctorCheckSeverity;
+    ok: boolean;
+    detail: string;
+  }>;
+  diagnostics: DiagnosticSummary;
+  requiredFailures: number;
+  recommendedAttention: number;
+  status: 'healthy' | 'attention' | 'failed';
+}
+
+export function buildDoctorDiagnosticProjection(report: DoctorReport): DoctorDiagnosticProjection {
+  const checks = getDoctorChecks(report).map((check) => ({
+    id: check.id,
+    severity: check.severity,
+    ok: check.ok,
+    // Shared redaction removes absolute paths, executable paths, and control
+    // characters before this value crosses the diagnostic boundary.
+    detail: sanitizeErrorDetail(check.detail, 200),
+  }));
+  const requiredFailures = checks.filter(
+    (check) => check.severity === 'required' && !check.ok,
+  ).length;
+  const recommendedAttention = checks.filter(
+    (check) => check.severity === 'recommended' && !check.ok,
+  ).length;
+  const diagnostics = createDiagnosticSummary({
+    viskodVersion: SETUP_VERSION,
+    platform: process.platform,
+    architecture: process.arch,
+    nodeVersion: report.node.version,
+    setupState:
+      report.setupState.state === 'complete'
+        ? 'complete'
+        : report.setupState.state === 'limited'
+          ? 'limited'
+          : report.setupState.state === 'incomplete'
+            ? 'failed'
+            : 'unknown',
+    mcpRuntime: report.mcp.ok ? 'verified' : 'failed',
+    browserRuntime: report.chromium.verified ? 'verified' : 'unavailable',
+    projectMode: report.project.ok ? 'single-package' : 'unavailable',
+    workspacePackageCount: 0,
+    workflowStage: 'unknown',
+    sourceResolutionStatus:
+      report.sourceResolution === 'ready'
+        ? 'resolved'
+        : report.sourceResolution === 'invalid'
+          ? 'failed'
+          : report.sourceResolution,
+    topSourceQualification: 'unavailable',
+    visualReviewStatus: 'unknown',
+    errorCodes: checks
+      .filter((check) => !check.ok)
+      .map((check) => check.id)
+      .slice(0, 20),
+    studioHealth: report.studio.reachable ? 'running' : 'unavailable',
+  });
+  return {
+    checks,
+    diagnostics,
+    requiredFailures,
+    recommendedAttention,
+    status: requiredFailures > 0 ? 'failed' : recommendedAttention > 0 ? 'attention' : 'healthy',
+  };
 }
 
 function checkNode(): DoctorReport['node'] {

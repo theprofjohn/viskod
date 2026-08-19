@@ -139,6 +139,23 @@ describe('import-graph', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('follows Next-style @/ aliases in local dependency closure', () => {
+    const tmpDir = join(tmpdir(), `viskod-ig-alias-${Date.now()}`);
+    mkdirSync(join(tmpDir, 'app'), { recursive: true });
+    mkdirSync(join(tmpDir, 'components'), { recursive: true });
+
+    writeFileSync(
+      join(tmpDir, 'app', 'page.tsx'),
+      'import { HomeSearch } from "@/components/home-search";',
+    );
+    writeFileSync(join(tmpDir, 'components', 'home-search.tsx'), 'export function HomeSearch() {}');
+
+    const closure = buildLocalDependencyClosure(tmpDir, 'app/page.tsx');
+    expect(closure).toContain('components/home-search.tsx');
+
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it('never lets a relative import escape the repository root', () => {
     const tmpDir = join(tmpdir(), `viskod-ig-escape-${Date.now()}`);
     const srcDir = join(tmpDir, 'src');
