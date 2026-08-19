@@ -223,8 +223,8 @@ Unit/integration lifecycle tests cover loopback binding, occupied ports, idempot
 
 ### 25.1 Final source identity and freeze
 
-- Final RC source commit for this closure: `d69bb8365f330bfb3694e113f16cc20d784849a9`.
-- `git status --short`: clean after the lockfile commit.
+- Final RC source commit for this closure: `c2a10ddac4a882693795d053057032f38f4dba1c`.
+- `git status --short`: clean after the release-test timeout stabilization.
 - Intentional source inventory: Phase 36/37 product and tests, active
   installation docs, Phase 36/37/38 reports, the privacy fixture, and the
   release lockfile. Generated `rc-artifacts/` was removed from the source
@@ -305,11 +305,20 @@ Authoritative final artifact metadata:
 | Unpacked size | 755,571 bytes |
 | SHA-256 | `9668cc4095a3ea52ec67893c393c2e137ed7ce6e3d36364a878484a00d28c1cf` |
 
-The complete validation matrix is recorded below after execution from the
-final clean source state. Process hygiene remains PASS for loopback binding,
-shutdown, MCP EOF cleanup, config preservation, and package privacy. The
-full-product external Studio criterion is **PARTIAL** because the artifact is
-truthfully scoped CLI/MCP-only.
+The complete validation matrix was executed from the final clean source
+worktree. `pnpm typecheck`, `pnpm lint`, `pnpm test:ci` (including the
+import-graph cache bound with its existing 30-second test budget),
+`pnpm test:dogfood`, `pnpm smoke:agent-workflow`, CLI build/artifact
+verification, and `pnpm release:check` passed. The full `pnpm test:e2e`
+suite passed 86/90 tests in the first clean run; four Studio UI tests
+timed out under the browser runner, and the isolated rerun passed 10/12
+with the same two timing-sensitive selection waits failing. This is recorded
+as a validation limitation rather than a product regression claim.
+
+Process hygiene remains PASS for loopback binding, shutdown, MCP EOF cleanup,
+config preservation, and package privacy. The full-product external Studio
+criterion is **PARTIAL** because the artifact is truthfully scoped CLI/MCP-only.
 
 **Phase 38A verdict: PARTIAL — CLI/MCP RC PASS; full installed Studio
-distribution is not yet available.**
+distribution is not yet available, and the E2E runner retains two
+timing-sensitive failures.**
