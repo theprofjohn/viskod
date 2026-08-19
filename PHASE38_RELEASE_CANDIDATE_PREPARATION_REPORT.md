@@ -223,7 +223,7 @@ Unit/integration lifecycle tests cover loopback binding, occupied ports, idempot
 
 ### 25.1 Final source identity and freeze
 
-- Final RC source commit for this closure: `c2a10ddac4a882693795d053057032f38f4dba1c`.
+- Final RC source commit for this closure: `5f0f3c6d64bed520dfb9d169adcc1318cb0ee667`.
 - `git status --short`: clean after the release-test timeout stabilization.
 - Intentional source inventory: Phase 36/37 product and tests, active
   installation docs, Phase 36/37/38 reports, the privacy fixture, and the
@@ -246,14 +246,17 @@ package.json
 LICENSE
 ```
 
-The final clean pack was `viskod-cli-0.2.4-alpha.tgz`, 149,406 bytes, with
-755,571 unpacked bytes and SHA-256
-`9668cc4095a3ea52ec67893c393c2e137ed7ce6e3d36364a878484a00d28c1cf`.
-Repeated `pnpm pack` runs produced the same executable and license bytes and
-semantically identical manifests; pnpm rewrote devDependency key order in the
-archive manifest, so archive bytes were not identical. The earlier
-`b2ab02f83f6c0ff72592f02329f22a207bb0cce24baafd814f2bcf6ddcf053c3` checksum
-is historical RC-preparation evidence, not the final artifact identity.
+The authoritative clean pack from that final commit was
+`viskod-cli-0.2.4-alpha.tgz`, 149,406 bytes, with 755,571 unpacked bytes and
+SHA-256
+`725b3c7123b4a6c298c2fdad1897e35b6e9aab69ab154290f4766659876a3dc8`.
+The unpacked package contents and executable/license bytes matched across
+repeated packs. pnpm rewrote devDependency key order in `package.json`, so
+archive bytes were not deterministic; the checksum above is the authoritative
+final artifact file. The earlier
+`9668cc4095a3ea52ec67893c393c2e137ed7ce6e3d36364a878484a00d28c1cf` and
+`b2ab02f83f6c0ff72592f02329f22a207bb0cce24baafd814f2bcf6ddcf053c3` checksums
+are historical RC-preparation evidence.
 
 ### 25.3 Studio distribution decision
 
@@ -303,7 +306,7 @@ Authoritative final artifact metadata:
 | Files | 3 |
 | Tarball size | 149,406 bytes |
 | Unpacked size | 755,571 bytes |
-| SHA-256 | `9668cc4095a3ea52ec67893c393c2e137ed7ce6e3d36364a878484a00d28c1cf` |
+| SHA-256 | `725b3c7123b4a6c298c2fdad1897e35b6e9aab69ab154290f4766659876a3dc8` |
 
 The complete validation matrix was executed from the final clean source
 worktree. `pnpm typecheck`, `pnpm lint`, `pnpm test:ci` (including the
