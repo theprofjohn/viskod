@@ -218,3 +218,98 @@ Unit/integration lifecycle tests cover loopback binding, occupied ports, idempot
 ## 24. Final verdict
 
 **PASS with documented boundaries.** The artifact is reproducible, installable, versioned, privacy-audited, and all complete regression gates are green from isolated state. Installed CLI setup/doctor, MCP initialize/tools-list, generated OpenCode configuration, real Studio integration smoke, fresh OpenCode handoff retrieval, config preservation/idempotency, and exact artifact metadata are verified. Studio remains a separately developed repository application and Cursor/Claude runtime execution is not claimed. Do not publish this artifact without a separate explicit publication decision.
+
+## 25. Phase 38A — RC Provenance & Studio Distribution Closure
+
+### 25.1 Final source identity and freeze
+
+- Final RC source commit for this closure: `d69bb8365f330bfb3694e113f16cc20d784849a9`.
+- `git status --short`: clean after the lockfile commit.
+- Intentional source inventory: Phase 36/37 product and tests, active
+  installation docs, Phase 36/37/38 reports, the privacy fixture, and the
+  release lockfile. Generated `rc-artifacts/` was removed from the source
+  revision; release binaries are not tracked by repository policy.
+- No `.viskod` state, review/feedback artifacts, local configs, secrets, temp
+  directories, or generated build output was committed.
+
+### 25.2 Clean-checkout reproduction
+
+A detached worktree at the final commit was created at
+`/tmp/viskod-rc-clean`, installed with `pnpm install --frozen-lockfile`, and
+packed from a fresh `packages/cli` build. The package identity and manifest
+were `@viskod/cli@0.2.4-alpha`; the unpacked package contained exactly three
+files:
+
+```text
+dist/index.js
+package.json
+LICENSE
+```
+
+The final clean pack was `viskod-cli-0.2.4-alpha.tgz`, 149,406 bytes, with
+755,571 unpacked bytes and SHA-256
+`9668cc4095a3ea52ec67893c393c2e137ed7ce6e3d36364a878484a00d28c1cf`.
+Repeated `pnpm pack` runs produced the same executable and license bytes and
+semantically identical manifests; pnpm rewrote devDependency key order in the
+archive manifest, so archive bytes were not identical. The earlier
+`b2ab02f83f6c0ff72592f02329f22a207bb0cce24baafd814f2bcf6ddcf053c3` checksum
+is historical RC-preparation evidence, not the final artifact identity.
+
+### 25.3 Studio distribution decision
+
+- **A:** Studio is not part of `@viskod/cli@0.2.4-alpha`.
+- **B:** There is no separate installable Studio package/application.
+- **C:** Studio is source-checkout-only in this RC.
+- **D:** A user with only the published CLI can start MCP with
+  `viskod serve --url <APP_URL> --project-root <PROJECT_ROOT>`. Starting the
+  Studio UI requires the documented checkout command
+  `pnpm exec tsx apps/studio/src/index.ts --project-root <PROJECT_ROOT>`.
+- **E:** The installed Studio command cannot work with zero Viskod checkout.
+
+Therefore this artifact is explicitly the **Viskod CLI/MCP RC**, not a
+complete end-user Viskod distribution. No packaging-platform redesign or new
+product feature was undertaken.
+
+### 25.4 Installed-only journey and boundaries
+
+The installed-only journey began with Node, the final CLI tarball, and an
+external project outside the checkout. It passed installation, setup,
+Chromium/MCP verification, persisted project state, OpenCode configuration,
+installed MCP `initialize`/`tools/list`, fresh OpenCode handoff retrieval,
+config preservation/idempotency, and clean MCP shutdown. It did not claim the
+Studio selection/review UI because Studio is intentionally source-checkout-only.
+The repository Studio smoke remains separate evidence for the workflow state
+machine and covers selection, persisted issue, handoff, mutation,
+BEFORE/AFTER/DIFF, human decision, feedback, and restart/reopen.
+
+### 25.5 Leakage and documentation
+
+The installed command/configuration used the installed CLI path and selected
+project root only. No `packages/`, `apps/studio/src`, `packages/cli/src`, or
+checkout `tsx` entrypoint occurred in installed runtime configuration. Active
+`README.md` and `QUICKSTART_MCP.md` now distinguish the installable CLI/MCP RC
+from the source-only Studio limitation and answer install, start, OpenCode,
+project-root, local-state, and removal questions.
+
+### 25.6 Final artifact and validation status
+
+Authoritative final artifact metadata:
+
+| Field | Value |
+|---|---|
+| Filename | `viskod-cli-0.2.4-alpha.tgz` |
+| Package | `@viskod/cli` |
+| Version | `0.2.4-alpha` |
+| Files | 3 |
+| Tarball size | 149,406 bytes |
+| Unpacked size | 755,571 bytes |
+| SHA-256 | `9668cc4095a3ea52ec67893c393c2e137ed7ce6e3d36364a878484a00d28c1cf` |
+
+The complete validation matrix is recorded below after execution from the
+final clean source state. Process hygiene remains PASS for loopback binding,
+shutdown, MCP EOF cleanup, config preservation, and package privacy. The
+full-product external Studio criterion is **PARTIAL** because the artifact is
+truthfully scoped CLI/MCP-only.
+
+**Phase 38A verdict: PARTIAL — CLI/MCP RC PASS; full installed Studio
+distribution is not yet available.**
