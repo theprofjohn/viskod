@@ -4,7 +4,15 @@ import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { type Browser, type Page, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ROOT, STUDIO_URL, killTree, sleep, spawnProc, waitForHttp } from './harness';
+import {
+  ROOT,
+  STUDIO_URL,
+  killTree,
+  sleep,
+  spawnProc,
+  waitForHttp,
+  waitForHttpUnavailable,
+} from './harness';
 
 /**
  * Phase 31 — REAL Studio UI journeys.
@@ -100,7 +108,12 @@ async function clickAction(action: string): Promise<void> {
 async function openFixtureInStudio(): Promise<void> {
   await page.goto(STUDIO_URL, { waitUntil: 'domcontentloaded' });
   await page.fill('#app-url', `${FIXTURE_URL}/?viskodReset=1&viskodSimulate=target-card`);
+  const navigateResponse = page.waitForResponse(
+    (response) =>
+      response.url() === `${STUDIO_URL}/navigate` && response.request().method() === 'POST',
+  );
   await page.click('form[data-action="open-app"] button[type="submit"]');
+  await navigateResponse;
 }
 
 /** Walk the shared report journey: open → select → accept → describe → handoff. */
@@ -295,6 +308,7 @@ describe('Phase 34A Studio UI — restart resume through decision', () => {
 
     killTree(studioProc);
     studioProc = null;
+    await waitForHttpUnavailable(`${STUDIO_URL}/health`, 10000, 'owned Studio shutdown');
     await waitForHttp(`${FIXTURE_URL}/`, 20000, 'fixture after Studio stop');
     studioProc = spawnProc(process.platform === 'win32' ? 'npx.cmd' : 'npx', [
       'tsx',

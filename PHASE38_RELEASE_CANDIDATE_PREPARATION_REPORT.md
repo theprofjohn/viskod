@@ -325,3 +325,116 @@ criterion is **PARTIAL** because the artifact is truthfully scoped CLI/MCP-only.
 **Phase 38A verdict: PARTIAL — CLI/MCP RC PASS; full installed Studio
 distribution is not yet available, and the E2E runner retains two
 timing-sensitive failures.**
+
+## 26. Phase 38B — RC E2E Determinism Closure
+
+### 26.1 Failure reproduction and root cause
+
+The first post-38A full-suite reproduction ran `pnpm test:e2e` with 15 files
+and 90 tests. It produced 86 passing tests and four failures:
+
+- `tests/e2e/studio-ui.test.ts` —
+  `Phase 34 issue history supports edit archive reopen and fork through rendered controls`;
+  the persisted issue-count assertion observed one issue instead of two.
+- `tests/e2e/visual-review-ui.test.ts` —
+  `Phase 34A Studio UI — restart resume through decision`;
+  the bounded `waitForStage('handoff_ready')` wait expired after an owned Studio
+  restart.
+- `tests/e2e/visual-review-ui.test.ts` —
+  `Phase 31 Studio UI — unchanged review journey`;
+  the rendered report-start control did not become observable after the prior
+  restart journey.
+- `tests/e2e/port-ownership.test.ts` —
+  the second smoke process did not exit successfully in that contaminated
+  ordering.
+
+The isolated Studio UI reproduction passed twice before the full run, while
+the visual-review file reproduced the restart/navigation failure in isolation.
+The failing transition was lifecycle readiness, not source selection or
+source-ranking behavior: a test could begin the next navigation while its
+owned Studio process, prior browser overlay teardown, or the prior rendered
+workflow/WebSocket state was still settling. A pre-existing rendered
+`#report-start` control could therefore be observed before the new `/navigate`
+request had established the new idle workflow.
+
+### 26.2 Bounded synchronization correction
+
+The correction is test-harness-only:
+
+- `tests/e2e/harness.ts` now has `waitForHttpUnavailable`, a bounded polling
+  condition that returns only after the owned Studio health endpoint is down.
+- `tests/e2e/visual-review-ui.test.ts` waits for owned Studio shutdown before
+  spawning the replacement process and waits for the `/navigate` response.
+- `tests/e2e/studio-ui.test.ts` waits for the server `/state` contract to show
+  the requested URL and `idle` workflow before beginning a report. The helper
+  then waits for the freshly rendered report control.
+
+No arbitrary sleep, global timeout inflation, product lifecycle protocol,
+selection semantics, source ranking, or shipped CLI/MCP runtime changed.
+Existing bounded polling remains a failure bound around explicit HTTP/state
+conditions. The focused lifecycle regressions cover repeated navigation,
+selection restart/cancel/reselect, issue history, Studio restart/resume, and
+visual review durability.
+
+### 26.3 Cache and performance-budget audit
+
+The import/cache test tolerance remains a test-runner budget only. Product
+budgets were unchanged:
+
+- `DEFAULT_SCAN_BUDGET`: `maxFiles=3000`, `maxTimeMs=2500`.
+- Import-graph concurrency: `16`.
+- Hint cache: 500 entries, 5-minute TTL.
+- Import-graph cache: 50 entries, 10-minute TTL.
+- Manifest cache: 20 entries, 10-minute TTL.
+- Abort/cancellation, generation invalidation, and deadline enforcement remain
+  unchanged.
+
+The existing 30-second test allowance documents clean-release-load
+variability; no product performance budget was raised and Phase 33
+performance/cancellation coverage remained green.
+
+### 26.4 Focused and authoritative validation
+
+Focused validation after the correction:
+
+- `tests/e2e/studio-ui.test.ts`: 12/12, including a repeated full-file run.
+- `tests/e2e/visual-review-ui.test.ts`: 3/3, including restart/resume.
+- `tests/e2e/visual-review-durability.test.ts`: 6/6.
+- Visual-selection integration/contract tests: 72/72.
+- Studio workflow/UI unit tests: 59/59.
+- Port ownership: 1/1.
+
+The authoritative single-command `pnpm test:e2e` run passed **15/15 files
+and 90/90 tests**.
+
+### 26.5 Final RC matrix
+
+On the same corrected source state:
+
+| Gate | Result |
+|---|---|
+| `pnpm typecheck` | PASS |
+| `pnpm lint` | PASS — 332 files |
+| `pnpm test:ci` | PASS — 74 files, 1,100 tests |
+| `pnpm test:e2e` | PASS — 15 files, 90 tests |
+| `pnpm test:dogfood` | PASS — 7 files, 129 tests |
+| `pnpm smoke:agent-workflow` | PASS — 26/26 |
+| `pnpm build:cli` | PASS |
+| `node scripts/verify-cli-artifact.mjs` | PASS |
+| `pnpm release:check` | PASS — complete release gate |
+
+### 26.6 Provenance, process hygiene, and verdict
+
+The correction touches only E2E harness/test files. It does not affect the
+packed CLI/MCP runtime, so the authoritative Phase 38A artifact source and
+SHA remain unchanged: source commit
+`5f0f3c6d64bed520dfb9d169adcc1318cb0ee667`, SHA-256
+`725b3c7123b4a6c298c2fdad1897e35b6e9aab69ab154290f4766659876a3dc8`.
+The post-fix packed artifact was independently rebuilt and verified; runtime
+content is unchanged because no CLI/MCP source or package metadata changed.
+
+All termination waits are scoped to processes created by the owning test.
+Unknown external owners are never terminated. The final clean-source status
+and final closure commit are recorded after `pnpm release:check`.
+
+**Phase 38B status: PASS pending final closure commit and clean-status evidence.**

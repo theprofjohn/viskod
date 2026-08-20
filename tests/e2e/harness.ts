@@ -101,6 +101,22 @@ export async function waitForHttp(url: string, timeoutMs: number, label: string)
   }
   throw new Error(`timeout waiting for ${label} at ${url}`);
 }
+export async function waitForHttpUnavailable(
+  url: string,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      await fetch(url, { signal: AbortSignal.timeout(1000) });
+    } catch {
+      return;
+    }
+    await sleep(100);
+  }
+  throw new Error(`timeout waiting for ${label} to stop at ${url}`);
+}
 
 /** Boot the phase12 fixture server (port 3000) and wait until it serves HTTP. */
 export async function startFixture(): Promise<ChildProcess> {

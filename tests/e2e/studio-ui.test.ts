@@ -145,11 +145,26 @@ async function freshMcpToolCall(
 
 async function openApp(url: string): Promise<void> {
   // viskodReset clears the fixture's simulated-target sessionStorage so every
-  // test starts with a clean selection simulation state.
   const sep = url.includes('?') ? '&' : '?';
-  await page.fill('#app-url', `${url}${sep}viskodReset=1`);
+  const targetUrl = `${url}${sep}viskodReset=1`;
+  await page.fill('#app-url', targetUrl);
   await page.click('#open-app-form button[type="submit"]');
-  await page.waitForSelector('#report-start', { timeout: 30000 });
+  const expectedUrl = targetUrl;
+  await page.waitForFunction(
+    async (target) => {
+      const response = await fetch('/state');
+      const state = (await response.json()) as {
+        pageUrl?: string;
+        workflow?: { stage?: string };
+      };
+      return state.pageUrl === target && state.workflow?.stage === 'idle';
+    },
+    expectedUrl,
+    { timeout: 30000 },
+  );
+  await page.waitForFunction(() => document.querySelector('#report-start') !== null, undefined, {
+    timeout: 30000,
+  });
 }
 
 /** Reset the server-side workflow and re-render the UI at idle between tests. */
