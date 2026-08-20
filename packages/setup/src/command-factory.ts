@@ -108,9 +108,7 @@ export function getMcpServeCommand(opts?: {
   if (mode === 'dev') {
     const checkoutRoot = findViskodCheckoutRoot() ?? findViskodCheckoutRoot(opts?.cwd);
     if (!checkoutRoot) {
-      throw new Error(
-        'dev mode requested but no Viskod checkout could be located (packages/cli/src/index.ts + package.json name "viskod")',
-      );
+      throw new Error('dev mode requested but no Viskod source checkout was located');
     }
     return {
       command: 'npx',

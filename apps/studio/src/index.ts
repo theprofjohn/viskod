@@ -36,6 +36,9 @@ import {
   UserFacingReview,
 } from '@viskod/visual-review';
 import type { VisualArtifactPolicy } from '@viskod/visual-review';
+
+declare const __VISKOD_VERSION__: string | undefined;
+const VISKOD_VERSION = typeof __VISKOD_VERSION__ !== 'undefined' ? __VISKOD_VERSION__ : '0.0.0-dev';
 import { SelectionOverlayController, VisualSelectionServiceImpl } from '@viskod/visual-selection';
 import type { BrowserIntegration } from '@viskod/visual-selection';
 import { chromium } from 'playwright';
@@ -468,6 +471,13 @@ export class Studio {
     return ok(undefined);
   }
 
+  /** Navigate the managed browser and initialize the selection workflow. */
+  async navigate(url: string): Promise<Result<void>> {
+    const result = await this.vce.navigate(url);
+    if (result.ok) this.setupPageWorkflow(url);
+    return result;
+  }
+
   /** Close sockets created by a failed start so nothing leaks on EADDRINUSE. */
   private async releaseStartupResources(): Promise<void> {
     if (this.wss) {
@@ -757,7 +767,7 @@ export class Studio {
     const source = workflow.source;
     const setup = this.state.setup;
     return createDiagnosticSummary({
-      viskodVersion: '0.0.0-dev',
+      viskodVersion: VISKOD_VERSION,
       platform: process.platform,
       architecture: process.arch,
       nodeVersion: process.version,
@@ -1240,21 +1250,26 @@ export class Studio {
       };
       this.state.currentSelection = selection;
 
-      if (this.selectionEngine) {
-        const resolved = await this.selectionEngine.resolveTarget({
-          selector: selection.selector,
-          source: 'studio',
-          timestamp: new Date().toISOString(),
-        });
-        if (resolved.ok) {
-          const validated = await this.selectionEngine.validateSelection({
+      this.vce.setSelectionEventsDelegated(true);
+      try {
+        if (this.selectionEngine) {
+          const resolved = await this.selectionEngine.resolveTarget({
             selector: selection.selector,
             source: 'studio',
-          } as SelectionTarget);
-          if (validated.ok && validated.value) {
-            this.state.currentSelection = validated.value.target;
+            timestamp: new Date().toISOString(),
+          });
+          if (resolved.ok) {
+            const validated = await this.selectionEngine.validateSelection({
+              selector: selection.selector,
+              source: 'studio',
+            } as SelectionTarget);
+            if (validated.ok && validated.value) {
+              this.state.currentSelection = validated.value.target;
+            }
           }
         }
+      } finally {
+        this.vce.setSelectionEventsDelegated(false);
       }
 
       const result = await this.vce.processSelection(selection);
@@ -2259,7 +2274,9 @@ const vce = new VisualContextEngine({
   sourceHintEngine,
 });
 
-const studio = new Studio(vce, eventBus, selectionEngine);
+const studio = new Studio(vce, eventBus, selectionEngine, {
+  port: resolveStudioPort(),
+});
 
 /**
  * Phase 30 project-root contract: Studio NEVER guesses the target project
@@ -2276,6 +2293,28 @@ function resolveStudioProjectRoot(): string | null {
   const raw = fromArg ?? process.env.VISKOD_PROJECT_ROOT;
   if (!raw || !raw.trim()) return null;
   return resolve(raw.trim());
+}
+
+function resolveStudioPort(): number {
+  const args = process.argv.slice(2);
+  const flagIdx = args.indexOf('--port');
+  const raw = flagIdx >= 0 ? args[flagIdx + 1] : undefined;
+  if (!raw) return DEFAULT_PORT;
+  const port = Number.parseInt(raw, 10);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : DEFAULT_PORT;
+}
+
+function resolveStudioUrl(): string | undefined {
+  const args = process.argv.slice(2);
+  const flagIdx = args.indexOf('--url');
+  const raw = flagIdx >= 0 ? args[flagIdx + 1] : undefined;
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -2447,6 +2486,16 @@ async function main(): Promise<void> {
     console.error(`Viskod Studio failed to start: ${started.error.message}`);
     process.exitCode = 1;
     return;
+  }
+  const targetUrl = resolveStudioUrl();
+  if (targetUrl) {
+    const navigated = await studio.navigate(targetUrl);
+    if (!navigated.ok) {
+      console.error(`Viskod Studio could not navigate to ${targetUrl}: ${navigated.error.message}`);
+      await studio.shutdown();
+      process.exitCode = 1;
+      return;
+    }
   }
   const shutdown = (): void => {
     void studio.shutdown().finally(() => process.exit(0));

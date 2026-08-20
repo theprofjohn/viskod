@@ -5,17 +5,16 @@
  * Runs the package-manager pack for @viskod/cli into a temporary directory
  * (prepack rebuilds the bundle), then fails unless:
  *   - the packed package name is `@viskod/cli` and its version equals
- *     packages/cli/package.json (the publish authority),
- *   - the tarball contains the declared `dist/index.js` entrypoint,
- *   - no repository source paths, `.viskod` data, test files, or
- *     secret-looking environment files leak into the tarball or the bundle.
+ *   - the packed package contains both CLI and packaged Studio entrypoints,
+ *   - no repository source paths, `.viskod` data, test files, or secret-looking
+ *     environment files leak into the tarball or bundled runtime.
  *
  * The temporary directory is always removed; cleanup failure also fails the
  * command. Missing output, pack failure, and malformed metadata are errors —
  * there is no warning-only mode.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,6 +89,7 @@ try {
       }
       if (
         entry !== 'package/dist/index.js' &&
+        entry !== 'package/dist/studio.js' &&
         !entry.startsWith('package/dist/') &&
         !ALLOWED_EXTRA.has(entry)
       ) {
@@ -97,8 +97,8 @@ try {
       }
     }
 
-    if (!files.includes('package/dist/index.js')) {
-      problems.push('tarball is missing the declared entrypoint package/dist/index.js');
+    for (const required of ['package/dist/index.js', 'package/dist/studio.js']) {
+      if (!files.includes(required)) problems.push(`tarball is missing ${required}`);
     }
 
     if (expectedVersion) {
@@ -107,10 +107,16 @@ try {
         mkdirSync(unpack, { recursive: true });
         execFileSync(
           'tar',
-          ['-xzf', tarball, '-C', unpack, 'package/package.json', 'package/dist/index.js'],
-          {
-            stdio: 'ignore',
-          },
+          [
+            '-xzf',
+            tarball,
+            '-C',
+            unpack,
+            'package/package.json',
+            'package/dist/index.js',
+            'package/dist/studio.js',
+          ],
+          { stdio: 'ignore' },
         );
         const metadata = JSON.parse(readFileSync(join(unpack, 'package/package.json'), 'utf8'));
         if (metadata.name !== '@viskod/cli') {
@@ -121,20 +127,22 @@ try {
             `packed package version is "${metadata.version}", expected "${expectedVersion}"`,
           );
         }
-        // Leak-scan the actual entrypoint payload for repository-local paths.
-        const index = join(unpack, 'package/dist/index.js');
-        if (!existsSync(index)) {
-          problems.push('extracted artifact is missing package/dist/index.js');
-        } else {
-          const code = readFileSync(index, 'utf8');
-          for (const needle of ['C:\\viskod', 'C:/viskod']) {
+        for (const runtime of ['index.js', 'studio.js']) {
+          const code = readFileSync(join(unpack, 'package/dist', runtime), 'utf8');
+          for (const needle of [
+            'apps/studio/src',
+            'packages/cli/src',
+            'pnpm exec tsx',
+            '/home/john/Projects/Viskod',
+            'C:/Viskod',
+          ]) {
             if (code.includes(needle)) {
-              problems.push(`dist/index.js contains repository-local path "${needle}"`);
+              problems.push(`dist/${runtime} contains repository-local string "${needle}"`);
             }
           }
         }
       } catch (error) {
-        problems.push(`cannot inspect packed metadata/entrypoint: ${error.message}`);
+        problems.push(`cannot inspect packed metadata/entrypoints: ${error.message}`);
       }
     }
   }

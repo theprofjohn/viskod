@@ -293,6 +293,7 @@ export class VisualContextEngine {
   private processingTimes: number[] = [];
   private isProcessingFromEvent = false;
   private isGeneratingPacket = false;
+  private selectionEventsDelegated = false;
   private lastPacket: ContextPacket | null = null;
   private screenshotPolicy: ScreenshotPolicy = { mode: 'agent-safe-omit' };
   private overlayPollInterval: ReturnType<typeof setInterval> | null = null;
@@ -325,7 +326,8 @@ export class VisualContextEngine {
     if (options.screenshotPolicy) this.screenshotPolicy = options.screenshotPolicy;
 
     this.eventBus.subscribe('SE_EVENT:SELECTION_CHANGED', async (event: BaseEvent) => {
-      if (this.isProcessingFromEvent || this.isGeneratingPacket) return;
+      if (this.isProcessingFromEvent || this.isGeneratingPacket || this.selectionEventsDelegated)
+        return;
       this.isProcessingFromEvent = true;
       try {
         const payload = event.payload as { selectionId: string; selector: string };
@@ -1243,6 +1245,11 @@ export class VisualContextEngine {
   /** Delegate overlay element events to a SelectionOverlayController. */
   setOverlayEventsDelegated(delegated: boolean): void {
     this.overlayEventsDelegated = delegated;
+  }
+
+  /** Suppress legacy selection-event capture while a caller owns capture. */
+  setSelectionEventsDelegated(delegated: boolean): void {
+    this.selectionEventsDelegated = delegated;
   }
 
   health(): VCEHealth {

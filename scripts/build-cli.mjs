@@ -17,6 +17,8 @@ import { build } from 'esbuild';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const entry = resolve(root, 'packages/cli/src/index.ts');
 const outfile = resolve(root, 'packages/cli/dist/index.js');
+const studioEntry = resolve(root, 'apps/studio/src/index.ts');
+const studioOutfile = resolve(root, 'packages/cli/dist/studio.js');
 const cliVersion = JSON.parse(
   readFileSync(resolve(root, 'packages/cli/package.json'), 'utf8'),
 ).version;
@@ -26,9 +28,10 @@ await build({
   outfile,
   bundle: true,
   platform: 'node',
+  external: ['playwright', 'pngjs', 'ws'],
   format: 'esm',
+  minify: true,
   target: 'node22',
-  external: ['playwright', 'pngjs'],
   define: {
     // packages/cli/package.json is the publish authority; the bundled
     // executable must report exactly the version that will be published.
@@ -37,4 +40,20 @@ await build({
   logLevel: 'info',
 });
 
+await build({
+  entryPoints: [studioEntry],
+  outfile: studioOutfile,
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  minify: true,
+  target: 'node22',
+  external: ['playwright', 'pngjs', 'ws'],
+  define: {
+    __VISKOD_VERSION__: JSON.stringify(cliVersion),
+  },
+  logLevel: 'info',
+});
+
 console.log(`Bundled @viskod/cli@${cliVersion} → ${outfile}`);
+console.log(`Bundled Studio runtime @viskod/cli@${cliVersion} → ${studioOutfile}`);

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-19T17:22:25.525Z",
+  "generatedAt": "2026-08-20T14:38:28.301Z",
   "machine": "linux-x64",
   "fixture": {
     "fileCount": 1200,
@@ -9,7 +9,7 @@
   "note": "Single-machine observations only — not public performance guarantees.",
   "operations": {
     "cold_scan": {
-      "durationMs": 1148.9,
+      "durationMs": 1259.41,
       "contentReads": 2406,
       "contentParses": 2406,
       "statCalls": 1205,
@@ -17,7 +17,7 @@
       "resolution": "ambiguous"
     },
     "warm_repeated_query": {
-      "durationMs": 222.88,
+      "durationMs": 1895.5,
       "contentReads": 0,
       "contentParses": 0,
       "statCalls": 1205,
@@ -25,7 +25,7 @@
       "resolution": "ambiguous"
     },
     "changed_file_refresh": {
-      "durationMs": 1876.6,
+      "durationMs": 1537.52,
       "contentReads": 2406,
       "contentParses": 2406,
       "statCalls": 1951,
@@ -33,7 +33,7 @@
       "resolution": "ambiguous"
     },
     "ambiguous_query": {
-      "durationMs": 1209.41,
+      "durationMs": 814.5,
       "contentReads": 1203,
       "contentParses": 1203,
       "statCalls": 1205,
@@ -41,7 +41,7 @@
       "resolution": "ambiguous"
     },
     "budget_exceeded_query": {
-      "durationMs": 789.79,
+      "durationMs": 498.86,
       "contentReads": 0,
       "contentParses": 0,
       "statCalls": 1205,

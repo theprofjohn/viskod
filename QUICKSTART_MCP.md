@@ -1,9 +1,7 @@
 # Quickstart: From UI Issue to Verified Fix
 
-The `0.2.4-alpha` artifact is the **Viskod CLI/MCP RC**. Studio is not
-included in the CLI package and is not separately installable yet. The
-installed-only path covers setup, MCP, handoff retrieval, and agent
-integration; the visual Studio workflow requires a Viskod source checkout.
+The `0.2.5-alpha` candidate is the unified Viskod distribution: one
+`@viskod/cli` installation provides CLI, MCP, and local Studio.
 
 ## Prerequisites
 
@@ -11,37 +9,29 @@ integration; the visual Studio workflow requires a Viskod source checkout.
 - A normal external project with a running app
 - Playwright Chromium (installed by the CLI package)
 
-For the Studio workflow only, also use a Viskod source checkout with pnpm 9+
-and Git.
-
-## 1. Install the CLI/MCP RC
+## 1. Install and set up
 
 ```bash
-npm i -g @viskod/cli
+npm install -g @viskod/cli
 viskod setup --project-root <your-app-dir> --install opencode
 viskod doctor --project-root <your-app-dir>
 ```
 
-The installed CLI can start the MCP server without a Viskod checkout:
+The installed CLI starts MCP without a Viskod checkout:
 
 ```bash
 viskod serve --url http://localhost:3000 --project-root <your-app-dir>
 ```
 
-## 2. Start Studio (source-checkout limitation)
-
-Studio is currently a repository application. Clone Viskod, then run:
+## 2. Start packaged Studio
 
 ```bash
-cd <REPO_PATH>
-pnpm install
-pnpm exec playwright install chromium
-pnpm exec tsx apps/studio/src/index.ts --project-root <your-app-dir>
+viskod studio --project-root <your-app-dir>
 ```
 
-Studio serves its UI on `http://localhost:3001`. This source checkout is
-required only for the Studio UI in this RC; it is not needed by the installed
-CLI/MCP command.
+Studio serves its UI on `http://127.0.0.1:3001`; use `--port <port>` to change
+the port. Stop it with Ctrl-C or SIGTERM. `viskod stop` controls the legacy
+persistent runtime session, not Studio.
 
 ## 3. Open a Local App
 

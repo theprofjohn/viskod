@@ -24,12 +24,16 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const FIXTURE_HTML = join(ROOT, 'examples', 'phase12-source-hint-app', 'index.html');
-const FIXTURE_HTML_BROKEN = join(ROOT, 'examples', 'phase12-source-hint-app', 'index.html.stale');
+const PHASE39_FIXTURE_ROOT = process.env.VISKOD_PHASE39_FIXTURE_ROOT;
+const PHASE39_INSTALLED_CLI = process.env.VISKOD_PHASE39_INSTALLED_CLI;
+const FIXTURE_ROOT = PHASE39_FIXTURE_ROOT ?? join(ROOT, 'examples', 'phase12-source-hint-app');
+const FIXTURE_HTML = join(FIXTURE_ROOT, 'index.html');
+const FIXTURE_HTML_BROKEN = join(FIXTURE_ROOT, 'index.html.stale');
 const STALE_COPY = 'STALE stale stale card copy for the smoke regression fixture';
 
-const FIXTURE_URL = 'http://127.0.0.1:3000';
-const STUDIO_URL = 'http://127.0.0.1:3001';
+const FIXTURE_URL = process.env.VISKOD_PHASE39_FIXTURE_URL ?? 'http://127.0.0.1:3000';
+const STUDIO_PORT = process.env.VISKOD_PHASE39_STUDIO_PORT ?? '3001';
+const STUDIO_URL = `http://127.0.0.1:${STUDIO_PORT}`;
 const SIMULATE_QUERY = '?viskodSimulate=target-card-description';
 
 const tmpDir = mkdtempSync(join(tmpdir(), 'viskod-smoke18-'));
@@ -219,8 +223,8 @@ function probePort(port) {
 
 async function assertPortsFree() {
   const required = [
-    { port: 3000, label: 'fixture server (examples/phase12-source-hint-app)' },
-    { port: 3001, label: 'Studio server' },
+    { port: Number(new URL(FIXTURE_URL).port || 80), label: 'fixture server' },
+    { port: Number(new URL(STUDIO_URL).port || 80), label: 'Studio server' },
   ];
   for (const { port, label } of required) {
     const inUse = await probePort(port);
@@ -249,12 +253,18 @@ try {
   process.exit(1);
 }
 
-const fixtureProc = spawnProc('node', ['examples/phase12-source-hint-app/server.cjs'], ROOT);
-const studioProc = spawnProc(
-  process.platform === 'win32' ? 'npx.cmd' : 'npx',
-  ['tsx', 'apps/studio/src/index.ts'],
-  ROOT,
-);
+const fixtureProc = spawnProc('node', ['server.cjs'], FIXTURE_ROOT);
+const studioProc = PHASE39_INSTALLED_CLI
+  ? spawnProc(
+      process.execPath,
+      [PHASE39_INSTALLED_CLI, 'studio', '--project-root', FIXTURE_ROOT, '--port', STUDIO_PORT],
+      FIXTURE_ROOT,
+    )
+  : spawnProc(
+      process.platform === 'win32' ? 'npx.cmd' : 'npx',
+      ['tsx', 'apps/studio/src/index.ts'],
+      ROOT,
+    );
 
 let exitCode = 0;
 
@@ -270,11 +280,11 @@ try {
 
   const studioReady = await waitForLog(
     studioProc,
-    'Viskod Studio running on http://(localhost|127\\.0\\.0\\.1):3001',
+    `Viskod Studio running on http://(localhost|127\\.0.0.1):${STUDIO_PORT}`,
     90000,
     'studio',
   );
-  check('Studio server started on 3001', studioReady);
+  check(`Studio server started on ${STUDIO_PORT}`, studioReady);
 
   if (!fixtureReady || !studioReady) {
     throw new Error('Fixture or Studio failed to start');
@@ -416,11 +426,17 @@ try {
 
   console.log('\n--- 2. MCP tools/list + viskod_capture_context ---');
 
-  const mcpProc = spawnProc(
-    process.platform === 'win32' ? 'npx.cmd' : 'npx',
-    ['tsx', 'packages/cli/src/index.ts', 'serve', '--url', FIXTURE_URL],
-    ROOT,
-  );
+  const mcpProc = PHASE39_INSTALLED_CLI
+    ? spawnProc(
+        process.execPath,
+        [PHASE39_INSTALLED_CLI, 'serve', '--url', FIXTURE_URL, '--project-root', FIXTURE_ROOT],
+        FIXTURE_ROOT,
+      )
+    : spawnProc(
+        process.platform === 'win32' ? 'npx.cmd' : 'npx',
+        ['tsx', 'packages/cli/src/index.ts', 'serve', '--url', FIXTURE_URL],
+        ROOT,
+      );
 
   let parsedIndex = 0;
   function send(msg) {

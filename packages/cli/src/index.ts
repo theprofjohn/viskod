@@ -1,7 +1,9 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { BrowserRuntime, resolveProfile } from '@viskod/browser-runtime';
 import { CapturePipeline } from '@viskod/capture-pipeline';
 import { VisualContextEngine, generateExport } from '@viskod/context-engine';
@@ -66,6 +68,9 @@ async function main(): Promise<void> {
   }
 
   switch (command) {
+    case 'studio':
+      await cmdStudio(args.slice(1));
+      break;
     case 'start':
       await cmdStart(args.slice(1));
       break;
@@ -341,6 +346,31 @@ async function cmdCapture(subArgs: string[]): Promise<void> {
   );
 
   await runtime.vce.stopBrowser();
+}
+async function cmdStudio(subArgs: string[]): Promise<void> {
+  const packageRoot = dirname(fileURLToPath(import.meta.url));
+  const studioPath = resolve(packageRoot, 'studio.js');
+  const projectRoot = getFlagValue(subArgs, '--project-root');
+  const child = spawn(process.execPath, [studioPath, ...subArgs], {
+    cwd: projectRoot ? resolve(projectRoot) : process.cwd(),
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      ...(projectRoot ? { VISKOD_PROJECT_ROOT: resolve(projectRoot) } : {}),
+    },
+  });
+
+  await new Promise<void>((resolveExit, rejectExit) => {
+    child.once('error', rejectExit);
+    child.once('exit', (code, signal) => {
+      if (signal) {
+        resolveExit();
+        return;
+      }
+      if (code && code !== 0) process.exitCode = code;
+      resolveExit();
+    });
+  });
 }
 
 async function cmdServe(): Promise<void> {
@@ -806,6 +836,7 @@ function printCommandHelp(commandName: string): void {
     doctor: 'Usage: viskod doctor [--project-root <path>] [--app-url <url>] [--json|--report]',
     install: 'Usage: viskod install [opencode|cursor|claude] [--project-root <path>] [--source]',
     serve: 'Usage: viskod serve [--url <url>] [--project-root <path>]',
+    studio: 'Usage: viskod studio [--project-root <path>] [--url <app-url>] [--port <port>]',
   };
   console.log(help[commandName] ?? 'Run viskod --help for available commands.');
 }
@@ -817,6 +848,7 @@ Usage:
   viskod start [url]     Start persistent runtime session
   viskod capture <sel>   Capture context (reuses session if available)
   viskod serve [--url] [--project-root <dir>]   Start MCP server (with optional browser + explicit project root)
+  viskod studio [--project-root <dir>] [--url <app-url>] [--port <port>]   Start the local Studio
   viskod install [ide]   Install Viskod MCP config into your IDE (opencode|cursor|claude)
   viskod doctor [--project-root] [--json|--report]
   viskod status          Show session status

@@ -103,44 +103,50 @@ Viskod observes and supplies context. External coding agents implement.
 
 > **Project status:** Alpha — interfaces may change. See [Current Alpha Limitations](#current-alpha-limitations) before adopting Viskod in a critical workflow.
 
-## Published package (recommended for the CLI/MCP RC)
+## Published package (recommended)
 
 ```bash
-npm i -g @viskod/cli        # → puts `viskod` on your PATH
+npm install -g @viskod/cli
 ```
 
-Also available with:
+The unified package provides the CLI, MCP server, and local Studio. Playwright
+installs Chromium during package installation unless
+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` is set.
+
+## First run
+
+From the application project:
 
 ```bash
-bun add -g @viskod/cli
-npx @viskod/cli serve       # one-shot, no install
+viskod setup --project-root .
+viskod studio --project-root .
 ```
 
-Package installation runs `playwright install chromium`, so the first install
-downloads a browser. If you already manage Chromium yourself you can opt out
-with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` — but then you must install
-Chromium separately or `viskod` will not be able to launch a browser.
+Studio listens on `http://127.0.0.1:3001` by default. Override the app URL
+with `--url <app-url>` and the port with `--port <port>`. Stop it with Ctrl-C
+or SIGTERM; `viskod stop` applies to the legacy persistent runtime session,
+not Studio.
 
-The `0.2.4-alpha` release is the **Viskod CLI/MCP RC**. It packages the CLI
-and MCP server only; Studio is not part of the CLI tarball and cannot be
-started by an installed `viskod` command without a Viskod source checkout.
-
-## From source (required for Studio in this RC)
-
-Studio is currently a repository application, not a separately installable
-package. To use the Studio UI, clone the Viskod repository and run:
+The MCP server remains a separate local process for OpenCode and other agents:
 
 ```bash
-pnpm install
-pnpm exec playwright install chromium
-pnpm exec tsx apps/studio/src/index.ts --project-root <your-app-dir>
+viskod serve --project-root .
 ```
 
-Studio serves its UI on `http://localhost:3001`.
+Install or refresh an agent configuration with
+`viskod install opencode --project-root .`. State remains local under the
+project's `.viskod/` directory. Review artifacts are local-sensitive and
+opt-in; screenshots are not included in agent-safe context. No account,
+telemetry, cloud sync, or automatic network submission is required.
 
-The installed CLI/MCP RC remains usable without a source checkout for setup,
-diagnostics, MCP configuration, and agent handoff retrieval. The full visual
-Studio workflow still requires the checkout limitation above.
+Run `viskod doctor --project-root .` for diagnostics. A stopped Studio is
+reported as not running; an unavailable packaged runtime is reported as a
+runtime failure.
+
+## Development checkout
+
+Development-only Studio commands may still run from the repository with
+workspace tooling. They are not required for normal users.
 
 ---
 
@@ -169,18 +175,24 @@ For a detailed walkthrough see [docs/setup.md](docs/setup.md).
 
 # Studio Quickstart
 
-In `0.2.4-alpha`, Studio is source-checkout-only. Start it from a Viskod
-checkout with the command in the installation section, then:
+Start the packaged local Studio from the application project:
+
+```bash
+viskod studio --project-root .
+```
+
+Then:
 
 1. Start your local app and leave it running.
-2. Open `http://localhost:3001`, enter your app URL, and click `Open app`.
+2. Open `http://127.0.0.1:3001`, enter your app URL, and click `Open app`.
 3. Click `Report UI issue`, hover over the problem, and click it.
 4. Describe the problem, click `Prepare agent handoff`, and copy the prompt
    for your coding agent.
 5. After the agent changes the code, click `Verify fix` and make the human
    decision.
 
-Full walkthrough: [QUICKSTART_MCP.md](QUICKSTART_MCP.md)
+Use Ctrl-C or SIGTERM to stop Studio. Full walkthrough:
+[QUICKSTART_MCP.md](QUICKSTART_MCP.md)
 
 ---
 
