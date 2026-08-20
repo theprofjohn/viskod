@@ -425,6 +425,10 @@ On the same corrected source state:
 
 ### 26.6 Provenance, process hygiene, and verdict
 
+The correction commit is `dc0fdd1` (`close Phase 38B E2E determinism`).
+The final repository closure commit is the same RC source correction commit;
+the documentation-only report follow-up does not alter shipped runtime scope.
+
 The correction touches only E2E harness/test files. It does not affect the
 packed CLI/MCP runtime, so the authoritative Phase 38A artifact source and
 SHA remain unchanged: source commit
@@ -434,7 +438,12 @@ The post-fix packed artifact was independently rebuilt and verified; runtime
 content is unchanged because no CLI/MCP source or package metadata changed.
 
 All termination waits are scoped to processes created by the owning test.
-Unknown external owners are never terminated. The final clean-source status
-and final closure commit are recorded after `pnpm release:check`.
+Unknown external owners are never terminated. `git status --short` is clean
+after the closure documentation commit; generated tarballs remain outside
+version control under the established policy.
 
-**Phase 38B status: PASS pending final closure commit and clean-status evidence.**
+**Phase 38B verdict: PASS.** The selection/restart race is root-caused and
+closed with bounded readiness conditions; all focused suites, the authoritative
+15-file/90-test E2E run, CI, dogfood, smoke, artifact, and release gates pass.
+The RC remains explicitly **VISKOD CLI/MCP RC** with Studio source-checkout-only.
+
