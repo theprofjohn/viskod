@@ -3,7 +3,7 @@ const stageData = [
     title: 'Report UI issue',
     copy: 'Point at the element that looks wrong.',
     target: 'button.fake-action',
-    evidence: ['Screenshot + bounds', 'DOM + computed styles', 'Source hints · 86% confidence'],
+    evidence: ['Screenshot + bounds', 'DOM + computed styles', 'Ranked source leads · confidence-rated'],
     width: '28%',
   },
   {
@@ -13,7 +13,7 @@ const stageData = [
     evidence: [
       'Problem + expected result',
       'Context packet · pkt_8f31',
-      'Source hints · 86% confidence',
+      'Ranked source leads · confidence-rated',
     ],
     width: '64%',
   },
@@ -21,7 +21,7 @@ const stageData = [
     title: 'Verify the fix',
     copy: 'Compare the same target before and after.',
     target: 'button.fake-action',
-    evidence: ['Before + after capture', 'Same target · confidence 94%', 'Human decision required'],
+    evidence: ['Before + after capture', 'Same target recaptured after reload', 'Human decision required'],
     width: '100%',
   },
 ];
