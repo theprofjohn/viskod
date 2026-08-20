@@ -216,12 +216,15 @@ review, feedback, and history require no account or paid capability.
 
 - Package: `@viskod/cli`
 - Version: `0.2.5-alpha`
-- Source commit: `bea4b20846feb70c9dce2712c20160a6ffdd904b`
+- Source commit: `ef210547fad7e006c245418f82e4060cdec1a947`
+- Final closure/report commit: recorded by the commit containing this report update
 - Filename: `viskod-cli-0.2.5-alpha.tgz`
-- Tarball size: `214492` bytes
-- Unpacked package size: `812209` bytes
-- File count: `3`
-- SHA-256: `7ebb714b41dd7fa88aad23587635aa87dc63e66a24e3a0a3a08421679fd060e9`
+- Tarball size: `218799` bytes
+- Unpacked package size: `823493` bytes
+- File count: `4` packed entries (3 runtime/manifest entries plus LICENSE)
+- SHA-256: `1b7ec8be5542e323e16fdf638cb5956215b2f7640f1d511d639248ee2762e4eb`
+
+Clean-checkout comparison: normalized package manifests are equal and both runtime bundles are byte-identical. Archive bytes differ because pnpm pack emits nondeterministic `devDependencies` key ordering in the packed manifest.
 
 The artifact was packed locally and not published.
 
