@@ -217,7 +217,7 @@ review, feedback, and history require no account or paid capability.
 - Package: `@viskod/cli`
 - Version: `0.2.5-alpha`
 - Source commit: `ef210547fad7e006c245418f82e4060cdec1a947`
-- Final closure/report commit: recorded by the commit containing this report update
+- Final closure/report commit: `9baf4115367ab3287cc1f5e6410b67cdecad51ca` (provenance data commit)
 - Filename: `viskod-cli-0.2.5-alpha.tgz`
 - Tarball size: `218799` bytes
 - Unpacked package size: `823493` bytes
